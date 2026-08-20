@@ -2,9 +2,11 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { loadAssetManifest, validateAssetManifest } from "./assets.ts";
 import { saveCaptions, type CaptionArtifact } from "./captions.ts";
+import { loadStudioConfig } from "./config.ts";
 import { loadProjectState, approveStage, setArtifact, sha256 } from "./project-state.ts";
 import { resolveProjectPath } from "./project-paths.ts";
 import { extractNarration } from "./narration.ts";
+import { probeDuration } from "./media.ts";
 import { renderDraft, type RenderArtifact } from "./render.ts";
 import { createPiperProvider } from "./tts/piper.ts";
 import { createOpenAiProvider } from "./tts/openai.ts";
@@ -21,6 +23,7 @@ export type GenerateVoiceOptions = {
   piperPrefixArgs?: string[];
   piperModelPath?: string;
   openAiApiKey?: string;
+  openAiModel?: string;
   vietnamesePythonPath?: string;
   vietnameseAppPath?: string;
   vietnamesePrefixArgs?: string[];
@@ -39,18 +42,19 @@ export async function approveCurrentScript(projectId: string): Promise<void> {
 
 export async function generateVoice(options: GenerateVoiceOptions): Promise<TtsArtifact> {
   const narration = await readProjectNarration(options.projectId);
+  const config = await loadStudioConfig();
   const request: TtsRequest = {
     projectId: options.projectId,
     provider: options.provider,
     text: narration.text,
-    voice: options.voice ?? "default",
+    voice: options.voice ?? defaultVoice(options.provider, config),
     format: options.provider === "openai" ? "mp3" : "wav",
     speed: 1,
     instructions: "",
     confirmedPaidRequest: options.confirmedPaidRequest === true,
   };
 
-  const provider = createVoiceProvider(options);
+  const provider = createVoiceProvider(options, config);
 
   const voice = await provider.generate(request);
   await setArtifact(options.projectId, {
@@ -67,56 +71,68 @@ export async function generateVoice(options: GenerateVoiceOptions): Promise<TtsA
   return voice;
 }
 
-function createVoiceProvider(options: GenerateVoiceOptions) {
+function createVoiceProvider(options: GenerateVoiceOptions, config: Awaited<ReturnType<typeof loadStudioConfig>>) {
+  const durationProbe = options.probeDuration ?? configuredProbeDuration(config.render.ffprobePath);
   if (options.provider === "piper") {
     return createPiperProvider({
-      executable: piperExecutable(options),
+      executable: piperExecutable(options, config.tts.piper.executablePath),
       prefixArgs: options.piperPrefixArgs,
-      modelPath: piperModelPath(options),
-      probeDuration: options.probeDuration,
+      modelPath: piperModelPath(options, config.tts.piper.modelPath),
+      probeDuration: durationProbe,
     });
   }
   if (options.provider === "vietnamese-local") {
     return createVietnameseLocalProvider({
-      pythonPath: vietnamesePythonPath(options),
-      appPath: vietnameseAppPath(options),
+      pythonPath: vietnamesePythonPath(options, config.tts.vietnameseLocal.pythonPath),
+      appPath: vietnameseAppPath(options, config.tts.vietnameseLocal.appPath),
       prefixArgs: options.vietnamesePrefixArgs,
-      probeDuration: options.probeDuration,
+      probeDuration: durationProbe,
     });
   }
   return createOpenAiProvider({
-    apiKey: options.openAiApiKey ?? process.env.OPENAI_API_KEY ?? "",
-    probeDuration: options.probeDuration,
+    apiKey: options.openAiApiKey ?? process.env[config.tts.openai.apiKeyEnv] ?? "",
+    model: options.openAiModel ?? config.tts.openai.model,
+    probeDuration: durationProbe,
   });
 }
 
-function piperExecutable(options: GenerateVoiceOptions): string {
-  const executable = options.piperExecutable ?? process.env.PIPER_PATH;
+function configuredProbeDuration(ffprobePath: string): (filePath: string) => Promise<number> {
+  return (filePath) => probeDuration(filePath, ffprobePath || undefined);
+}
+
+function piperExecutable(options: GenerateVoiceOptions, configValue: string): string {
+  const executable = options.piperExecutable ?? process.env.PIPER_PATH ?? configValue;
   if (!executable) {
     throw new Error("PIPER_PATH is required for local Piper voice generation.");
   }
   return executable;
 }
 
-function piperModelPath(options: GenerateVoiceOptions): string {
-  const modelPath = options.piperModelPath ?? process.env.PIPER_MODEL_PATH;
+function piperModelPath(options: GenerateVoiceOptions, configValue: string): string {
+  const modelPath = options.piperModelPath ?? process.env.PIPER_MODEL_PATH ?? configValue;
   if (!modelPath) {
     throw new Error("PIPER_MODEL_PATH is required for local Piper voice generation.");
   }
   return modelPath;
 }
 
-function vietnamesePythonPath(options: GenerateVoiceOptions): string {
-  const pythonPath = options.vietnamesePythonPath ?? process.env.VIETNAMESE_TTS_PYTHON_PATH ?? "python";
+function vietnamesePythonPath(options: GenerateVoiceOptions, configValue: string): string {
+  const pythonPath = options.vietnamesePythonPath ?? process.env.VIETNAMESE_TTS_PYTHON_PATH ?? configValue;
   return pythonPath;
 }
 
-function vietnameseAppPath(options: GenerateVoiceOptions): string {
-  const appPath = options.vietnameseAppPath ?? process.env.VIETNAMESE_TTS_APP_PATH;
+function vietnameseAppPath(options: GenerateVoiceOptions, configValue: string): string {
+  const appPath = options.vietnameseAppPath ?? process.env.VIETNAMESE_TTS_APP_PATH ?? configValue;
   if (!appPath) {
     throw new Error("VIETNAMESE_TTS_APP_PATH is required for local Vietnamese voice generation.");
   }
   return appPath;
+}
+
+function defaultVoice(provider: GenerateVoiceOptions["provider"], config: Awaited<ReturnType<typeof loadStudioConfig>>): string {
+  if (provider === "openai") return config.tts.openai.voice;
+  if (provider === "vietnamese-local") return config.tts.vietnameseLocal.voice;
+  return config.tts.piper.voice;
 }
 
 export async function prepareCaptions(projectId: string, durationSeconds?: number): Promise<CaptionArtifact> {
@@ -146,6 +162,7 @@ export async function approveCurrentCopyrightCheck(projectId: string): Promise<v
 
 export async function renderDraftProject(projectId: string, options: RenderDraftOptions = {}): Promise<RenderArtifact> {
   const brief = JSON.parse(await readFile(resolveProjectPath(projectId, "brief.json"), "utf8")) as VideoBrief;
+  const config = await loadStudioConfig();
   const state = await loadProjectState(projectId);
   const voice = requireArtifact(state.artifacts.voice, "voice");
   const captions = requireArtifact(state.artifacts.captions, "captions");
@@ -159,8 +176,10 @@ export async function renderDraftProject(projectId: string, options: RenderDraft
     captionsPath: join("projects", projectId, captions.relativePath),
     outputPath,
     assetPaths: [],
-    ffmpegPath: options.ffmpegPath,
+    ffmpegPath: options.ffmpegPath ?? (config.render.ffmpegPath || undefined),
     ffmpegPrefixArgs: options.ffmpegPrefixArgs,
+    width: config.render.shortsWidth,
+    height: config.render.shortsHeight,
   });
 }
 

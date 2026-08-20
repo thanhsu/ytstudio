@@ -82,6 +82,19 @@ Or use the CLI server command with a custom port:
 npm run cli -- studio --port 4317
 ```
 
+## Studio Config
+
+Use the `Config` button in the local studio to edit model and tool settings:
+
+- script template/model label
+- translation provider/model/default market
+- default voice provider and voice model
+- Piper, Vietnamese local TTS, FFmpeg, and FFprobe paths
+
+The UI saves these settings to `studio.config.json`, which is ignored by Git
+because it contains machine-specific paths. API keys are not stored there; keep
+real secrets in environment variables such as `OPENAI_API_KEY`.
+
 ## Free Draft Workflow
 
 Prerequisites for local rendering:

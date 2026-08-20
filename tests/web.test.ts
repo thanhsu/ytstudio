@@ -8,9 +8,10 @@ import { createStudioServer, startStudioServer } from "../src/server.ts";
 test("web shell exposes the complete approval pipeline", async () => {
   const html = await readFile("src/web/index.html", "utf8");
 
-  for (const stage of ["Brief", "Script", "Subtitles", "Voice", "Assets", "Copyright", "Render"]) {
+  for (const stage of ["Brief", "Script", "Subtitles", "Voice", "Assets", "Copyright", "Render", "Config"]) {
     assert.match(html, new RegExp(stage));
   }
+  assert.match(html, /id="open-config"/);
   assert.match(html, /aria-live="polite"/);
 });
 

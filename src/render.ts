@@ -28,6 +28,8 @@ export type RenderInput = {
   assetPaths: string[];
   ffmpegPath?: string;
   ffmpegPrefixArgs?: string[];
+  width?: number;
+  height?: number;
 };
 
 export type RenderArtifact = ArtifactRecord & {
@@ -51,9 +53,11 @@ export function evaluateRenderGate(input: RenderGateInput): RenderGateResult {
 }
 
 export function buildShortsRenderArgs(input: RenderInput): string[] {
+  const width = input.width ?? 1080;
+  const height = input.height ?? 1920;
   const escapedCaptionsPath = input.captionsPath.replace(/\\/g, "/").replace(/:/g, "\\:");
   const filter = [
-    `color=c=#111827:s=1080x1920:d=${input.durationSeconds}[bg]`,
+    `color=c=#111827:s=${width}x${height}:d=${input.durationSeconds}[bg]`,
     `[bg]drawtext=text='${escapeDrawText(input.title)}':fontcolor=white:fontsize=64:x=(w-text_w)/2:y=180:box=1:boxcolor=black@0.35:boxborderw=24[v0]`,
     `[v0]subtitles='${escapedCaptionsPath}':force_style='Fontsize=18,Alignment=2'[v]`,
   ].join(";");
@@ -75,7 +79,7 @@ export function buildShortsRenderArgs(input: RenderInput): string[] {
     "-t",
     String(input.durationSeconds),
     "-s",
-    "1080x1920",
+    `${width}x${height}`,
     "-c:v",
     "libx264",
     "-pix_fmt",
@@ -88,6 +92,8 @@ export function buildShortsRenderArgs(input: RenderInput): string[] {
 }
 
 export async function renderDraft(input: RenderInput, signal?: AbortSignal): Promise<RenderArtifact> {
+  const width = input.width ?? 1080;
+  const height = input.height ?? 1920;
   await mkdir(dirname(input.outputPath), { recursive: true });
   await runProcess(input.ffmpegPath ?? process.env.FFMPEG_PATH ?? "ffmpeg", [
     ...(input.ffmpegPrefixArgs ?? []),
@@ -110,8 +116,8 @@ export async function renderDraft(input: RenderInput, signal?: AbortSignal): Pro
     createdAt: new Date().toISOString(),
     metadata: {
       durationSeconds: input.durationSeconds,
-      width: 1080,
-      height: 1920,
+      width,
+      height,
     },
   };
   await setArtifact(input.projectId, artifact);

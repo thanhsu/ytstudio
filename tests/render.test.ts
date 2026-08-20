@@ -56,3 +56,9 @@ test("shorts render targets vertical H264 MP4", () => {
   assert.ok(args.includes("aac"));
   assert.equal(args.at(-1), input.outputPath);
 });
+
+test("shorts render accepts configured output dimensions", () => {
+  const args = buildShortsRenderArgs({ ...sampleRenderInput(), width: 720, height: 1280 });
+
+  assert.ok(args.includes("720x1280"));
+});

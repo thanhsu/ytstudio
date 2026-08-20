@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createStudioServer, startStudioServer } from "../src/server.ts";
@@ -76,6 +76,40 @@ test("render route reports unmet approval gates", async () => {
         "script-approval-missing",
         "copyright-approval-missing",
       ]);
+    } finally {
+      await running.close();
+    }
+  });
+});
+
+test("config route loads and persists studio model settings", async () => {
+  await withTempCwd(async () => {
+    const running = await startStudioServer(createStudioServer(), { port: 0 });
+    try {
+      const initial = await fetch(`${running.url}/api/config`);
+      assert.equal(initial.status, 200);
+      assert.equal((await initial.json()).config.tts.openai.model, "gpt-4o-mini-tts");
+
+      const response = await fetch(`${running.url}/api/config`, {
+        method: "PUT",
+        headers: { "content-type": "application/json", origin: running.url },
+        body: JSON.stringify({
+          script: { model: "review-template-v2" },
+          translation: { provider: "gemini", model: "gemini-2.5-flash", defaultTarget: "vi" },
+          tts: {
+            defaultProvider: "vietnamese-local",
+            vietnameseLocal: { appPath: "D:/tools/tts/app.py", pythonPath: "py", voice: "vi-demo" },
+          },
+          render: { ffmpegPath: "D:/tools/ffmpeg.exe" },
+        }),
+      });
+
+      assert.equal(response.status, 200);
+      const saved = (await response.json()).config;
+      assert.equal(saved.script.model, "review-template-v2");
+      assert.equal(saved.translation.provider, "gemini");
+      assert.equal(saved.tts.vietnameseLocal.voice, "vi-demo");
+      assert.match(await readFile("studio.config.json", "utf8"), /gemini-2\.5-flash/);
     } finally {
       await running.close();
     }

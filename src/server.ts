@@ -2,6 +2,7 @@ import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import { readdir, readFile } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
 import Busboy from "busboy";
+import { loadStudioConfig, saveStudioConfig } from "./config.ts";
 import { loadProjectState } from "./project-state.ts";
 import { validateProjectId } from "./project-paths.ts";
 import { TRANSLATION_PRESETS } from "./translation.ts";
@@ -90,6 +91,17 @@ async function routeRequest(
 
   if (method === "GET" && url.pathname === "/api/projects") {
     await sendProjects(response, projectsRoot);
+    return;
+  }
+
+  if (method === "GET" && url.pathname === "/api/config") {
+    sendJson(response, 200, { config: await loadStudioConfig() });
+    return;
+  }
+
+  if (method === "PUT" && url.pathname === "/api/config") {
+    const body = await readJsonBody(request);
+    sendJson(response, 200, { config: await saveStudioConfig(body) });
     return;
   }
 
