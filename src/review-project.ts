@@ -75,6 +75,21 @@ export type UpdateReviewProjectInput = Partial<
   >
 >;
 
+export type UpdateEpisodeSourceInput = Partial<
+  Pick<
+    EpisodeSource,
+    | "sourceVideoPath"
+    | "subtitlePath"
+    | "audioPath"
+    | "transcriptPath"
+    | "sceneMapPath"
+    | "analysisPath"
+    | "sourceHash"
+    | "status"
+    | "error"
+  >
+>;
+
 const BATCH_FILE = "batch.json";
 
 export async function createReviewProject(input: CreateReviewProjectInput): Promise<ReviewProject> {
@@ -157,6 +172,28 @@ export async function updateReviewProject(
   };
   await saveReviewProject(next);
   return next;
+}
+
+export async function updateEpisodeSource(
+  seriesId: string,
+  reviewProjectId: string,
+  episodeNumber: number,
+  updates: UpdateEpisodeSourceInput,
+): Promise<ReviewProject> {
+  const current = await loadReviewProject(seriesId, reviewProjectId);
+  const index = current.episodes.findIndex((episode) => episode.episodeNumber === episodeNumber);
+  if (index === -1) {
+    throw new Error(`Episode ${episodeNumber} is not part of review project ${reviewProjectId}.`);
+  }
+
+  current.episodes[index] = normalizeEpisodeSource({
+    ...current.episodes[index],
+    ...updates,
+  });
+  current.updatedAt = new Date().toISOString();
+  if (current.status === "draft") current.status = "sources";
+  await saveReviewProject(current);
+  return current;
 }
 
 export async function saveReviewProject(reviewProject: ReviewProject): Promise<void> {

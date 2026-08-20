@@ -18,6 +18,7 @@ import {
   loadReviewProject,
   updateReviewProject,
 } from "./review-project.ts";
+import { importReviewEpisodeMedia, importReviewEpisodeSubtitle } from "./review-source.ts";
 import { generateDryRunScript } from "./script.ts";
 import {
   createSeriesProject,
@@ -252,6 +253,43 @@ async function routeRequest(
         outputs: recordStringBody(body.outputs),
       });
       sendJson(response, 200, { ok: true, reviewProject });
+      return;
+    }
+    const reviewEpisodeSourceMatch = /^review-projects\/([a-z0-9-]+)\/episodes\/(\d+)\/(media|subtitle)$/.exec(rest);
+    if (method === "POST" && reviewEpisodeSourceMatch) {
+      const [, reviewProjectId, episodeNumberText, kind] = reviewEpisodeSourceMatch;
+      const episodeNumber = numberBody(episodeNumberText, 0);
+      const uploaded = await saveMultipartUpload(request, seriesId, `review-${kind}-upload`);
+      try {
+        if (kind === "media") {
+          const imported = await importReviewEpisodeMedia({
+            seriesId,
+            reviewProjectId,
+            episodeNumber,
+            sourcePath: uploaded.path,
+          });
+          sendJson(response, 200, {
+            ok: true,
+            imported,
+            reviewProject: await loadReviewProject(seriesId, reviewProjectId),
+          });
+          return;
+        }
+        const imported = await importReviewEpisodeSubtitle({
+          seriesId,
+          reviewProjectId,
+          episodeNumber,
+          sourcePath: uploaded.path,
+          language: uploaded.fields.language || "zh",
+        });
+        sendJson(response, 200, {
+          ok: true,
+          imported,
+          reviewProject: await loadReviewProject(seriesId, reviewProjectId),
+        });
+      } finally {
+        await rm(uploaded.path, { force: true });
+      }
       return;
     }
     const episodeMatch = /^episodes\/([a-z0-9-]+)$/.exec(rest);
