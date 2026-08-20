@@ -12,6 +12,7 @@ commentary.
 - Trend and topic research for YouTube review channels.
 - AI-assisted brief, script, title, description, and pinned comment generation.
 - Copyright-risk checklist before rendering.
+- SRT import, translation-prompt generation, and subtitle structure validation.
 - TTS voice generation hook.
 - Visual asset planning for captions, cards, rankings, and generated B-roll.
 - FFmpeg-based render pipeline for Shorts and long-form exports.
@@ -22,9 +23,10 @@ The first MVP should run locally and guide the creator through:
 
 1. Create a video brief.
 2. Generate a review script and metadata.
-3. Prepare voice and visual assets.
-4. Run a copyright-risk checklist.
-5. Render a draft video.
+3. Import and translate subtitles when a source SRT is available.
+4. Prepare voice and visual assets.
+5. Run a copyright-risk checklist.
+6. Render a draft video.
 
 Auto-upload to YouTube is intentionally postponed until the local review workflow
 is solid and OAuth/account risk is handled deliberately.
@@ -106,6 +108,20 @@ npm run cli -- generate-voice --project tales-herding-gods-qin-mu --provider ope
 ```
 
 No Piper failure falls back to OpenAI automatically.
+
+## Subtitle Translation Workflow
+
+Use this when a Chinese source SRT is available and you need a reviewed
+translation before writing narration or rendering.
+
+```powershell
+npm run cli -- import-srt --project tales-herding-gods-qin-mu --file .\source.srt
+npm run cli -- build-translation-prompt --project tales-herding-gods-qin-mu --source workspace/subtitles/source-...srt --target vi --genre cultivation
+npm run cli -- validate-translation --source .\source.srt --translated .\translated.srt
+```
+
+Targets: `vi`, `en-au`, `en-gb`, `pt-br`, `de`.
+Genres: `cultivation`, `fantasy-system`, `modern-drama`.
 
 ## Safety Gates
 

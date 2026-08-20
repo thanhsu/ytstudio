@@ -3,6 +3,14 @@ import { saveCopyrightCheck } from "./copyright.ts";
 import { generateDryRunScript } from "./script.ts";
 import { createStudioServer, startStudioServer } from "./server.ts";
 import {
+  buildTranslationDraft,
+  importSubtitle,
+  validateTranslation,
+  type TranslationGenre,
+  type TranslationLanguage,
+} from "./translation.ts";
+import { readFile } from "node:fs/promises";
+import {
   approveCurrentCopyrightCheck,
   approveCurrentScript,
   approveEmptyAssetManifest,
@@ -88,6 +96,15 @@ Commands:
 
   render-draft --project <id>
     Approve current asset/copyright files and render a vertical Shorts draft.
+
+  import-srt --project <id> --file <path>
+    Import a source SRT into the project workspace and validate basic format.
+
+  build-translation-prompt --project <id> --source <workspace/subtitles/source.srt> --target <vi|en-au|en-gb|pt-br|de> --genre <cultivation|fantasy-system|modern-drama>
+    Create a reusable subtitle translation prompt that preserves SRT structure.
+
+  validate-translation --source <path> --translated <path>
+    Validate translated SRT cue count, timestamps, line length, and Chinese leftovers.
 
   studio [--port <n>]
     Start the local browser studio on 127.0.0.1.
@@ -207,6 +224,47 @@ async function run(): Promise<void> {
     return;
   }
 
+  if (command === "import-srt") {
+    const projectId = requireProject(args);
+    const file = textArg(args, "file");
+    if (!file) {
+      throw new Error("--file is required.");
+    }
+    const imported = await importSubtitle(projectId, file);
+    console.log(`Imported subtitles: projects/${projectId}/${imported.relativePath}`);
+    console.log(`Cues: ${imported.cueCount}`);
+    printValidation(imported.validation);
+    return;
+  }
+
+  if (command === "build-translation-prompt") {
+    const projectId = requireProject(args);
+    const source = textArg(args, "source");
+    if (!source) {
+      throw new Error("--source is required.");
+    }
+    const target = textArg(args, "target", "vi") as TranslationLanguage;
+    const genre = textArg(args, "genre", "cultivation") as TranslationGenre;
+    const draft = await buildTranslationDraft(projectId, source, target, genre);
+    console.log(`Created translation prompt: projects/${projectId}/${draft.promptPath}`);
+    console.log(`Cues: ${draft.cueCount}`);
+    return;
+  }
+
+  if (command === "validate-translation") {
+    const source = textArg(args, "source");
+    const translated = textArg(args, "translated");
+    if (!source || !translated) {
+      throw new Error("--source and --translated are required.");
+    }
+    const result = validateTranslation(await readFile(source, "utf8"), await readFile(translated, "utf8"));
+    printValidation(result);
+    if (!result.valid) {
+      process.exitCode = 1;
+    }
+    return;
+  }
+
   if (command === "studio") {
     const port = numberArg(args, "port", 4317);
     const running = await startStudioServer(createStudioServer(), { port });
@@ -231,4 +289,14 @@ function requireProject(args: Args): string {
     throw new Error("--project is required.");
   }
   return projectId;
+}
+
+function printValidation(result: { valid: boolean; errors: string[]; warnings: string[] }): void {
+  console.log(`Valid: ${result.valid ? "yes" : "no"}`);
+  for (const error of result.errors) {
+    console.log(`ERROR: ${error}`);
+  }
+  for (const warning of result.warnings) {
+    console.log(`WARN: ${warning}`);
+  }
 }

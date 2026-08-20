@@ -8,7 +8,7 @@ import { createStudioServer, startStudioServer } from "../src/server.ts";
 test("web shell exposes the complete approval pipeline", async () => {
   const html = await readFile("src/web/index.html", "utf8");
 
-  for (const stage of ["Brief", "Script", "Voice", "Assets", "Copyright", "Render"]) {
+  for (const stage of ["Brief", "Script", "Subtitles", "Voice", "Assets", "Copyright", "Render"]) {
     assert.match(html, new RegExp(stage));
   }
   assert.match(html, /aria-live="polite"/);
@@ -27,6 +27,8 @@ test("server serves the studio shell without exposing project files", async () =
     try {
       assert.equal((await fetch(`${running.url}/`)).status, 200);
       assert.equal((await fetch(`${running.url}/projects/sample-project/brief.json`)).status, 404);
+      const presets = await (await fetch(`${running.url}/api/translation-presets`)).json();
+      assert.equal(presets.presets.some((preset: { language: string }) => preset.language === "vi"), true);
     } finally {
       await running.close();
     }

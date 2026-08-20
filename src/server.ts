@@ -4,6 +4,7 @@ import { extname, join, resolve } from "node:path";
 import Busboy from "busboy";
 import { loadProjectState } from "./project-state.ts";
 import { validateProjectId } from "./project-paths.ts";
+import { TRANSLATION_PRESETS } from "./translation.ts";
 
 export type StudioServerOptions = {
   projectsRoot?: string;
@@ -89,6 +90,14 @@ async function routeRequest(
 
   if (method === "GET" && url.pathname === "/api/projects") {
     await sendProjects(response, projectsRoot);
+    return;
+  }
+
+  if (method === "GET" && url.pathname === "/api/translation-presets") {
+    sendJson(response, 200, {
+      presets: Object.values(TRANSLATION_PRESETS),
+      genres: ["cultivation", "fantasy-system", "modern-drama"],
+    });
     return;
   }
 
