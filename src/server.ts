@@ -14,6 +14,14 @@ import { loadProjectState } from "./project-state.ts";
 import { resolveProjectPath, validateProjectId } from "./project-paths.ts";
 import { generateDryRunScript } from "./script.ts";
 import {
+  createSeriesProject,
+  generateEpisodePlan,
+  listSeriesProjects,
+  loadSeriesProject,
+  updateSeriesEpisode,
+  type EpisodeStatus,
+} from "./series.ts";
+import {
   buildTranslationDraft,
   importSubtitle,
   TRANSLATION_PRESETS,
@@ -117,6 +125,13 @@ async function routeRequest(
     return;
   }
 
+  if (method === "GET" && url.pathname === "/api/series") {
+    const ids = await listSeriesProjects();
+    const series = await Promise.all(ids.map((id) => loadSeriesProject(id)));
+    sendJson(response, 200, { series });
+    return;
+  }
+
   if (method === "POST" && url.pathname === "/api/projects") {
     const body = await readJsonBody(request);
     const brief = await createBrief({
@@ -130,6 +145,25 @@ async function routeRequest(
       notes: typeof body.notes === "string" ? body.notes : "",
     });
     sendJson(response, 200, { ok: true, brief });
+    return;
+  }
+
+  if (method === "POST" && url.pathname === "/api/series") {
+    const body = await readJsonBody(request);
+    const series = await createSeriesProject({
+      id: requiredString(body.id, "id"),
+      title: requiredString(body.title, "title"),
+      show: requiredString(body.show, "show"),
+      originalTitle: typeof body.originalTitle === "string" ? body.originalTitle : "",
+      workflowType: body.workflowType,
+      audience: requiredString(body.audience, "audience"),
+      language: requiredString(body.language, "language"),
+      brandNotes: typeof body.brandNotes === "string" ? body.brandNotes : "",
+      titleStyle: typeof body.titleStyle === "string" ? body.titleStyle : "",
+      thumbnailStyle: typeof body.thumbnailStyle === "string" ? body.thumbnailStyle : "",
+      scheduleNotes: typeof body.scheduleNotes === "string" ? body.scheduleNotes : "",
+    });
+    sendJson(response, 200, { ok: true, series });
     return;
   }
 
@@ -154,6 +188,47 @@ async function routeRequest(
 
   if (method === "GET" && url.pathname === "/api/workflow-templates") {
     sendJson(response, 200, { templates: WORKFLOW_TEMPLATES });
+    return;
+  }
+
+  const seriesMatch = /^\/api\/series\/([a-z0-9-]+)(?:\/(.+))?$/.exec(url.pathname);
+  if (seriesMatch) {
+    const seriesId = validateProjectId(seriesMatch[1]);
+    const rest = seriesMatch[2] ?? "";
+    if (method === "GET" && rest === "") {
+      sendJson(response, 200, { series: await loadSeriesProject(seriesId) });
+      return;
+    }
+    if (method === "POST" && rest === "episode-plan") {
+      const body = await readJsonBody(request);
+      const series = await generateEpisodePlan(seriesId, {
+        count: numberBody(body.count, 20),
+        startEpisode: numberBody(body.startEpisode, 1),
+      });
+      sendJson(response, 200, { ok: true, series });
+      return;
+    }
+    const episodeMatch = /^episodes\/([a-z0-9-]+)$/.exec(rest);
+    if (method === "PATCH" && episodeMatch) {
+      const body = await readJsonBody(request);
+      const series = await updateSeriesEpisode(seriesId, episodeMatch[1], {
+        sourceTitle: optionalString(body.sourceTitle),
+        workingTitle: optionalString(body.workingTitle),
+        angle: optionalString(body.angle),
+        hook: optionalString(body.hook),
+        outline: stringArrayBody(body.outline),
+        titleOptions: stringArrayBody(body.titleOptions),
+        description: optionalString(body.description),
+        hashtags: stringArrayBody(body.hashtags),
+        pinnedComment: optionalString(body.pinnedComment),
+        priority: body.priority === "high" || body.priority === "medium" || body.priority === "low" ? body.priority : undefined,
+        status: episodeStatusBody(body.status),
+      });
+      const episode = series.episodes.find((item) => item.id === episodeMatch[1]);
+      sendJson(response, 200, { ok: true, series, episode });
+      return;
+    }
+    sendError(response, 404, { code: "not-found", message: "Series route not found." });
     return;
   }
 
@@ -344,7 +419,7 @@ async function routeRequest(
 async function sendProjects(response: ServerResponse, projectsRoot: string): Promise<void> {
   let ids: string[] = [];
   try {
-    ids = (await readdir(projectsRoot, { withFileTypes: true }))
+    const candidates = (await readdir(projectsRoot, { withFileTypes: true }))
       .filter((entry) => entry.isDirectory())
       .map((entry) => entry.name)
       .filter((name) => {
@@ -355,6 +430,14 @@ async function sendProjects(response: ServerResponse, projectsRoot: string): Pro
           return false;
         }
       });
+    for (const id of candidates) {
+      try {
+        await readFile(join(projectsRoot, id, "brief.json"), "utf8");
+        ids.push(id);
+      } catch {
+        // Series roots and incomplete folders are managed by other endpoints.
+      }
+    }
   } catch {
     ids = [];
   }
@@ -486,6 +569,30 @@ function requiredString(value: unknown, field: string): string {
 function numberBody(value: unknown, fallback: number): number {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function stringArrayBody(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.map(String);
+}
+
+function episodeStatusBody(value: unknown): EpisodeStatus | undefined {
+  if (
+    value === "idea" ||
+    value === "script" ||
+    value === "voice" ||
+    value === "caption" ||
+    value === "render" ||
+    value === "ready" ||
+    value === "published"
+  ) {
+    return value;
+  }
+  return undefined;
 }
 
 function assetMediaType(value: unknown): AssetMediaType {

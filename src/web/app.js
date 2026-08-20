@@ -33,6 +33,8 @@ const RUN_AVAILABLE_TASKS_LABEL = "Run available tasks";
 
 const appState = {
   projects: [],
+  series: [],
+  selectedSeries: null,
   selectedProject: null,
   activeStage: "brief",
   projectSnapshot: null,
@@ -42,6 +44,7 @@ const appState = {
 };
 
 const projectList = document.querySelector("#project-list");
+const seriesPanel = document.querySelector("#series-panel");
 const workflowTitle = document.querySelector("#workflow-title");
 const workflowDescription = document.querySelector("#workflow-description");
 const workflowSteps = document.querySelector("#workflow-steps");
@@ -55,6 +58,7 @@ const audioPreview = document.querySelector("#audio-preview");
 const videoPreview = document.querySelector("#video-preview");
 
 document.querySelector("#refresh-projects").addEventListener("click", () => loadProjects());
+document.querySelector("#open-series").addEventListener("click", () => renderSeriesManager());
 document.querySelector("#new-project").addEventListener("click", () => renderCreateProject());
 document.querySelector("#open-config").addEventListener("click", () => renderConfig());
 document.querySelector("#run-ready-tasks").addEventListener("click", () => runAvailableTasks());
@@ -64,18 +68,27 @@ bindStageRail();
 
 async function loadProjects() {
   setStatus("Loading projects...");
-  const [projectsResponse, presetsResponse, workflowsResponse, configResponse] = await Promise.all([
+  const [projectsResponse, seriesResponse, presetsResponse, workflowsResponse, configResponse] = await Promise.all([
     fetch("/api/projects"),
+    fetch("/api/series"),
     fetch("/api/translation-presets"),
     fetch("/api/workflow-templates"),
     fetch("/api/config"),
   ]);
   const data = await projectsResponse.json();
+  appState.series = (await seriesResponse.json()).series ?? [];
   appState.translationPresets = await presetsResponse.json();
   appState.workflowTemplates = await workflowsResponse.json();
   appState.config = (await configResponse.json()).config;
   appState.projects = data.projects ?? [];
+  if (!appState.selectedSeries && appState.series.length > 0) {
+    appState.selectedSeries = appState.series[0];
+  }
   renderProjects();
+  if (location.hash === "#series") {
+    renderSeriesManager();
+    return;
+  }
   if (appState.projects.length && !appState.selectedProject) {
     await selectProject(appState.projects[0]);
     return;
@@ -84,8 +97,10 @@ async function loadProjects() {
 }
 
 function renderProjects() {
+  const hiddenEpisodeProjects = seriesEpisodeProjectIds();
+  const visibleProjects = appState.projects.filter((id) => !hiddenEpisodeProjects.has(id) || id === appState.selectedProject);
   projectList.replaceChildren(
-    ...appState.projects.map((id) => {
+    ...visibleProjects.map((id) => {
       const item = document.createElement("li");
       const button = document.createElement("button");
       button.type = "button";
@@ -202,6 +217,7 @@ async function selectProject(projectId) {
 
 function renderStage() {
   setActiveStageButton();
+  seriesPanel.replaceChildren();
   const snapshot = appState.projectSnapshot;
   if (!snapshot) {
     renderCreateProject();
@@ -227,6 +243,192 @@ function renderStage() {
   renderer(snapshot);
   renderWorkflowBoard();
   renderPreviews(snapshot);
+}
+
+function renderSeriesManager() {
+  stageTitle.textContent = "Series Manager";
+  setActiveStageButton("series");
+  seriesPanel.replaceChildren();
+  stageContent.replaceChildren(
+    paragraph("Manage a show-level project, generate editable episode/video plans, then perform detailed workflow per episode."),
+    renderCreateSeriesForm(),
+    renderSeriesList(),
+    appState.selectedSeries ? renderSeriesDetail(appState.selectedSeries) : paragraph("Select or create a series to manage episodes."),
+  );
+  setStatus("Series Manager loaded.");
+}
+
+function renderCreateSeriesForm() {
+  const form = document.createElement("form");
+  form.className = "form-grid";
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    createSeries(form).catch((error) => setStatus(error.message));
+  });
+  form.replaceChildren(
+    field("Series id", "id", "", "text", "muc-than-ky"),
+    field("Series title", "title", "", "text", "Muc Than Ky Review"),
+    field("Show / film", "show", "", "text", "Muc Than Ky"),
+    field("Original title", "originalTitle", "", "text", "牧神记"),
+    selectField("Workflow type", "workflowType", "review-recap", workflowTypeOptions()),
+    field("Audience", "audience", "Vietnamese donghua review viewers"),
+    field("Language", "language", "Vietnamese"),
+    field("Schedule notes", "scheduleNotes", "Fixed upload day and hour"),
+    actionButton("Create Series", null, "submit", "primary"),
+  );
+  return wrapSection("New series", form);
+}
+
+function renderSeriesList() {
+  const list = document.createElement("div");
+  list.className = "series-list";
+  if (appState.series.length === 0) {
+    list.append(paragraph("No series projects yet."));
+    return wrapSection("Series", list);
+  }
+  for (const series of appState.series) {
+    const button = actionButton(`${series.title} (${series.episodes.length})`, () => {
+      appState.selectedSeries = series;
+      renderSeriesManager();
+    });
+    if (appState.selectedSeries?.id === series.id) button.classList.add("selected");
+    list.append(button);
+  }
+  return wrapSection("Series", list);
+}
+
+function renderSeriesDetail(series) {
+  const planForm = document.createElement("form");
+  planForm.className = "form-grid compact-form";
+  planForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    generateSeriesEpisodePlan(series.id, formValues(planForm)).catch((error) => setStatus(error.message));
+  });
+  planForm.replaceChildren(
+    field("Count", "count", "20", "number"),
+    field("Start episode", "startEpisode", String(series.episodes.length + 1), "number"),
+    actionButton("Generate episode plan", null, "submit", "primary"),
+  );
+
+  const table = document.createElement("div");
+  table.className = "episode-table";
+  table.append(episodeHeader());
+  for (const episode of series.episodes) {
+    table.append(renderEpisodeRow(series.id, episode));
+  }
+
+  return wrapSection(
+    `${series.title} - ${series.episodes.length} episodes`,
+    summaryGrid({
+      Show: series.show,
+      Original: series.originalTitle,
+      Workflow: series.workflowType,
+      Audience: series.audience,
+      Language: series.language,
+      Schedule: series.scheduleNotes,
+    }),
+    planForm,
+    table,
+  );
+}
+
+function episodeHeader() {
+  const row = document.createElement("div");
+  row.className = "episode-row episode-header";
+  for (const label of ["Episode", "Working title", "Angle", "Status", "Actions"]) {
+    const cell = document.createElement("strong");
+    cell.textContent = label;
+    row.append(cell);
+  }
+  return row;
+}
+
+function renderEpisodeRow(seriesId, episode) {
+  const row = document.createElement("form");
+  row.className = "episode-row";
+  row.addEventListener("submit", (event) => {
+    event.preventDefault();
+    updateEpisode(seriesId, episode.id, boolFormValues(row)).catch((error) => setStatus(error.message));
+  });
+
+  const number = document.createElement("span");
+  number.textContent = String(episode.episodeNumber).padStart(3, "0");
+  row.append(
+    number,
+    inlineInput("workingTitle", episode.workingTitle),
+    inlineInput("angle", episode.angle),
+    selectField("", "status", episode.status, [
+      ["idea", "Idea"],
+      ["script", "Script"],
+      ["voice", "Voice"],
+      ["caption", "Caption"],
+      ["render", "Render"],
+      ["ready", "Ready"],
+      ["published", "Published"],
+    ]),
+    episodeActions(episode),
+  );
+  return row;
+}
+
+function episodeActions(episode) {
+  const actions = document.createElement("div");
+  actions.className = "episode-actions";
+  actions.append(
+    actionButton("Save", null, "submit", "primary"),
+    actionButton("Perform task", () => performEpisodeTask(episode), "button"),
+  );
+  return actions;
+}
+
+async function createSeries(form) {
+  const response = await fetch("/api/series", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(formValues(form)),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
+  appState.selectedSeries = data.series;
+  await loadProjects();
+  appState.selectedSeries = appState.series.find((series) => series.id === data.series.id) ?? data.series;
+  renderSeriesManager();
+  setStatus(`Created series ${data.series.title}.`);
+}
+
+async function generateSeriesEpisodePlan(seriesId, values) {
+  const response = await fetch(`/api/series/${encodeURIComponent(seriesId)}/episode-plan`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(values),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
+  appState.selectedSeries = data.series;
+  await loadProjects();
+  appState.selectedSeries = appState.series.find((series) => series.id === data.series.id) ?? data.series;
+  renderSeriesManager();
+  setStatus(`Generated episode plan for ${data.series.title}.`);
+}
+
+async function updateEpisode(seriesId, episodeId, values) {
+  const response = await fetch(`/api/series/${encodeURIComponent(seriesId)}/episodes/${encodeURIComponent(episodeId)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(values),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
+  appState.selectedSeries = data.series;
+  await loadProjects();
+  appState.selectedSeries = appState.series.find((series) => series.id === data.series.id) ?? data.series;
+  renderSeriesManager();
+  setStatus(`Saved ${data.episode.id}.`);
+}
+
+async function performEpisodeTask(episode) {
+  await selectProject(episode.episodeProjectId);
+  setStatus(`Perform task: opened detailed workflow for ${episode.id}.`);
 }
 
 function renderCreateProject() {
@@ -766,6 +968,20 @@ function checklist(items) {
   return list;
 }
 
+function wrapSection(title, ...children) {
+  const section = document.createElement("section");
+  section.className = "subpanel";
+  section.append(sectionTitle(title), ...children);
+  return section;
+}
+
+function inlineInput(name, value) {
+  const input = document.createElement("input");
+  input.name = name;
+  input.value = value ?? "";
+  return input;
+}
+
 function linkButton(label, relativePath) {
   const link = document.createElement("a");
   link.className = "button-link";
@@ -926,6 +1142,10 @@ function translationTargetLabels() {
 
 function unique(values) {
   return [...new Set(values)];
+}
+
+function seriesEpisodeProjectIds() {
+  return new Set(appState.series.flatMap((series) => series.episodes.map((episode) => episode.episodeProjectId)));
 }
 
 function setActiveStageButton(stage = appState.activeStage) {

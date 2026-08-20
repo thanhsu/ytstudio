@@ -12,6 +12,8 @@ test("web shell exposes the complete approval pipeline", async () => {
     assert.match(html, new RegExp(stage));
   }
   assert.match(html, /id="workflow-board"/);
+  assert.match(html, /id="open-series"/);
+  assert.match(html, /id="series-panel"/);
   assert.match(html, /id="open-config"/);
   assert.match(html, /aria-live="polite"/);
 });
@@ -40,6 +42,11 @@ test("web app exposes UI controls for media, ASR, captions, and render actions",
   assert.match(script, /Run available tasks/);
   assert.match(script, /parallelGroup/);
   assert.match(script, /workflow.steps/);
+  assert.match(script, /Series Manager/);
+  assert.match(script, /Generate episode plan/);
+  assert.match(script, /Perform task/);
+  assert.equal(script.includes("/api/series"), true);
+  assert.match(script, /#series/);
   assert.match(script, /Copyright Check/);
   assert.match(script, /Upload Asset/);
   assert.match(script, /Export/);
