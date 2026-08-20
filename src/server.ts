@@ -1,6 +1,6 @@
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import { createWriteStream } from "node:fs";
-import { mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { basename, extname, join, resolve } from "node:path";
 import { createReadStream } from "node:fs";
 import Busboy from "busboy";
@@ -9,7 +9,9 @@ import { generateSourceSrtFromAsr } from "./asr.ts";
 import { createBrief } from "./brief.ts";
 import { loadStudioConfig, saveStudioConfig } from "./config.ts";
 import { saveCopyrightCheck } from "./copyright.ts";
+import { saveEditingPlan } from "./editing-plan.ts";
 import { saveEpisodeAnalysis, type EpisodeAnalysis } from "./episode-analysis.ts";
+import { exportReviewPackage } from "./export-package.ts";
 import { extractAudioForAsr, importMedia } from "./media-ingest.ts";
 import { loadProjectState } from "./project-state.ts";
 import { resolveProjectPath, validateProjectId } from "./project-paths.ts";
@@ -20,6 +22,7 @@ import {
   updateReviewProject,
 } from "./review-project.ts";
 import { importReviewEpisodeMedia, importReviewEpisodeSubtitle } from "./review-source.ts";
+import { regenerateScriptSegment, saveReviewScript, type ReviewScript } from "./review-script.ts";
 import { saveReviewEpisodeSceneMap } from "./scene-map.ts";
 import { generateDryRunScript } from "./script.ts";
 import { saveStoryArc } from "./story-arc.ts";
@@ -359,6 +362,84 @@ async function routeRequest(
       sendJson(response, 200, {
         ok: true,
         storyArc,
+        reviewProject: await loadReviewProject(seriesId, reviewProjectId),
+      });
+      return;
+    }
+    const reviewScriptMatch = /^review-projects\/([a-z0-9-]+)\/script$/.exec(rest);
+    if (method === "POST" && reviewScriptMatch) {
+      const [, reviewProjectId] = reviewScriptMatch;
+      const reviewProject = await loadReviewProject(seriesId, reviewProjectId);
+      if (!reviewProject.outputs.storyArc) {
+        sendError(response, 409, {
+          code: "story-arc-required",
+          message: "Story arc is required before review script generation.",
+        });
+        return;
+      }
+      const saved = await saveReviewScript(seriesId, reviewProjectId);
+      const script = JSON.parse(await readFile(join("projects", seriesId, saved.scriptPath), "utf8")) as ReviewScript;
+      sendJson(response, 200, {
+        ok: true,
+        script,
+        saved,
+        reviewProject: await loadReviewProject(seriesId, reviewProjectId),
+      });
+      return;
+    }
+    const scriptSegmentMatch = /^review-projects\/([a-z0-9-]+)\/script\/segments\/(SEG-\d{3})$/.exec(rest);
+    if (method === "PATCH" && scriptSegmentMatch) {
+      const [, reviewProjectId, segmentId] = scriptSegmentMatch;
+      const body = await readJsonBody(request);
+      const reviewProject = await loadReviewProject(seriesId, reviewProjectId);
+      const scriptPath = reviewProject.outputs.reviewScript;
+      if (!scriptPath) {
+        sendError(response, 409, {
+          code: "script-required",
+          message: "Review script is required before editing a segment.",
+        });
+        return;
+      }
+      const script = JSON.parse(await readFile(join("projects", seriesId, scriptPath), "utf8")) as ReviewScript;
+      const updated = regenerateScriptSegment(script, segmentId, requiredString(body.narration, "narration"));
+      await writeFile(join("projects", seriesId, scriptPath), `${JSON.stringify(updated, null, 2)}\n`, "utf8");
+      sendJson(response, 200, { ok: true, script: updated, reviewProject });
+      return;
+    }
+    const editingPlanMatch = /^review-projects\/([a-z0-9-]+)\/editing-plan$/.exec(rest);
+    if (method === "POST" && editingPlanMatch) {
+      const [, reviewProjectId] = editingPlanMatch;
+      const reviewProject = await loadReviewProject(seriesId, reviewProjectId);
+      if (!reviewProject.outputs.reviewScript) {
+        sendError(response, 409, {
+          code: "script-required",
+          message: "Review script is required before editing plan generation.",
+        });
+        return;
+      }
+      const editingPlan = await saveEditingPlan(seriesId, reviewProjectId);
+      sendJson(response, 200, {
+        ok: true,
+        editingPlan,
+        reviewProject: await loadReviewProject(seriesId, reviewProjectId),
+      });
+      return;
+    }
+    const exportMatch = /^review-projects\/([a-z0-9-]+)\/export$/.exec(rest);
+    if (method === "POST" && exportMatch) {
+      const [, reviewProjectId] = exportMatch;
+      const reviewProject = await loadReviewProject(seriesId, reviewProjectId);
+      if (!reviewProject.outputs.editingPlan) {
+        sendError(response, 409, {
+          code: "editing-plan-required",
+          message: "Editing plan is required before export.",
+        });
+        return;
+      }
+      const exported = await exportReviewPackage(seriesId, reviewProjectId);
+      sendJson(response, 200, {
+        ok: true,
+        exported,
         reviewProject: await loadReviewProject(seriesId, reviewProjectId),
       });
       return;

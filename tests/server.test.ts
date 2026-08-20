@@ -303,6 +303,38 @@ test("batch review API builds episode analysis and story arc", async () => {
       assert.equal(storyResponse.status, 200);
       const storyBody = await storyResponse.json();
       assert.equal(storyBody.storyArc.storyArcPath, "review-projects/ep01-02/story-arc.json");
+
+      const scriptResponse = await fetch(`${running.url}/api/series/muc-than-ky/review-projects/ep01-02/script`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: running.url },
+        body: "{}",
+      });
+      assert.equal(scriptResponse.status, 200);
+      const scriptBody = await scriptResponse.json();
+      assert.equal(scriptBody.script.segments[0].segmentId, "SEG-001");
+
+      const segmentResponse = await fetch(`${running.url}/api/series/muc-than-ky/review-projects/ep01-02/script/segments/SEG-001`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", origin: running.url },
+        body: JSON.stringify({ narration: "A sharper editor-approved hook for this batch." }),
+      });
+      assert.equal(segmentResponse.status, 200);
+      assert.equal((await segmentResponse.json()).script.segments[0].revision, 2);
+
+      const editingResponse = await fetch(`${running.url}/api/series/muc-than-ky/review-projects/ep01-02/editing-plan`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: running.url },
+        body: "{}",
+      });
+      assert.equal(editingResponse.status, 200);
+
+      const exportResponse = await fetch(`${running.url}/api/series/muc-than-ky/review-projects/ep01-02/export`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: running.url },
+        body: "{}",
+      });
+      assert.equal(exportResponse.status, 200);
+      assert.match((await exportResponse.json()).exported.voiceOverSrtPath, /voice-over\.srt/);
     } finally {
       await running.close();
     }
