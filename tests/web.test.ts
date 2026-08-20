@@ -50,6 +50,11 @@ test("web app exposes UI controls for media, ASR, captions, and render actions",
   assert.match(script, /Generate Review Script/);
   assert.match(script, /Generate Editing Plan/);
   assert.match(script, /Export Review Package/);
+  assert.match(script, /Story Bible/);
+  assert.match(script, /Generate Story Outline/);
+  assert.match(script, /Generate Chapter/);
+  assert.match(script, /Continuity Check/);
+  assert.match(script, /Export Audio Story/);
   assert.match(script, /uploadReviewEpisodeFile/);
   assert.match(script, /reviewProjectApiUrl/);
   assert.equal(script.includes("/api/series"), true);

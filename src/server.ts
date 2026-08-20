@@ -5,6 +5,14 @@ import { basename, extname, join, resolve } from "node:path";
 import { createReadStream } from "node:fs";
 import Busboy from "busboy";
 import { saveAsset, type AssetMediaType } from "./assets.ts";
+import {
+  checkStoryContinuity,
+  createStoryBible,
+  exportAudioStoryPackage,
+  generateStoryChapter,
+  generateStoryOutline,
+  loadAudioStoryWorkspace,
+} from "./audio-story.ts";
 import { generateSourceSrtFromAsr } from "./asr.ts";
 import { createBrief } from "./brief.ts";
 import { loadStudioConfig, saveStudioConfig } from "./config.ts";
@@ -223,6 +231,54 @@ async function routeRequest(
     }
     if (method === "GET" && rest === "review-projects") {
       sendJson(response, 200, { reviewProjects: await listReviewProjects(seriesId) });
+      return;
+    }
+    if (method === "GET" && rest === "audio-story") {
+      sendJson(response, 200, { workspace: await loadAudioStoryWorkspace(seriesId) });
+      return;
+    }
+    if (method === "POST" && rest === "audio-story/bible") {
+      const body = await readJsonBody(request);
+      const bible = await createStoryBible(seriesId, {
+        title: requiredString(body.title, "title"),
+        genre: requiredString(body.genre, "genre"),
+        premise: requiredString(body.premise, "premise"),
+        tone: requiredString(body.tone, "tone"),
+        audience: requiredString(body.audience, "audience"),
+        language: requiredString(body.language, "language"),
+        rules: stringArrayBody(body.rules),
+        characters: storyCharactersBody(body.characters),
+        locations: stringArrayBody(body.locations),
+      });
+      sendJson(response, 200, { ok: true, bible, workspace: await loadAudioStoryWorkspace(seriesId) });
+      return;
+    }
+    if (method === "POST" && rest === "audio-story/outline") {
+      const body = await readJsonBody(request);
+      const outline = await generateStoryOutline(seriesId, {
+        chapterCount: numberBody(body.chapterCount, 10),
+        targetMinutesPerChapter: numberBody(body.targetMinutesPerChapter, 12),
+      });
+      sendJson(response, 200, { ok: true, outline, workspace: await loadAudioStoryWorkspace(seriesId) });
+      return;
+    }
+    const audioStoryChapterMatch = /^audio-story\/chapters\/(\d+)$/.exec(rest);
+    if (method === "POST" && audioStoryChapterMatch) {
+      const chapterNumber = numberBody(audioStoryChapterMatch[1], 1);
+      const chapter = await generateStoryChapter(seriesId, chapterNumber);
+      sendJson(response, 200, { ok: true, chapter, workspace: await loadAudioStoryWorkspace(seriesId) });
+      return;
+    }
+    const audioStoryContinuityMatch = /^audio-story\/chapters\/(\d+)\/continuity$/.exec(rest);
+    if (method === "POST" && audioStoryContinuityMatch) {
+      const chapterNumber = numberBody(audioStoryContinuityMatch[1], 1);
+      const report = await checkStoryContinuity(seriesId, chapterNumber);
+      sendJson(response, 200, { ok: true, report, workspace: await loadAudioStoryWorkspace(seriesId) });
+      return;
+    }
+    if (method === "POST" && rest === "audio-story/export") {
+      const exported = await exportAudioStoryPackage(seriesId);
+      sendJson(response, 200, { ok: true, exported, workspace: await loadAudioStoryWorkspace(seriesId) });
       return;
     }
     if (method === "POST" && rest === "review-projects") {
@@ -814,6 +870,21 @@ function optionalString(value: unknown): string | undefined {
 function stringArrayBody(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
   return value.map(String);
+}
+
+function storyCharactersBody(value: unknown) {
+  if (!Array.isArray(value)) return undefined;
+  return value
+    .filter((item) => item && typeof item === "object")
+    .map((item) => {
+      const candidate = item as Record<string, unknown>;
+      return {
+        name: typeof candidate.name === "string" ? candidate.name : "Unnamed",
+        role: typeof candidate.role === "string" ? candidate.role : "supporting role",
+        traits: Array.isArray(candidate.traits) ? candidate.traits.map(String) : [],
+        voiceNotes: typeof candidate.voiceNotes === "string" ? candidate.voiceNotes : "",
+      };
+    });
 }
 
 function numberArrayBody(value: unknown): number[] {

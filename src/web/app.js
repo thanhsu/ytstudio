@@ -35,6 +35,7 @@ const appState = {
   projects: [],
   series: [],
   reviewProjectsBySeries: {},
+  audioStoryWorkspaces: {},
   selectedSeries: null,
   selectedReviewProjectId: null,
   selectedProject: null,
@@ -89,6 +90,16 @@ async function loadProjects() {
         const response = await fetch(`/api/series/${encodeURIComponent(series.id)}/review-projects`);
         return [series.id, (await response.json()).reviewProjects ?? []];
       }),
+    ),
+  );
+  appState.audioStoryWorkspaces = Object.fromEntries(
+    await Promise.all(
+      appState.series
+        .filter((series) => series.workflowType === "audio-story")
+        .map(async (series) => {
+          const response = await fetch(`/api/series/${encodeURIComponent(series.id)}/audio-story`);
+          return [series.id, (await response.json()).workspace ?? {}];
+        }),
     ),
   );
   if (!appState.selectedSeries && appState.series.length > 0) {
@@ -340,8 +351,124 @@ function renderSeriesDetail(series) {
     }),
     planForm,
     table,
-    renderBatchReviewPanel(series),
+    series.workflowType === "audio-story" ? renderAudioStoryPanel(series) : renderBatchReviewPanel(series),
   );
+}
+
+function renderAudioStoryPanel(series) {
+  const workspace = appState.audioStoryWorkspaces[series.id] ?? {};
+  return wrapSection(
+    "Audio Story",
+    paragraph("Create original story audio from a reusable bible, chapter outline, editable chapter drafts, continuity checks, and export files."),
+    renderStoryBibleForm(series, workspace),
+    renderStoryOutlinePanel(series, workspace),
+    renderStoryChapterPanel(series, workspace),
+    renderAudioStoryOutputLinks(series, workspace),
+  );
+}
+
+function renderStoryBibleForm(series, workspace) {
+  const bible = workspace.bible ?? {};
+  const form = document.createElement("form");
+  form.className = "form-grid";
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    saveStoryBible(series.id, boolFormValues(form)).catch((error) => setStatus(error.message));
+  });
+  form.replaceChildren(
+    field("Story title", "title", bible.title ?? series.show, "text"),
+    field("Genre", "genre", bible.genre ?? "original cultivation fantasy", "text"),
+    textareaField("Premise", "premise", bible.premise ?? "A low-status courier discovers a hidden rule under a border town."),
+    field("Tone", "tone", bible.tone ?? "cinematic, mysterious, serialized", "text"),
+    field("Audience", "audience", bible.audience ?? series.audience, "text"),
+    field("Language", "language", bible.language ?? series.language, "text"),
+    textareaField("Rules", "rules", (bible.rules ?? ["Original story only", "No copied names or franchise terms"]).join("\n")),
+    textareaField("Main character", "mainCharacter", bible.characters?.[0]?.name ?? "Lin Vale"),
+    textareaField("Locations", "locations", (bible.locations ?? ["Moon Gate Town", "Ash River"]).join("\n")),
+    actionButton("Save Story Bible", null, "submit", "primary"),
+  );
+  return wrapSection("Story Bible", form);
+}
+
+function renderStoryOutlinePanel(series, workspace) {
+  const form = document.createElement("form");
+  form.className = "form-grid compact-form";
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    generateStoryOutlineUi(series.id, formValues(form)).catch((error) => setStatus(error.message));
+  });
+  form.replaceChildren(
+    field("Chapter count", "chapterCount", String(workspace.outline?.chapters?.length ?? 10), "number"),
+    field("Minutes / chapter", "targetMinutesPerChapter", String(workspace.outline?.targetMinutesPerChapter ?? 12), "number"),
+    actionButton("Generate Story Outline", null, "submit", "primary"),
+  );
+  const list = document.createElement("ol");
+  list.className = "artifact-list";
+  for (const chapter of workspace.outline?.chapters ?? []) {
+    const item = document.createElement("li");
+    item.textContent = `Chapter ${chapter.chapterNumber}: ${chapter.titleOptions[0]} - ${chapter.status}`;
+    list.append(item);
+  }
+  if (!workspace.outline) list.append(paragraph("No outline yet."));
+  return wrapSection("Outline", form, list);
+}
+
+function renderStoryChapterPanel(series, workspace) {
+  const form = document.createElement("form");
+  form.className = "form-grid compact-form";
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const values = formValues(form);
+    generateStoryChapterUi(series.id, values.chapterNumber).catch((error) => setStatus(error.message));
+  });
+  form.replaceChildren(
+    field("Chapter", "chapterNumber", "1", "number"),
+    actionButton("Generate Chapter", null, "submit", "primary"),
+  );
+
+  const chapters = document.createElement("div");
+  chapters.className = "episode-table";
+  for (const chapter of workspace.chapters ?? []) {
+    const row = document.createElement("div");
+    row.className = "episode-row";
+    row.append(
+      paragraph(String(chapter.chapterNumber).padStart(3, "0")),
+      paragraph(chapter.title),
+      paragraph(chapter.status),
+      actionButton("Continuity Check", () => runStoryContinuityUi(series.id, chapter.chapterNumber), "button"),
+      seriesLinkButton(series.id, "Open Chapter", `audio-story/chapters/chapter-${String(chapter.chapterNumber).padStart(3, "0")}.md`),
+    );
+    chapters.append(row);
+  }
+  if ((workspace.chapters ?? []).length === 0) chapters.append(paragraph("No generated chapters yet."));
+
+  return wrapSection(
+    "Chapters",
+    form,
+    chapters,
+    actionButton("Export Audio Story", () => exportAudioStoryUi(series.id), "button", "primary"),
+  );
+}
+
+function renderAudioStoryOutputLinks(series, workspace) {
+  const outputs = workspace.outputs ?? {};
+  const list = document.createElement("ul");
+  list.className = "artifact-list";
+  for (const [label, path] of Object.entries(outputs)) {
+    const item = document.createElement("li");
+    const link = document.createElement("a");
+    link.href = seriesFileUrl(series.id, path);
+    link.target = "_blank";
+    link.textContent = `${label}: ${path}`;
+    item.append(link);
+    list.append(item);
+  }
+  if (Object.keys(outputs).length === 0) {
+    const empty = document.createElement("li");
+    empty.textContent = "No audio story exports yet.";
+    list.append(empty);
+  }
+  return wrapSection("Audio Story Exports", list);
 }
 
 function renderBatchReviewPanel(series) {
@@ -608,6 +735,91 @@ async function createBatchReview(seriesId, values) {
   appState.selectedSeries = appState.series.find((series) => series.id === seriesId) ?? appState.selectedSeries;
   renderSeriesManager();
   setStatus(`Created batch review ${data.reviewProject.sourceRange}.`);
+}
+
+async function saveStoryBible(seriesId, values) {
+  const response = await fetch(`/api/series/${encodeURIComponent(seriesId)}/audio-story/bible`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      title: values.title,
+      genre: values.genre,
+      premise: values.premise,
+      tone: values.tone,
+      audience: values.audience,
+      language: values.language,
+      rules: lines(values.rules),
+      locations: lines(values.locations),
+      characters: [
+        {
+          name: values.mainCharacter,
+          role: "protagonist",
+          traits: ["editable"],
+          voiceNotes: "Keep narration consistent with this character.",
+        },
+      ],
+    }),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
+  appState.audioStoryWorkspaces[seriesId] = data.workspace;
+  renderSeriesManager();
+  setStatus("Story Bible saved.");
+}
+
+async function generateStoryOutlineUi(seriesId, values) {
+  const response = await fetch(`/api/series/${encodeURIComponent(seriesId)}/audio-story/outline`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(values),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
+  appState.audioStoryWorkspaces[seriesId] = data.workspace;
+  renderSeriesManager();
+  setStatus("Generated Story Outline.");
+}
+
+async function generateStoryChapterUi(seriesId, chapterNumber) {
+  const response = await fetch(`/api/series/${encodeURIComponent(seriesId)}/audio-story/chapters/${encodeURIComponent(chapterNumber)}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
+  appState.audioStoryWorkspaces[seriesId] = data.workspace;
+  renderSeriesManager();
+  setStatus(`Generated Chapter ${data.chapter.chapterNumber}.`);
+}
+
+async function runStoryContinuityUi(seriesId, chapterNumber) {
+  const response = await fetch(
+    `/api/series/${encodeURIComponent(seriesId)}/audio-story/chapters/${encodeURIComponent(chapterNumber)}/continuity`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    },
+  );
+  const data = await response.json();
+  if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
+  appState.audioStoryWorkspaces[seriesId] = data.workspace;
+  renderSeriesManager();
+  setStatus(data.report.blocked ? "Continuity check found a blocker." : "Continuity Check complete.");
+}
+
+async function exportAudioStoryUi(seriesId) {
+  const response = await fetch(`/api/series/${encodeURIComponent(seriesId)}/audio-story/export`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
+  appState.audioStoryWorkspaces[seriesId] = data.workspace;
+  renderSeriesManager();
+  setStatus("Export Audio Story complete.");
 }
 
 async function uploadReviewEpisodeFile(seriesId, reviewProjectId, episodeNumber, kind, inputId) {
@@ -1220,6 +1432,15 @@ function linkButton(label, relativePath) {
   return link;
 }
 
+function seriesLinkButton(seriesId, label, relativePath) {
+  const link = document.createElement("a");
+  link.className = "button-link";
+  link.href = seriesFileUrl(seriesId, relativePath);
+  link.target = "_blank";
+  link.textContent = label;
+  return link;
+}
+
 function uploadField(label, inputId, accept, onClick) {
   const wrapper = document.createElement("div");
   wrapper.className = "upload-row";
@@ -1370,6 +1591,13 @@ function parseEpisodeNumbers(value) {
     .split(/[,\s]+/)
     .map((item) => Number(item.trim()))
     .filter((number) => Number.isInteger(number) && number > 0);
+}
+
+function lines(value) {
+  return String(value ?? "")
+    .split(/\r?\n|,/)
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function targetOptions() {
