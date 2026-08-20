@@ -19,6 +19,7 @@ import {
   updateReviewProject,
 } from "./review-project.ts";
 import { importReviewEpisodeMedia, importReviewEpisodeSubtitle } from "./review-source.ts";
+import { saveReviewEpisodeSceneMap } from "./scene-map.ts";
 import { generateDryRunScript } from "./script.ts";
 import {
   createSeriesProject,
@@ -290,6 +291,27 @@ async function routeRequest(
       } finally {
         await rm(uploaded.path, { force: true });
       }
+      return;
+    }
+    const reviewEpisodeSceneMapMatch = /^review-projects\/([a-z0-9-]+)\/episodes\/(\d+)\/scene-map$/.exec(rest);
+    if (method === "POST" && reviewEpisodeSceneMapMatch) {
+      const [, reviewProjectId, episodeNumberText] = reviewEpisodeSceneMapMatch;
+      const episodeNumber = numberBody(episodeNumberText, 0);
+      const reviewProject = await loadReviewProject(seriesId, reviewProjectId);
+      const episode = reviewProject.episodes.find((item) => item.episodeNumber === episodeNumber);
+      if (!episode?.transcriptPath) {
+        sendError(response, 409, {
+          code: "transcript-required",
+          message: `Episode ${episodeNumber} needs a transcript before scene mapping.`,
+        });
+        return;
+      }
+      const sceneMap = await saveReviewEpisodeSceneMap(seriesId, reviewProjectId, episodeNumber, episode.transcriptPath);
+      sendJson(response, 200, {
+        ok: true,
+        sceneMap,
+        reviewProject: await loadReviewProject(seriesId, reviewProjectId),
+      });
       return;
     }
     const episodeMatch = /^episodes\/([a-z0-9-]+)$/.exec(rest);
