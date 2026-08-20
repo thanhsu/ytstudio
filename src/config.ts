@@ -11,6 +11,13 @@ export type StudioConfig = {
     defaultTarget: "vi" | "en-au" | "en-gb" | "pt-br" | "de";
     defaultGenre: "cultivation" | "fantasy-system" | "modern-drama";
   };
+  asr: {
+    provider: "disabled" | "faster-whisper" | "whisper-cpp";
+    executablePath: string;
+    model: string;
+    modelPath: string;
+    language: string;
+  };
   tts: {
     defaultProvider: "piper" | "openai" | "vietnamese-local";
     openai: {
@@ -49,6 +56,13 @@ export const DEFAULT_STUDIO_CONFIG: StudioConfig = {
     model: "manual-review",
     defaultTarget: "vi",
     defaultGenre: "cultivation",
+  },
+  asr: {
+    provider: "disabled",
+    executablePath: "",
+    model: "small",
+    modelPath: "",
+    language: "zh",
   },
   tts: {
     defaultProvider: "piper",
@@ -111,6 +125,13 @@ export function normalizeStudioConfig(value: unknown): StudioConfig {
         ["cultivation", "fantasy-system", "modern-drama"],
         "cultivation",
       ),
+    },
+    asr: {
+      provider: enumValue(candidate.asr?.provider, ["disabled", "faster-whisper", "whisper-cpp"], "disabled"),
+      executablePath: stringValue(candidate.asr?.executablePath, ""),
+      model: stringValue(candidate.asr?.model, DEFAULT_STUDIO_CONFIG.asr.model),
+      modelPath: stringValue(candidate.asr?.modelPath, ""),
+      language: stringValue(candidate.asr?.language, DEFAULT_STUDIO_CONFIG.asr.language),
     },
     tts: {
       defaultProvider: enumValue(candidate.tts?.defaultProvider, ["piper", "openai", "vietnamese-local"], "piper"),

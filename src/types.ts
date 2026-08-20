@@ -57,7 +57,7 @@ export type StageApproval = {
   note: string;
 };
 
-export type ArtifactKind = "voice" | "captions" | "render";
+export type ArtifactKind = "media" | "audio" | "source-subtitles" | "voice" | "captions" | "render";
 
 export type ArtifactRecord = {
   kind: ArtifactKind;

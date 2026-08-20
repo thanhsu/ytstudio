@@ -23,6 +23,8 @@ test("loads defaults when studio config is missing", async () => {
 
     assert.equal(config.script.model, "local-template");
     assert.equal(config.translation.defaultTarget, "vi");
+    assert.equal(config.asr.provider, "disabled");
+    assert.equal(config.asr.language, "zh");
     assert.equal(config.tts.openai.model, "gpt-4o-mini-tts");
     assert.equal(config.render.shortsWidth, 1080);
   });
@@ -38,6 +40,13 @@ test("normalizes saved config and rejects invalid enum values", async () => {
         defaultTarget: "en-au",
         defaultGenre: "fantasy-system",
       },
+      asr: {
+        provider: "faster-whisper",
+        executablePath: "tools/faster-whisper.exe",
+        model: "medium",
+        modelPath: "",
+        language: "zh",
+      },
       tts: {
         defaultProvider: "vietnamese-local",
         openai: { model: "tts-model", voice: "verse", apiKeyEnv: "OPENAI_API_KEY" },
@@ -48,17 +57,20 @@ test("normalizes saved config and rejects invalid enum values", async () => {
     });
 
     assert.equal(saved.translation.provider, "openai");
+    assert.equal(saved.asr.provider, "faster-whisper");
+    assert.equal(saved.asr.model, "medium");
     assert.equal(saved.tts.defaultProvider, "vietnamese-local");
     assert.equal(saved.render.shortsHeight, 1280);
     assert.match(await readFile("studio.config.json", "utf8"), /template-v2/);
 
     await writeFile(
       "studio.config.json",
-      JSON.stringify({ translation: { provider: "unsafe-provider" }, render: { shortsWidth: -1 } }),
+      JSON.stringify({ translation: { provider: "unsafe-provider" }, asr: { provider: "cloud-unsafe" }, render: { shortsWidth: -1 } }),
       "utf8",
     );
     const reloaded = await loadStudioConfig();
     assert.equal(reloaded.translation.provider, "prompt-only");
+    assert.equal(reloaded.asr.provider, "disabled");
     assert.equal(reloaded.render.shortsWidth, 1080);
   });
 });

@@ -1,5 +1,7 @@
 import { createBrief } from "./brief.ts";
 import { saveCopyrightCheck } from "./copyright.ts";
+import { generateSourceSrtFromAsr } from "./asr.ts";
+import { extractAudioForAsr, importMedia } from "./media-ingest.ts";
 import { generateDryRunScript } from "./script.ts";
 import { createStudioServer, startStudioServer } from "./server.ts";
 import {
@@ -99,6 +101,15 @@ Commands:
 
   import-srt --project <id> --file <path>
     Import a source SRT into the project workspace and validate basic format.
+
+  import-media --project <id> --file <path>
+    Copy an MP4/MOV/MKV/WebM source into the project workspace.
+
+  extract-audio --project <id> [--media <workspace/media/source.mp4>]
+    Extract mono 16k WAV audio from project media for local ASR.
+
+  generate-asr-srt --project <id> [--provider <faster-whisper|whisper-cpp>] [--audio <workspace/media/asr-audio.wav>]
+    Generate source.asr.srt from extracted audio with the configured local ASR tool.
 
   build-translation-prompt --project <id> --source <workspace/subtitles/source.srt> --target <vi|en-au|en-gb|pt-br|de> --genre <cultivation|fantasy-system|modern-drama>
     Create a reusable subtitle translation prompt that preserves SRT structure.
@@ -234,6 +245,43 @@ async function run(): Promise<void> {
     console.log(`Imported subtitles: projects/${projectId}/${imported.relativePath}`);
     console.log(`Cues: ${imported.cueCount}`);
     printValidation(imported.validation);
+    return;
+  }
+
+  if (command === "import-media") {
+    const projectId = requireProject(args);
+    const file = textArg(args, "file");
+    if (!file) {
+      throw new Error("--file is required.");
+    }
+    const imported = await importMedia(projectId, file);
+    console.log(`Imported media: projects/${projectId}/${imported.relativePath}`);
+    console.log(`Original: ${imported.originalName}`);
+    console.log(`Size: ${imported.sizeBytes} bytes`);
+    return;
+  }
+
+  if (command === "extract-audio") {
+    const projectId = requireProject(args);
+    const artifact = await extractAudioForAsr(projectId, textArg(args, "media", "workspace/media/source.mp4"));
+    console.log(`Extracted ASR audio: projects/${projectId}/${artifact.relativePath}`);
+    return;
+  }
+
+  if (command === "generate-asr-srt") {
+    const projectId = requireProject(args);
+    const provider = textArg(args, "provider");
+    if (provider && provider !== "faster-whisper" && provider !== "whisper-cpp") {
+      throw new Error("--provider must be faster-whisper or whisper-cpp.");
+    }
+    const artifact = await generateSourceSrtFromAsr({
+      projectId,
+      provider: provider ? (provider as "faster-whisper" | "whisper-cpp") : undefined,
+      audioRelativePath: textArg(args, "audio", "workspace/media/asr-audio.wav"),
+    });
+    console.log(`Generated ASR subtitles: projects/${projectId}/${artifact.relativePath}`);
+    console.log(`Provider: ${artifact.provider}`);
+    console.log(`Cues: ${artifact.cueCount}`);
     return;
   }
 

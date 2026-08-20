@@ -12,6 +12,7 @@ commentary.
 - Trend and topic research for YouTube review channels.
 - AI-assisted brief, script, title, description, and pinned comment generation.
 - Copyright-risk checklist before rendering.
+- Media ingest and local ASR subtitle generation when no SRT is available.
 - SRT import, translation-prompt generation, and subtitle structure validation.
 - TTS voice generation hook.
 - Visual asset planning for captions, cards, rankings, and generated B-roll.
@@ -88,6 +89,7 @@ Use the `Config` button in the local studio to edit model and tool settings:
 
 - script template/model label
 - translation provider/model/default market
+- local ASR provider/model/language
 - default voice provider and voice model
 - Piper, Vietnamese local TTS, FFmpeg, and FFprobe paths
 
@@ -145,6 +147,28 @@ npm run cli -- validate-translation --source .\source.srt --translated .\transla
 
 Targets: `vi`, `en-au`, `en-gb`, `pt-br`, `de`.
 Genres: `cultivation`, `fantasy-system`, `modern-drama`.
+
+## ASR Workflow
+
+Use this when the source MP4 has usable dialogue audio but no SRT. Configure ASR
+from the Studio `Config` screen first.
+
+Supported local providers:
+
+- `faster-whisper`: set ASR executable to `faster-whisper` or a full path.
+- `whisper-cpp`: set ASR executable and ASR model path to a local ggml model.
+
+Example:
+
+```powershell
+npm run cli -- import-media --project tales-herding-gods-qin-mu --file .\source.mp4
+npm run cli -- extract-audio --project tales-herding-gods-qin-mu
+npm run cli -- generate-asr-srt --project tales-herding-gods-qin-mu
+```
+
+This writes `workspace/subtitles/source.asr.srt`, which can then be sent through
+the subtitle translation workflow. OCR for hard-sub-only videos is a separate
+next module.
 
 ## Safety Gates
 
