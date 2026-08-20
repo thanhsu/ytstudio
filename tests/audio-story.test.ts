@@ -11,6 +11,7 @@ import {
   generateStoryOutline,
   loadAudioStoryWorkspace,
 } from "../src/audio-story.ts";
+import { saveBrandKit } from "../src/brand-kit.ts";
 import { createSeriesProject } from "../src/series.ts";
 import { createStudioServer, startStudioServer } from "../src/server.ts";
 
@@ -74,10 +75,18 @@ test("audio story workflow creates bible, outline, chapter, continuity report an
     const report = await checkStoryContinuity("ai-story-channel", 1);
     assert.equal(report.chapterNumber, 1);
     assert.equal(report.blocked, false);
+    await saveBrandKit("ai-story-channel", {
+      channelName: "Arc Lantern Stories",
+      thumbnailPreset: "audio-cover",
+      primaryColor: "#f4c430",
+    });
 
     const exported = await exportAudioStoryPackage("ai-story-channel");
     assert.match(exported.manuscriptPath, /audio-story\/exports\/manuscript\.md/);
-    assert.match(await readFile(join("projects", "ai-story-channel", exported.youtubeMetadataPath), "utf8"), /Ashes Under the Moon Gate/);
+    const metadata = await readFile(join("projects", "ai-story-channel", exported.youtubeMetadataPath), "utf8");
+    assert.match(metadata, /Ashes Under the Moon Gate/);
+    assert.match(metadata, /Arc Lantern Stories/);
+    assert.match(metadata, /audio-cover/);
 
     const workspace = await loadAudioStoryWorkspace("ai-story-channel");
     assert.equal(workspace.outline?.chapters.length, 3);

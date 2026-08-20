@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { loadBrandKit, type BrandKit } from "./brand-kit.ts";
 import { loadReviewProject, updateReviewProject } from "./review-project.ts";
 import type { EditingPlan } from "./editing-plan.ts";
 import type { ReviewScript } from "./review-script.ts";
@@ -18,6 +19,7 @@ export async function exportReviewPackage(seriesId: string, reviewProjectId: str
 
   const script = JSON.parse(await readFile(join("projects", seriesId, project.outputs.reviewScript), "utf8")) as ReviewScript;
   const editingPlan = JSON.parse(await readFile(join("projects", seriesId, project.outputs.editingPlan), "utf8")) as EditingPlan;
+  const brandKit = await loadBrandKit(seriesId);
   const exportDir = join("projects", seriesId, "review-projects", reviewProjectId, "exports");
   await mkdir(exportDir, { recursive: true });
 
@@ -29,7 +31,7 @@ export async function exportReviewPackage(seriesId: string, reviewProjectId: str
   await writeFile(join("projects", seriesId, jsonPath), `${JSON.stringify(editingPlan, null, 2)}\n`, "utf8");
   await writeFile(join("projects", seriesId, csvPath), toCsv(editingPlan), "utf8");
   await writeFile(join("projects", seriesId, voiceOverSrtPath), toVoiceOverSrt(script), "utf8");
-  await writeFile(join("projects", seriesId, youtubeMetadataPath), `${JSON.stringify(buildYoutubeMetadata(script), null, 2)}\n`, "utf8");
+  await writeFile(join("projects", seriesId, youtubeMetadataPath), `${JSON.stringify(buildYoutubeMetadata(script, brandKit), null, 2)}\n`, "utf8");
   await updateReviewProject(seriesId, reviewProjectId, {
     status: "exported",
     outputs: {
@@ -76,7 +78,7 @@ function toVoiceOverSrt(script: ReviewScript): string {
     .join("\n\n")}\n`;
 }
 
-function buildYoutubeMetadata(script: ReviewScript): Record<string, unknown> {
+function buildYoutubeMetadata(script: ReviewScript, brandKit: BrandKit): Record<string, unknown> {
   return {
     titles: [
       `${script.title}: ${script.sourceRange} Explained`,
@@ -84,11 +86,26 @@ function buildYoutubeMetadata(script: ReviewScript): Record<string, unknown> {
       `${script.title} Batch Review - ${script.sourceRange}`,
     ],
     description: `${script.title} story review for ${script.sourceRange}. Commentary-led recap with lore explanations and no future spoilers.`,
+    channel: {
+      name: brandKit.channelName,
+      handle: brandKit.handle,
+      cta: brandKit.cta,
+    },
     chapters: script.segments.map((segment, index) => ({
       time: formatChapterTime(script.segments.slice(0, index).reduce((sum, item) => sum + item.estimatedSeconds, 0)),
       title: `${segment.segmentId} ${segment.section}`,
     })),
     thumbnailText: [script.title, script.sourceRange, "Story Review"],
+    thumbnailBrand: {
+      preset: brandKit.thumbnailPreset,
+      primaryColor: brandKit.primaryColor,
+      secondaryColor: brandKit.secondaryColor,
+      accentColor: brandKit.accentColor,
+      fontStyle: brandKit.fontStyle,
+      watermarkPath: brandKit.watermarkPath,
+      watermarkOpacity: brandKit.watermarkOpacity,
+      safeTextRules: brandKit.safeTextRules,
+    },
   };
 }
 

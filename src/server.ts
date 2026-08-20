@@ -14,6 +14,7 @@ import {
   loadAudioStoryWorkspace,
 } from "./audio-story.ts";
 import { generateSourceSrtFromAsr } from "./asr.ts";
+import { generateThumbnailBrief, loadBrandKit, saveBrandAsset, saveBrandKit, type BrandAssetType } from "./brand-kit.ts";
 import { createBrief } from "./brief.ts";
 import { loadStudioConfig, saveStudioConfig } from "./config.ts";
 import { saveCopyrightCheck } from "./copyright.ts";
@@ -231,6 +232,58 @@ async function routeRequest(
     }
     if (method === "GET" && rest === "review-projects") {
       sendJson(response, 200, { reviewProjects: await listReviewProjects(seriesId) });
+      return;
+    }
+    if (method === "GET" && rest === "brand-kit") {
+      sendJson(response, 200, { brandKit: await loadBrandKit(seriesId) });
+      return;
+    }
+    if (method === "PUT" && rest === "brand-kit") {
+      const body = await readJsonBody(request);
+      const brandKit = await saveBrandKit(seriesId, {
+        channelName: optionalString(body.channelName),
+        handle: optionalString(body.handle),
+        logoRoundPath: optionalString(body.logoRoundPath),
+        logoTextPath: optionalString(body.logoTextPath),
+        watermarkPath: optionalString(body.watermarkPath),
+        primaryColor: optionalString(body.primaryColor),
+        secondaryColor: optionalString(body.secondaryColor),
+        accentColor: optionalString(body.accentColor),
+        fontStyle: optionalString(body.fontStyle),
+        thumbnailPreset: body.thumbnailPreset,
+        titleStyle: optionalString(body.titleStyle),
+        thumbnailStyle: optionalString(body.thumbnailStyle),
+        watermarkOpacity: body.watermarkOpacity,
+        safeTextRules: stringArrayBody(body.safeTextRules),
+        cta: optionalString(body.cta),
+      });
+      sendJson(response, 200, { ok: true, brandKit });
+      return;
+    }
+    if (method === "POST" && rest === "brand-kit/assets") {
+      const uploaded = await saveMultipartUpload(request, seriesId, "brand-asset-upload");
+      try {
+        const asset = await saveBrandAsset(seriesId, {
+          filename: uploaded.filename,
+          bytes: await readFile(uploaded.path),
+          mimeType: uploaded.mimeType,
+          assetType: brandAssetType(uploaded.fields.assetType),
+        });
+        sendJson(response, 200, { ok: true, asset, brandKit: await loadBrandKit(seriesId) });
+      } finally {
+        await rm(uploaded.path, { force: true });
+      }
+      return;
+    }
+    if (method === "POST" && rest === "brand-kit/thumbnail-brief") {
+      const body = await readJsonBody(request);
+      const thumbnailBrief = await generateThumbnailBrief(seriesId, {
+        workflowType: body.workflowType,
+        videoTitle: requiredString(body.videoTitle, "videoTitle"),
+        episodeLabel: typeof body.episodeLabel === "string" ? body.episodeLabel : "",
+        hook: requiredString(body.hook, "hook"),
+      });
+      sendJson(response, 200, { ok: true, thumbnailBrief });
       return;
     }
     if (method === "GET" && rest === "audio-story") {
@@ -808,6 +861,7 @@ async function saveMultipartUpload(
     let originalName = "upload.bin";
     let mimeType = "application/octet-stream";
     const fields: Record<string, string> = {};
+    let writeDone: Promise<void> = Promise.resolve();
 
     busboy.on("file", (_name, file, info) => {
       if (saved) {
@@ -823,7 +877,10 @@ async function saveMultipartUpload(
       );
       const output = createWriteStream(outputPath);
       file.pipe(output);
-      output.on("error", reject);
+      writeDone = new Promise((resolveWrite, rejectWrite) => {
+        output.on("finish", resolveWrite);
+        output.on("error", rejectWrite);
+      });
     });
     busboy.on("field", (name, value) => {
       fields[name] = value;
@@ -834,7 +891,10 @@ async function saveMultipartUpload(
         reject(new Error("No upload file was provided."));
         return;
       }
-      resolve({ path: outputPath, filename: originalName, mimeType, fields });
+      writeDone.then(
+        () => resolve({ path: outputPath, filename: originalName, mimeType, fields }),
+        reject,
+      );
     });
     request.pipe(busboy);
   });
@@ -935,6 +995,19 @@ function reviewProjectStatusBody(value: unknown) {
 
 function assetMediaType(value: unknown): AssetMediaType {
   return value === "video" ? "video" : "image";
+}
+
+function brandAssetType(value: unknown): BrandAssetType {
+  if (
+    value === "logo-round" ||
+    value === "logo-text" ||
+    value === "watermark" ||
+    value === "reference" ||
+    value === "background"
+  ) {
+    return value;
+  }
+  return "reference";
 }
 
 function isSameOrigin(request: IncomingMessage): boolean {

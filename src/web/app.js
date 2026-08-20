@@ -36,6 +36,8 @@ const appState = {
   series: [],
   reviewProjectsBySeries: {},
   audioStoryWorkspaces: {},
+  brandKits: {},
+  thumbnailBriefs: {},
   selectedSeries: null,
   selectedReviewProjectId: null,
   selectedProject: null,
@@ -100,6 +102,14 @@ async function loadProjects() {
           const response = await fetch(`/api/series/${encodeURIComponent(series.id)}/audio-story`);
           return [series.id, (await response.json()).workspace ?? {}];
         }),
+    ),
+  );
+  appState.brandKits = Object.fromEntries(
+    await Promise.all(
+      appState.series.map(async (series) => {
+        const response = await fetch(`/api/series/${encodeURIComponent(series.id)}/brand-kit`);
+        return [series.id, (await response.json()).brandKit ?? {}];
+      }),
     ),
   );
   if (!appState.selectedSeries && appState.series.length > 0) {
@@ -349,10 +359,116 @@ function renderSeriesDetail(series) {
       Language: series.language,
       Schedule: series.scheduleNotes,
     }),
+    renderBrandKitPanel(series),
     planForm,
     table,
     series.workflowType === "audio-story" ? renderAudioStoryPanel(series) : renderBatchReviewPanel(series),
   );
+}
+
+function renderBrandKitPanel(series) {
+  const kit = appState.brandKits[series.id] ?? {};
+  const brief = appState.thumbnailBriefs[series.id];
+  return wrapSection(
+    "Brand Kit",
+    paragraph("Manage channel identity, reusable thumbnail rules, logos, watermarks, and thumbnail briefs for this series."),
+    renderBrandKitForm(series, kit),
+    renderBrandAssetForm(series),
+    renderThumbnailBriefForm(series),
+    renderBrandKitSummary(series, kit, brief),
+  );
+}
+
+function renderBrandKitForm(series, kit) {
+  const form = document.createElement("form");
+  form.className = "form-grid";
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    saveBrandKitUi(series.id, boolFormValues(form)).catch((error) => setStatus(error.message));
+  });
+  form.replaceChildren(
+    field("Channel name", "channelName", kit.channelName ?? series.title),
+    field("Handle", "handle", kit.handle ?? ""),
+    field("Primary color", "primaryColor", kit.primaryColor ?? "#f4c430", "color"),
+    field("Secondary color", "secondaryColor", kit.secondaryColor ?? "#1b1f2a", "color"),
+    field("Accent color", "accentColor", kit.accentColor ?? "#e5484d", "color"),
+    field("Font style", "fontStyle", kit.fontStyle ?? "bold condensed sans"),
+    selectField("Thumbnail preset", "thumbnailPreset", kit.thumbnailPreset ?? "story-arc", [
+      ["story-arc", "Story arc"],
+      ["character-focus", "Character focus"],
+      ["audio-cover", "Audio cover"],
+      ["clean-news", "Clean news"],
+    ]),
+    field("Watermark opacity", "watermarkOpacity", String(kit.watermarkOpacity ?? 0.2), "number"),
+    textareaField("Title style", "titleStyle", kit.titleStyle ?? "Clear curiosity with consistent channel language."),
+    textareaField("Thumbnail style", "thumbnailStyle", kit.thumbnailStyle ?? "Large readable text, high contrast."),
+    textareaField("Safe text rules", "safeTextRules", (kit.safeTextRules ?? ["Use three to five words max"]).join("\n")),
+    field("CTA", "cta", kit.cta ?? "Subscribe for the next story"),
+    actionButton("Save Brand Kit", null, "submit", "primary"),
+  );
+  return wrapSection("Channel Identity", form);
+}
+
+function renderBrandAssetForm(series) {
+  const form = document.createElement("form");
+  form.className = "form-grid compact-form";
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    uploadBrandAssetUi(series.id, form).catch((error) => setStatus(error.message));
+  });
+  form.replaceChildren(
+    selectField("Asset type", "assetType", "watermark", [
+      ["logo-round", "Logo round"],
+      ["logo-text", "Logo text"],
+      ["watermark", "Watermark"],
+      ["reference", "Reference"],
+      ["background", "Background"],
+    ]),
+    fileField("Brand asset", `brand-asset-${series.id}`, "image/*"),
+    actionButton("Upload Brand Asset", null, "submit", "primary"),
+  );
+  return wrapSection("Assets", form);
+}
+
+function renderThumbnailBriefForm(series) {
+  const form = document.createElement("form");
+  form.className = "form-grid compact-form";
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    generateThumbnailBriefUi(series.id, formValues(form)).catch((error) => setStatus(error.message));
+  });
+  form.replaceChildren(
+    selectField("Workflow", "workflowType", series.workflowType, workflowTypeOptions()),
+    field("Video title", "videoTitle", series.show || series.title),
+    field("Episode / chapter", "episodeLabel", "EP01-05"),
+    textareaField("Hook", "hook", "One hidden detail changes the whole arc."),
+    actionButton("Generate Thumbnail Brief", null, "submit", "primary"),
+  );
+  return wrapSection("Thumbnail Studio", form);
+}
+
+function renderBrandKitSummary(series, kit, brief) {
+  const output = document.createElement("div");
+  output.append(
+    summaryGrid({
+      Channel: kit.channelName ?? series.title,
+      Preset: kit.thumbnailPreset ?? "story-arc",
+      Logo: kit.logoRoundPath || kit.logoTextPath || "none",
+      Watermark: kit.watermarkPath || "none",
+    }),
+  );
+  if (brief) {
+    output.append(
+      sectionTitle("Last Thumbnail Brief"),
+      summaryGrid({
+        Title: brief.videoTitle,
+        Text: brief.textLines.join(" / "),
+        Layout: brief.layout,
+      }),
+      paragraph(brief.prompt),
+    );
+  }
+  return wrapSection("Preview Metadata", output);
 }
 
 function renderAudioStoryPanel(series) {
@@ -735,6 +851,54 @@ async function createBatchReview(seriesId, values) {
   appState.selectedSeries = appState.series.find((series) => series.id === seriesId) ?? appState.selectedSeries;
   renderSeriesManager();
   setStatus(`Created batch review ${data.reviewProject.sourceRange}.`);
+}
+
+async function saveBrandKitUi(seriesId, values) {
+  const response = await fetch(`/api/series/${encodeURIComponent(seriesId)}/brand-kit`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      ...values,
+      safeTextRules: lines(values.safeTextRules),
+    }),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
+  appState.brandKits[seriesId] = data.brandKit;
+  renderSeriesManager();
+  setStatus("Brand Kit saved.");
+}
+
+async function uploadBrandAssetUi(seriesId, form) {
+  const input = form.querySelector("[type=file]");
+  const file = input?.files?.[0];
+  if (!file) throw new Error("Choose a brand asset first.");
+  const values = formValues(form);
+  const body = new FormData();
+  body.append("assetType", values.assetType);
+  body.append("file", file);
+  const response = await fetch(`/api/series/${encodeURIComponent(seriesId)}/brand-kit/assets`, {
+    method: "POST",
+    body,
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
+  appState.brandKits[seriesId] = data.brandKit;
+  renderSeriesManager();
+  setStatus(`Upload Brand Asset complete: ${data.asset.relativePath}`);
+}
+
+async function generateThumbnailBriefUi(seriesId, values) {
+  const response = await fetch(`/api/series/${encodeURIComponent(seriesId)}/brand-kit/thumbnail-brief`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(values),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
+  appState.thumbnailBriefs[seriesId] = data.thumbnailBrief;
+  renderSeriesManager();
+  setStatus("Generate Thumbnail Brief complete.");
 }
 
 async function saveStoryBible(seriesId, values) {

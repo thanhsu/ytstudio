@@ -1,5 +1,6 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { loadBrandKit, type BrandKit } from "./brand-kit.ts";
 import { ensureProjectDir, writeJson } from "./fs.ts";
 import { validateProjectId } from "./project-paths.ts";
 
@@ -245,6 +246,7 @@ export async function exportAudioStoryPackage(seriesIdValue: string): Promise<Au
   const seriesId = validateProjectId(seriesIdValue);
   await ensureAudioStoryDir(seriesId);
   const bible = await requireBible(seriesId);
+  const brandKit = await loadBrandKit(seriesId);
   const chapters = await listChapters(seriesId);
   if (chapters.length === 0) throw new Error("At least one chapter is required before export.");
 
@@ -264,7 +266,7 @@ export async function exportAudioStoryPackage(seriesIdValue: string): Promise<Au
   await writeFile(join("projects", seriesId, manuscriptPath), buildManuscript(bible, chapters), "utf8");
   await writeJson(join("projects", seriesId, chapterIndexPath), chapters.map(chapterIndexEntry));
   await writeFile(join("projects", seriesId, voiceOverSrtPath), buildVoiceOverSrt(chapters), "utf8");
-  await writeJson(join("projects", seriesId, youtubeMetadataPath), buildYoutubeMetadata(bible, chapters));
+  await writeJson(join("projects", seriesId, youtubeMetadataPath), buildYoutubeMetadata(bible, chapters, brandKit));
   await writeJson(audioStoryPath(seriesId, "outputs.json"), {
     manuscript: manuscriptPath,
     chapterIndex: chapterIndexPath,
@@ -387,7 +389,7 @@ function buildVoiceOverSrt(chapters: StoryChapter[]): string {
     .join("\n\n")}\n`;
 }
 
-function buildYoutubeMetadata(bible: StoryBible, chapters: StoryChapter[]): Record<string, unknown> {
+function buildYoutubeMetadata(bible: StoryBible, chapters: StoryChapter[], brandKit: BrandKit): Record<string, unknown> {
   return {
     titles: [
       `${bible.title} | Original ${bible.genre} Audio Story`,
@@ -395,11 +397,26 @@ function buildYoutubeMetadata(bible: StoryBible, chapters: StoryChapter[]): Reco
       `A ${bible.tone} Story For Night Listening`,
     ],
     description: `${bible.title} is an original ${bible.genre} audio story for ${bible.audience}.`,
+    channel: {
+      name: brandKit.channelName,
+      handle: brandKit.handle,
+      cta: brandKit.cta,
+    },
     chapters: chapters.map((chapter, index) => ({
       time: formatChapterTime(chapters.slice(0, index).reduce((sum, item) => sum + item.estimatedMinutes * 60, 0)),
       title: chapter.title,
     })),
     thumbnailText: [bible.title, "Original Story", bible.genre],
+    thumbnailBrand: {
+      preset: brandKit.thumbnailPreset,
+      primaryColor: brandKit.primaryColor,
+      secondaryColor: brandKit.secondaryColor,
+      accentColor: brandKit.accentColor,
+      fontStyle: brandKit.fontStyle,
+      watermarkPath: brandKit.watermarkPath,
+      watermarkOpacity: brandKit.watermarkOpacity,
+      safeTextRules: brandKit.safeTextRules,
+    },
   };
 }
 

@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { createReviewProject, loadReviewProject, updateEpisodeSource, updateReviewProject } from "../src/review-project.ts";
 import { buildEditingPlan, saveEditingPlan } from "../src/editing-plan.ts";
 import { exportReviewPackage } from "../src/export-package.ts";
+import { saveBrandKit } from "../src/brand-kit.ts";
 import type { ReviewScript } from "../src/review-script.ts";
 import type { Scene } from "../src/scene-map.ts";
 
@@ -87,6 +88,12 @@ test("saves editing plan and exports json csv srt and youtube metadata", async (
       status: "script",
       outputs: { reviewScript: "review-projects/ep01-02/review-script.json" },
     });
+    await saveBrandKit("muc-than-ky", {
+      channelName: "Arc Lantern",
+      primaryColor: "#f4c430",
+      thumbnailPreset: "story-arc",
+      cta: "Follow for the next arc",
+    });
 
     const saved = await saveEditingPlan("muc-than-ky", "ep01-02");
     const exported = await exportReviewPackage("muc-than-ky", "ep01-02");
@@ -96,7 +103,10 @@ test("saves editing plan and exports json csv srt and youtube metadata", async (
     assert.equal(project.status, "exported");
     assert.match(await readFile(join("projects", "muc-than-ky", exported.csvPath), "utf8"), /SEG-001,EP01-SC001/);
     assert.match(await readFile(join("projects", "muc-than-ky", exported.voiceOverSrtPath), "utf8"), /Qin Mu sees the danger/);
-    assert.match(await readFile(join("projects", "muc-than-ky", exported.youtubeMetadataPath), "utf8"), /thumbnailText/);
+    const metadata = await readFile(join("projects", "muc-than-ky", exported.youtubeMetadataPath), "utf8");
+    assert.match(metadata, /thumbnailText/);
+    assert.match(metadata, /Arc Lantern/);
+    assert.match(metadata, /#f4c430/);
   } finally {
     process.chdir(previous);
   }
