@@ -465,7 +465,7 @@ git commit -m "feat: validate assets and render vertical drafts"
 - Produces: `cancel(projectId: string, jobId: string): Promise<JobRecord>`
 - Produces: `subscribe(projectId: string, listener: JobListener): () => void`
 
-- [ ] **Step 1: Write serialization, progress, and cancellation tests**
+- [x] **Step 1: Write serialization, progress, and cancellation tests**
 
 ```typescript
 test("only one mutating job runs per project", async () => {
@@ -481,23 +481,23 @@ test("cancelling a job aborts its operation", async () => {
 });
 ```
 
-- [ ] **Step 2: Run job tests and verify RED**
+- [x] **Step 2: Run job tests and verify RED**
 
 Run: `node --test tests/jobs.test.ts`
 
 Expected: FAIL because `ProjectJobManager` is missing.
 
-- [ ] **Step 3: Implement persisted job state and subscriptions**
+- [x] **Step 3: Implement persisted job state and subscriptions**
 
 Persist each job under `workspace/jobs/<job-id>.json`, keep an in-memory `AbortController` only while running, emit immutable snapshots to subscribers, and recover prior `running` jobs as `failed` with an interrupted-process message on startup.
 
-- [ ] **Step 4: Run job tests**
+- [x] **Step 4: Run job tests**
 
 Run: `node --test tests/jobs.test.ts`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the task**
+- [x] **Step 5: Commit the task**
 
 ```bash
 git add src/jobs.ts tests/jobs.test.ts
