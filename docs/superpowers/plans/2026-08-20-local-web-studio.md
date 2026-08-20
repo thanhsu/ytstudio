@@ -302,7 +302,7 @@ git commit -m "feat: add media process and TTS cache services"
 - Produces: `estimateOpenAiSpeechCost(input: OpenAiCostInput): OpenAiCostEstimate`
 - Produces: `createOpenAiProvider(config: OpenAiConfig): TtsProvider`
 
-- [ ] **Step 1: Write Piper invocation tests**
+- [x] **Step 1: Write Piper invocation tests**
 
 ```typescript
 test("Piper writes a local draft without network fallback", async () => {
@@ -314,17 +314,17 @@ test("Piper writes a local draft without network fallback", async () => {
 });
 ```
 
-- [ ] **Step 2: Run Piper test and verify RED**
+- [x] **Step 2: Run Piper test and verify RED**
 
 Run: `node --test tests/piper.test.ts`
 
 Expected: FAIL because the Piper provider is missing.
 
-- [ ] **Step 3: Implement Piper provider**
+- [x] **Step 3: Implement Piper provider**
 
 Pass narration through stdin and invoke Piper with `--model`, `--output_file`, and optional speaker arguments. Validate executable and model first. Return a `TtsArtifact` after probing duration; propagate local failure without any alternate provider call.
 
-- [ ] **Step 4: Write OpenAI estimator and confirmation tests**
+- [x] **Step 4: Write OpenAI estimator and confirmation tests**
 
 ```typescript
 test("OpenAI generation is blocked without explicit confirmation", async () => {
@@ -341,27 +341,27 @@ test("cost estimate includes text and projected audio", () => {
 });
 ```
 
-- [ ] **Step 5: Run OpenAI tests and verify RED**
+- [x] **Step 5: Run OpenAI tests and verify RED**
 
 Run: `node --test tests/openai-tts.test.ts`
 
 Expected: FAIL because estimator and provider are missing.
 
-- [ ] **Step 6: Implement paid provider with injected fetch**
+- [x] **Step 6: Implement paid provider with injected fetch**
 
 POST to `https://api.openai.com/v1/audio/speech` with `model`, `voice`, `input`, `instructions`, `speed`, and `response_format`. Require `confirmedPaidRequest === true`, redact authorization data from errors, and write the response bytes only after a successful status. Keep pricing in an exported configuration object with input-text and output-audio rates.
 
-- [ ] **Step 7: Document environment variables**
+- [x] **Step 7: Document environment variables**
 
 Add `OPENAI_API_KEY`, `PIPER_PATH`, `PIPER_MODEL_PATH`, `FFMPEG_PATH`, and `FFPROBE_PATH` with empty safe defaults and explanatory comments.
 
-- [ ] **Step 8: Run focused tests**
+- [x] **Step 8: Run focused tests**
 
 Run: `node --test tests/piper.test.ts tests/openai-tts.test.ts`
 
 Expected: PASS with no network access.
 
-- [ ] **Step 9: Commit the task**
+- [x] **Step 9: Commit the task**
 
 ```bash
 git add .env.example src/tts/piper.ts src/tts/openai.ts tests/piper.test.ts tests/openai-tts.test.ts
