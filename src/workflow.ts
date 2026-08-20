@@ -8,18 +8,22 @@ import { extractNarration } from "./narration.ts";
 import { renderDraft, type RenderArtifact } from "./render.ts";
 import { createPiperProvider } from "./tts/piper.ts";
 import { createOpenAiProvider } from "./tts/openai.ts";
+import { createVietnameseLocalProvider } from "./tts/vietnamese-local.ts";
 import type { ArtifactRecord, CopyrightCheckResult, VideoBrief } from "./types.ts";
 import type { TtsArtifact, TtsRequest } from "./tts/types.ts";
 
 export type GenerateVoiceOptions = {
   projectId: string;
-  provider: "piper" | "openai";
+  provider: "piper" | "openai" | "vietnamese-local";
   voice?: string;
   confirmedPaidRequest?: boolean;
   piperExecutable?: string;
   piperPrefixArgs?: string[];
   piperModelPath?: string;
   openAiApiKey?: string;
+  vietnamesePythonPath?: string;
+  vietnameseAppPath?: string;
+  vietnamesePrefixArgs?: string[];
   probeDuration?: (filePath: string) => Promise<number>;
 };
 
@@ -46,18 +50,7 @@ export async function generateVoice(options: GenerateVoiceOptions): Promise<TtsA
     confirmedPaidRequest: options.confirmedPaidRequest === true,
   };
 
-  const provider =
-    options.provider === "piper"
-      ? createPiperProvider({
-          executable: piperExecutable(options),
-          prefixArgs: options.piperPrefixArgs,
-          modelPath: piperModelPath(options),
-          probeDuration: options.probeDuration,
-        })
-      : createOpenAiProvider({
-          apiKey: options.openAiApiKey ?? process.env.OPENAI_API_KEY ?? "",
-          probeDuration: options.probeDuration,
-        });
+  const provider = createVoiceProvider(options);
 
   const voice = await provider.generate(request);
   await setArtifact(options.projectId, {
@@ -74,6 +67,29 @@ export async function generateVoice(options: GenerateVoiceOptions): Promise<TtsA
   return voice;
 }
 
+function createVoiceProvider(options: GenerateVoiceOptions) {
+  if (options.provider === "piper") {
+    return createPiperProvider({
+      executable: piperExecutable(options),
+      prefixArgs: options.piperPrefixArgs,
+      modelPath: piperModelPath(options),
+      probeDuration: options.probeDuration,
+    });
+  }
+  if (options.provider === "vietnamese-local") {
+    return createVietnameseLocalProvider({
+      pythonPath: vietnamesePythonPath(options),
+      appPath: vietnameseAppPath(options),
+      prefixArgs: options.vietnamesePrefixArgs,
+      probeDuration: options.probeDuration,
+    });
+  }
+  return createOpenAiProvider({
+    apiKey: options.openAiApiKey ?? process.env.OPENAI_API_KEY ?? "",
+    probeDuration: options.probeDuration,
+  });
+}
+
 function piperExecutable(options: GenerateVoiceOptions): string {
   const executable = options.piperExecutable ?? process.env.PIPER_PATH;
   if (!executable) {
@@ -88,6 +104,19 @@ function piperModelPath(options: GenerateVoiceOptions): string {
     throw new Error("PIPER_MODEL_PATH is required for local Piper voice generation.");
   }
   return modelPath;
+}
+
+function vietnamesePythonPath(options: GenerateVoiceOptions): string {
+  const pythonPath = options.vietnamesePythonPath ?? process.env.VIETNAMESE_TTS_PYTHON_PATH ?? "python";
+  return pythonPath;
+}
+
+function vietnameseAppPath(options: GenerateVoiceOptions): string {
+  const appPath = options.vietnameseAppPath ?? process.env.VIETNAMESE_TTS_APP_PATH;
+  if (!appPath) {
+    throw new Error("VIETNAMESE_TTS_APP_PATH is required for local Vietnamese voice generation.");
+  }
+  return appPath;
 }
 
 export async function prepareCaptions(projectId: string, durationSeconds?: number): Promise<CaptionArtifact> {

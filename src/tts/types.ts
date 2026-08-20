@@ -2,7 +2,7 @@ export type TtsFormat = "wav" | "mp3";
 
 export type TtsRequest = {
   projectId: string;
-  provider: "piper" | "openai";
+  provider: "piper" | "openai" | "vietnamese-local";
   text: string;
   voice: string;
   format: TtsFormat;

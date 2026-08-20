@@ -109,6 +109,16 @@ npm run cli -- generate-voice --project tales-herding-gods-qin-mu --provider ope
 
 No Piper failure falls back to OpenAI automatically.
 
+Local Vietnamese voice can use the offline Python TTS tool:
+
+```powershell
+$env:VIETNAMESE_TTS_APP_PATH="D:\DOCS\SUPHAM\New folder\Model\Model\app.py"
+npm run cli -- generate-voice --project tales-herding-gods-qin-mu --provider vietnamese-local --voice "piper:Minh Quân (Vbee):model"
+```
+
+Set `VIETNAMESE_TTS_PYTHON_PATH` if `python` is not the interpreter that has the
+tool's dependencies installed.
+
 ## Subtitle Translation Workflow
 
 Use this when a Chinese source SRT is available and you need a reviewed

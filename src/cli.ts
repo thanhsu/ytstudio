@@ -88,8 +88,8 @@ Commands:
   copyright-check --project <id> --commentary-percent <n> --footage-percent <n> --longest-clip-seconds <n> [--uses-full-scene true|false] [--thumbnail-from-frame true|false] [--clips-have-purpose true|false]
     Save a conservative copyright-risk checklist.
 
-  generate-voice --project <id> --provider <piper|openai> [--voice <name>] [--confirm-paid true]
-    Approve the current script and generate voice. Piper never falls back to OpenAI.
+  generate-voice --project <id> --provider <piper|openai|vietnamese-local> [--voice <name>] [--confirm-paid true]
+    Approve the current script and generate voice. Local providers never fall back to paid APIs.
 
   prepare-captions --project <id>
     Build SRT captions from script narration and current voice duration.
@@ -194,8 +194,8 @@ async function run(): Promise<void> {
   if (command === "generate-voice") {
     const projectId = requireProject(args);
     const provider = textArg(args, "provider", "piper");
-    if (provider !== "piper" && provider !== "openai") {
-      throw new Error("--provider must be piper or openai.");
+    if (provider !== "piper" && provider !== "openai" && provider !== "vietnamese-local") {
+      throw new Error("--provider must be piper, openai, or vietnamese-local.");
     }
     await approveCurrentScript(projectId);
     const artifact = await generateVoice({
