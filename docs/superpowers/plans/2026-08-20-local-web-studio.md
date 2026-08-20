@@ -519,13 +519,13 @@ git commit -m "feat: orchestrate persistent project jobs"
 - Produces: `createStudioServer(options: StudioServerOptions): http.Server`
 - Produces routes: `GET /api/projects`, `GET /api/projects/:id`, `PUT /api/projects/:id/script`, `POST /api/projects/:id/approvals/:stage`, `POST /api/projects/:id/voice`, `POST /api/projects/:id/assets`, `POST /api/projects/:id/captions`, `POST /api/projects/:id/render`, `POST /api/projects/:id/jobs/:jobId/cancel`, `GET /api/projects/:id/events`
 
-- [ ] **Step 1: Add Busboy dependency**
+- [x] **Step 1: Add Busboy dependency**
 
 Run: `npm install busboy && npm install --save-dev @types/busboy`
 
 Expected: `package.json` and lockfile contain pinned compatible dependencies.
 
-- [ ] **Step 2: Write API security and workflow tests**
+- [x] **Step 2: Write API security and workflow tests**
 
 ```typescript
 test("server binds to loopback by default", async () => {
@@ -549,31 +549,31 @@ test("render route reports unmet approval gates", async () => {
 });
 ```
 
-- [ ] **Step 3: Run server tests and verify RED**
+- [x] **Step 3: Run server tests and verify RED**
 
 Run: `node --test tests/server.test.ts`
 
 Expected: FAIL because the server is missing.
 
-- [ ] **Step 4: Implement JSON routes, upload streaming, and error envelopes**
+- [x] **Step 4: Implement JSON routes, upload streaming, and error envelopes**
 
 Use `{ code, message, action?, details? }` for expected API errors. Enforce JSON and upload size limits, same-origin checks for mutating requests, and project path validation before reading any file. Use Busboy streams directly into `saveAsset`.
 
-- [ ] **Step 5: Implement SSE job progress**
+- [x] **Step 5: Implement SSE job progress**
 
 Send `event: snapshot` with serialized current job state, then `event: job` for updates. Send a comment heartbeat every 15 seconds and unsubscribe on connection close.
 
-- [ ] **Step 6: Add server scripts and type coverage**
+- [x] **Step 6: Add server scripts and type coverage**
 
 Add `"studio": "node src/server.ts"` and include browser JavaScript only as static files; keep TypeScript checks on `src/**/*.ts` and `tests/**/*.ts`.
 
-- [ ] **Step 7: Run API and full tests**
+- [x] **Step 7: Run API and full tests**
 
 Run: `npm test`
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit the task**
+- [x] **Step 8: Commit the task**
 
 ```bash
 git add package.json package-lock.json tsconfig.json src/server.ts tests/server.test.ts
