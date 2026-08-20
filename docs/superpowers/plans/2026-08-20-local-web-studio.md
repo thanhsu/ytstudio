@@ -242,7 +242,7 @@ git commit -m "feat: extract narration and build captions"
 - Produces: `findCachedVoice(projectId: string, key: string): Promise<TtsArtifact | null>`
 - Produces test helpers: `makeFakeExecutable(source: string): Promise<string>`, `makeRecordingExecutable(recordPath: string): Promise<string>`, `sampleTtsRequest(): TtsRequest`, `sampleAsset: AssetRecord`, `sampleRenderInput(): RenderInput`, `readyRenderInput(): RenderGateInput`, `stateWithApprovedScript(hash: string): ProjectState`, `createSampleProject(root: string): Promise<VideoBrief>`, and `fakeTools: WorkflowDependencies`
 
-- [ ] **Step 1: Write process and cache tests**
+- [x] **Step 1: Write process and cache tests**
 
 ```typescript
 test("process runner preserves argument boundaries", async () => {
@@ -258,27 +258,27 @@ test("TTS cache keys change with paid request settings", () => {
 });
 ```
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
 Run: `node --test tests/process.test.ts tests/tts-cache.test.ts`
 
 Expected: FAIL because process and cache modules are missing.
 
-- [ ] **Step 3: Implement safe child-process execution**
+- [x] **Step 3: Implement safe child-process execution**
 
 Use `spawn(command, args, { shell: false })`, collect bounded stdout/stderr, support `AbortSignal`, and return exit code and duration. Reject non-zero exits with a typed `ProcessError` containing sanitized stderr.
 
-- [ ] **Step 4: Implement media probing and cache records**
+- [x] **Step 4: Implement media probing and cache records**
 
 Invoke FFprobe with `-v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1`. Store cache records beside generated audio and validate that the referenced audio file still exists before returning a hit.
 
-- [ ] **Step 5: Run focused tests**
+- [x] **Step 5: Run focused tests**
 
 Run: `node --test tests/process.test.ts tests/tts-cache.test.ts`
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit the task**
+- [x] **Step 6: Commit the task**
 
 ```bash
 git add src/process.ts src/media.ts src/tts tests/process.test.ts tests/tts-cache.test.ts tests/helpers.ts
