@@ -66,7 +66,7 @@
 - Produces: `setArtifact(projectId: string, artifact: ArtifactRecord): Promise<ProjectState>`
 - Produces: `derivePipelineStatus(state: ProjectState, currentHashes: SourceHashes): PipelineStatus`
 
-- [ ] **Step 1: Write path-confinement and stale-state tests**
+- [x] **Step 1: Write path-confinement and stale-state tests**
 
 ```typescript
 test("project paths reject traversal", () => {
@@ -87,13 +87,13 @@ test("changed script hash invalidates script-dependent artifacts", () => {
 });
 ```
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run: `node --test tests/project-state.test.ts`
 
 Expected: FAIL because `project-paths.ts` and `project-state.ts` do not exist.
 
-- [ ] **Step 3: Implement the project contracts and persistence**
+- [x] **Step 3: Implement the project contracts and persistence**
 
 ```typescript
 export type ApprovalStage = "script" | "assets" | "copyright";
@@ -115,17 +115,17 @@ export type ProjectState = {
 
 Use `resolve(PROJECTS_DIR, projectId, ...segments)` and verify the result begins with the resolved project root plus the platform separator. Save state atomically through a temporary sibling file followed by `rename`.
 
-- [ ] **Step 4: Ignore generated project workspaces**
+- [x] **Step 4: Ignore generated project workspaces**
 
 Add `projects/*/workspace/` while preserving the existing broad project ignore behavior. Ensure `.superpowers/` remains ignored.
 
-- [ ] **Step 5: Run focused and existing tests**
+- [x] **Step 5: Run focused and existing tests**
 
 Run: `node --test tests/project-state.test.ts tests/script.test.ts tests/copyright.test.ts`
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit the task**
+- [x] **Step 6: Commit the task**
 
 ```bash
 git add .gitignore src/fs.ts src/types.ts src/project-paths.ts src/project-state.ts tests/project-state.test.ts

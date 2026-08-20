@@ -1,10 +1,9 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
 
 export const PROJECTS_DIR = "projects";
 
 export function projectDir(projectId: string): string {
-  return join(PROJECTS_DIR, projectId);
+  return `${PROJECTS_DIR}/${projectId}`;
 }
 
 export async function ensureProjectDir(projectId: string): Promise<string> {

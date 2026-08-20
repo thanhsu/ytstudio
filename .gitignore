@@ -7,6 +7,7 @@ build/
 .next/
 coverage/
 projects/
+projects/*/workspace/
 renders/
 tmp/
 .superpowers/

@@ -48,3 +48,27 @@ export type CopyrightCheckResult = CopyrightCheckInput & {
   findings: string[];
   checkedAt: string;
 };
+
+export type ApprovalStage = "script" | "assets" | "copyright";
+
+export type StageApproval = {
+  sourceHash: string;
+  approvedAt: string;
+  note: string;
+};
+
+export type ArtifactKind = "voice" | "captions" | "render";
+
+export type ArtifactRecord = {
+  kind: ArtifactKind;
+  sourceHash: string;
+  relativePath: string;
+  createdAt: string;
+  metadata: Record<string, string | number | boolean>;
+};
+
+export type ProjectState = {
+  version: 1;
+  approvals: Partial<Record<ApprovalStage, StageApproval>>;
+  artifacts: Partial<Record<ArtifactKind, ArtifactRecord>>;
+};
