@@ -68,15 +68,22 @@ function renderStage() {
     paragraph("Import Chinese SRT, build a market-specific translation prompt, then validate the translated SRT before editing."),
     sectionTitle("Media / ASR"),
     paragraph("If no SRT exists, import MP4, extract mono 16k audio, then generate source.asr.srt with the configured local ASR tool."),
-    codeBlock(`npm run cli -- import-media --project ${appState.selectedProject} --file <source.mp4>`),
-    codeBlock(`npm run cli -- extract-audio --project ${appState.selectedProject}`),
-    codeBlock(`npm run cli -- generate-asr-srt --project ${appState.selectedProject}`),
+    uploadField("Import media", "media-file", "video/*,.mkv,.mov,.mp4,.webm", () => uploadProjectFile("media-file", "media")),
+    actionButton("Extract Audio", () => postProjectAction("media/audio", {}, "Audio extracted.")),
+    actionButton("Generate ASR SRT", () => postProjectAction("asr", {}, "ASR subtitles generated.")),
     paragraph(`ASR provider: ${appState.config?.asr?.provider ?? "disabled"}`),
-    codeBlock(`npm run cli -- import-srt --project ${appState.selectedProject} --file <source.srt>`),
-    codeBlock(
-      `npm run cli -- build-translation-prompt --project ${appState.selectedProject} --source <workspace/subtitles/source.srt> --target vi --genre cultivation`,
+    uploadField("Import source SRT", "srt-file", ".srt", () => uploadProjectFile("srt-file", "subtitles/source")),
+    actionButton("Build Translation Prompt", () =>
+      postProjectAction(
+        "subtitles/translation-prompt",
+        {
+          source: sourceSubtitlePath(),
+          target: appState.config?.translation?.defaultTarget ?? "vi",
+          genre: appState.config?.translation?.defaultGenre ?? "cultivation",
+        },
+        "Translation prompt created.",
+      ),
     ),
-    codeBlock("npm run cli -- validate-translation --source <source.srt> --translated <translated.srt>"),
     paragraph(`Targets: ${translationTargetLabels().join(", ")}`),
     paragraph(`Default voice: ${appState.config?.tts?.defaultProvider ?? "piper"}`),
     actionButton("Generate Voice", () => {
@@ -86,7 +93,10 @@ function renderStage() {
       }
       requestVoice(false);
     }),
+    actionButton("Prepare Captions", () => postProjectAction("captions", {}, "Captions prepared.")),
     actionButton("Render Draft", () => requestRender()),
+    sectionTitle("Current Artifacts"),
+    artifactList(snapshot.state?.artifacts ?? {}),
   );
 }
 
@@ -176,23 +186,62 @@ async function saveConfig(form) {
 
 async function requestVoice(confirmedPaidRequest) {
   const provider = appState.config?.tts?.defaultProvider ?? "piper";
-  const response = await fetch(`/api/projects/${encodeURIComponent(appState.selectedProject)}/voice`, {
+  const response = await fetch(projectApiUrl("voice"), {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ provider, confirmedPaidRequest }),
   });
   const data = await response.json();
-  setStatus(response.ok ? "Voice job queued." : `${data.code}: ${data.message}`);
+  setStatus(response.ok ? `Voice ready: ${data.artifact.relativePath}` : `${data.code}: ${data.message}`);
+  if (response.ok) await selectProject(appState.selectedProject);
 }
 
 async function requestRender() {
-  const response = await fetch(`/api/projects/${encodeURIComponent(appState.selectedProject)}/render`, {
+  const response = await fetch(projectApiUrl("render"), {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: "{}",
   });
   const data = await response.json();
-  setStatus(response.ok ? "Render job queued." : `${data.code}: ${(data.details?.reasons ?? []).join(", ")}`);
+  setStatus(response.ok ? `Rendered: ${data.artifact.relativePath}` : `${data.code}: ${(data.details?.reasons ?? []).join(", ")}`);
+  if (response.ok) await selectProject(appState.selectedProject);
+}
+
+async function uploadProjectFile(inputId, route) {
+  const input = document.querySelector(`#${inputId}`);
+  const file = input?.files?.[0];
+  if (!file) {
+    setStatus("Choose a file first.");
+    return;
+  }
+  setStatus(`Uploading ${file.name}...`);
+  const body = new FormData();
+  body.append("file", file);
+  const response = await fetch(projectApiUrl(route), { method: "POST", body });
+  const data = await response.json();
+  if (!response.ok) {
+    setStatus(`${data.code}: ${data.message}`);
+    return;
+  }
+  setStatus(`Imported: ${data.artifact.relativePath}`);
+  await selectProject(appState.selectedProject);
+}
+
+async function postProjectAction(route, body, successMessage) {
+  setStatus(`${successMessage.replace(/\.$/, "")}...`);
+  const response = await fetch(projectApiUrl(route), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    setStatus(`${data.code}: ${data.message}`);
+    return;
+  }
+  const artifact = data.artifact ?? data.draft;
+  setStatus(artifact?.relativePath ? `${successMessage} ${artifact.relativePath}` : successMessage);
+  await selectProject(appState.selectedProject);
 }
 
 function paragraph(text) {
@@ -246,6 +295,44 @@ function codeBlock(text) {
   const element = document.createElement("pre");
   element.textContent = text;
   return element;
+}
+
+function uploadField(label, inputId, accept, onClick) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "upload-row";
+  const input = document.createElement("input");
+  input.id = inputId;
+  input.type = "file";
+  input.accept = accept;
+  const button = actionButton(label, onClick);
+  wrapper.append(input, button);
+  return wrapper;
+}
+
+function artifactList(artifacts) {
+  const list = document.createElement("ul");
+  list.className = "artifact-list";
+  const entries = Object.entries(artifacts);
+  if (entries.length === 0) {
+    const empty = document.createElement("li");
+    empty.textContent = "No artifacts yet.";
+    list.append(empty);
+    return list;
+  }
+  for (const [kind, artifact] of entries) {
+    const item = document.createElement("li");
+    item.textContent = `${kind}: ${artifact.relativePath}`;
+    list.append(item);
+  }
+  return list;
+}
+
+function sourceSubtitlePath() {
+  return appState.projectSnapshot?.state?.artifacts?.["source-subtitles"]?.relativePath ?? "workspace/subtitles/source.asr.srt";
+}
+
+function projectApiUrl(route) {
+  return `/api/projects/${encodeURIComponent(appState.selectedProject)}/${route}`;
 }
 
 function translationTargetLabels() {

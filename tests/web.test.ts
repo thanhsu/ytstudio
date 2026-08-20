@@ -8,11 +8,21 @@ import { createStudioServer, startStudioServer } from "../src/server.ts";
 test("web shell exposes the complete approval pipeline", async () => {
   const html = await readFile("src/web/index.html", "utf8");
 
-  for (const stage of ["Brief", "Script", "Subtitles", "Voice", "Assets", "Copyright", "Render", "Config"]) {
+  for (const stage of ["Brief", "Script", "Subtitles", "ASR", "Voice", "Assets", "Copyright", "Render", "Config"]) {
     assert.match(html, new RegExp(stage));
   }
   assert.match(html, /id="open-config"/);
   assert.match(html, /aria-live="polite"/);
+});
+
+test("web app exposes UI controls for media, ASR, captions, and render actions", async () => {
+  const script = await readFile("src/web/app.js", "utf8");
+
+  for (const route of ["media", "media/audio", "asr", "subtitles/source", "subtitles/translation-prompt", "captions", "voice", "render"]) {
+    assert.match(script, new RegExp(route.replace("/", "\\/")));
+  }
+  assert.match(script, /uploadProjectFile/);
+  assert.match(script, /Build Translation Prompt/);
 });
 
 test("server serves the studio shell without exposing project files", async () => {

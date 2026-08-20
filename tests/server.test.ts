@@ -115,3 +115,30 @@ test("config route loads and persists studio model settings", async () => {
     }
   });
 });
+
+test("subtitle upload route imports source SRT through the API", async () => {
+  await withTempCwd(async () => {
+    const running = await startStudioServer(createStudioServer(), { port: 0 });
+    try {
+      const form = new FormData();
+      form.append(
+        "file",
+        new Blob(["1\n00:00:00,000 --> 00:00:02,000\n你好\n"], { type: "application/x-subrip" }),
+        "source.srt",
+      );
+
+      const response = await fetch(`${running.url}/api/projects/sample-project/subtitles/source`, {
+        method: "POST",
+        headers: { origin: running.url },
+        body: form,
+      });
+
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.artifact.cueCount, 1);
+      assert.match(body.artifact.relativePath, /workspace\/subtitles\/source-/);
+    } finally {
+      await running.close();
+    }
+  });
+});

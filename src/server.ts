@@ -1,11 +1,28 @@
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
-import { readdir, readFile } from "node:fs/promises";
-import { extname, join, resolve } from "node:path";
+import { createWriteStream } from "node:fs";
+import { mkdir, readdir, readFile, rm } from "node:fs/promises";
+import { basename, extname, join, resolve } from "node:path";
 import Busboy from "busboy";
+import { generateSourceSrtFromAsr } from "./asr.ts";
 import { loadStudioConfig, saveStudioConfig } from "./config.ts";
+import { extractAudioForAsr, importMedia } from "./media-ingest.ts";
 import { loadProjectState } from "./project-state.ts";
-import { validateProjectId } from "./project-paths.ts";
-import { TRANSLATION_PRESETS } from "./translation.ts";
+import { resolveProjectPath, validateProjectId } from "./project-paths.ts";
+import {
+  buildTranslationDraft,
+  importSubtitle,
+  TRANSLATION_PRESETS,
+  type TranslationGenre,
+  type TranslationLanguage,
+} from "./translation.ts";
+import {
+  approveCurrentScript,
+  approveCurrentCopyrightCheck,
+  approveEmptyAssetManifest,
+  generateVoice,
+  prepareCaptions,
+  renderDraftProject,
+} from "./workflow.ts";
 
 export type StudioServerOptions = {
   projectsRoot?: string;
@@ -142,7 +159,20 @@ async function routeRequest(
       });
       return;
     }
-    sendJson(response, 202, { ok: true, queued: true });
+    await approveCurrentScript(projectId);
+    const artifact = await generateVoice({
+      projectId,
+      provider: voiceProvider(body.provider),
+      voice: typeof body.voice === "string" ? body.voice : undefined,
+      confirmedPaidRequest: body.confirmedPaidRequest === true,
+    });
+    sendJson(response, 200, { ok: true, artifact });
+    return;
+  }
+
+  if (method === "POST" && rest === "captions") {
+    const artifact = await prepareCaptions(projectId);
+    sendJson(response, 200, { ok: true, artifact });
     return;
   }
 
@@ -162,13 +192,71 @@ async function routeRequest(
       });
       return;
     }
-    sendJson(response, 202, { ok: true, queued: true });
+    await approveEmptyAssetManifest(projectId);
+    await approveCurrentCopyrightCheck(projectId);
+    const artifact = await renderDraftProject(projectId);
+    sendJson(response, 200, { ok: true, artifact });
     return;
   }
 
   if (method === "POST" && rest === "assets") {
     await consumeUpload(request);
     sendJson(response, 202, { ok: true, queued: true });
+    return;
+  }
+
+  if (method === "POST" && rest === "media") {
+    const uploaded = await saveMultipartUpload(request, projectId, "media-upload");
+    try {
+      const artifact = await importMedia(projectId, uploaded.path);
+      sendJson(response, 200, { ok: true, artifact });
+    } finally {
+      await rm(uploaded.path, { force: true });
+    }
+    return;
+  }
+
+  if (method === "POST" && rest === "media/audio") {
+    const body = await readJsonBody(request);
+    const artifact = await extractAudioForAsr(
+      projectId,
+      typeof body.media === "string" ? body.media : "workspace/media/source.mp4",
+    );
+    sendJson(response, 200, { ok: true, artifact });
+    return;
+  }
+
+  if (method === "POST" && rest === "asr") {
+    const body = await readJsonBody(request);
+    const artifact = await generateSourceSrtFromAsr({
+      projectId,
+      provider:
+        body.provider === "faster-whisper" || body.provider === "whisper-cpp" ? body.provider : undefined,
+      audioRelativePath: typeof body.audio === "string" ? body.audio : undefined,
+    });
+    sendJson(response, 200, { ok: true, artifact });
+    return;
+  }
+
+  if (method === "POST" && rest === "subtitles/source") {
+    const uploaded = await saveMultipartUpload(request, projectId, "subtitle-upload");
+    try {
+      const artifact = await importSubtitle(projectId, uploaded.path);
+      sendJson(response, 200, { ok: true, artifact });
+    } finally {
+      await rm(uploaded.path, { force: true });
+    }
+    return;
+  }
+
+  if (method === "POST" && rest === "subtitles/translation-prompt") {
+    const body = await readJsonBody(request);
+    const source = typeof body.source === "string" ? body.source : "workspace/subtitles/source.asr.srt";
+    const config = await loadStudioConfig();
+    const target = (typeof body.target === "string" ? body.target : config.translation.defaultTarget) as TranslationLanguage;
+    const genre = (typeof body.genre === "string" ? body.genre : config.translation.defaultGenre) as TranslationGenre;
+    const draft = await buildTranslationDraft(projectId, source, target, genre);
+    sendJson(response, 200, { ok: true, draft });
     return;
   }
 
@@ -227,6 +315,58 @@ async function consumeUpload(request: IncomingMessage): Promise<void> {
     busboy.on("finish", resolve);
     request.pipe(busboy);
   });
+}
+
+async function saveMultipartUpload(
+  request: IncomingMessage,
+  projectId: string,
+  purpose: string,
+): Promise<{ path: string; filename: string }> {
+  const uploadDir = resolveProjectPath(projectId, join("workspace", "uploads"));
+  await mkdir(uploadDir, { recursive: true });
+
+  return new Promise((resolve, reject) => {
+    const busboy = Busboy({ headers: request.headers, limits: { fileSize: 3 * 1024 * 1024 * 1024 } });
+    let saved = false;
+    let outputPath = "";
+    let originalName = "upload.bin";
+
+    busboy.on("file", (_name, file, info) => {
+      if (saved) {
+        file.resume();
+        return;
+      }
+      saved = true;
+      originalName = basename(info.filename || "upload.bin");
+      outputPath = resolveProjectPath(
+        projectId,
+        join("workspace", "uploads", `${Date.now()}-${purpose}-${safeFileName(originalName)}`),
+      );
+      const output = createWriteStream(outputPath);
+      file.pipe(output);
+      output.on("error", reject);
+    });
+    busboy.on("error", reject);
+    busboy.on("finish", () => {
+      if (!saved || !outputPath) {
+        reject(new Error("No upload file was provided."));
+        return;
+      }
+      resolve({ path: outputPath, filename: originalName });
+    });
+    request.pipe(busboy);
+  });
+}
+
+function voiceProvider(value: unknown): "piper" | "openai" | "vietnamese-local" {
+  if (value === "openai" || value === "vietnamese-local" || value === "piper") {
+    return value;
+  }
+  return "piper";
+}
+
+function safeFileName(value: string): string {
+  return value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "upload.bin";
 }
 
 function isSameOrigin(request: IncomingMessage): boolean {

@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, basename } from "node:path";
 import { resolveProjectPath } from "./project-paths.ts";
+import { setArtifact, sha256 } from "./project-state.ts";
 import { compareSrtStructure, parseSrt, stringifySrt, validateSrt, type SrtCue } from "./srt.ts";
 
 export type TranslationLanguage = "vi" | "en-au" | "en-gb" | "pt-br" | "de";
@@ -84,7 +85,18 @@ export async function importSubtitle(projectId: string, sourcePath: string): Pro
   const relativePath = `workspace/subtitles/source-${Date.now()}-${safeFileName(basename(sourcePath))}`;
   const outputPath = resolveProjectPath(projectId, relativePath);
   await mkdir(dirname(outputPath), { recursive: true });
-  await writeFile(outputPath, stringifySrt(cues), "utf8");
+  const normalized = stringifySrt(cues);
+  await writeFile(outputPath, normalized, "utf8");
+  await setArtifact(projectId, {
+    kind: "source-subtitles",
+    sourceHash: sha256(normalized),
+    relativePath,
+    createdAt: new Date().toISOString(),
+    metadata: {
+      cueCount: cues.length,
+      sourceName: basename(sourcePath),
+    },
+  });
   return { relativePath, cueCount: cues.length, validation };
 }
 

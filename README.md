@@ -83,6 +83,20 @@ Or use the CLI server command with a custom port:
 npm run cli -- studio --port 4317
 ```
 
+The studio UI is the primary workflow. It can now:
+
+- upload/import source MP4/MOV/MKV/WebM media
+- extract ASR audio with FFmpeg
+- generate source SRT through configured local ASR
+- upload/import source SRT directly
+- build a translation prompt from the current source subtitle artifact
+- generate voice
+- prepare captions
+- render a draft
+- edit model/tool config
+
+The CLI remains as a debug and automation fallback, not the main operator path.
+
 ## Studio Config
 
 Use the `Config` button in the local studio to edit model and tool settings:

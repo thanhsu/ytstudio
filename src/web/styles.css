@@ -151,6 +151,27 @@ select:focus-visible {
   width: 100%;
 }
 
+.upload-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 0.5rem 0;
+}
+
+.upload-row input {
+  min-width: 0;
+}
+
+.artifact-list {
+  padding-left: 1.25rem;
+}
+
+.artifact-list li {
+  overflow-wrap: anywhere;
+  margin-bottom: 0.35rem;
+}
+
 .config-form button[type="submit"] {
   justify-self: start;
 }
@@ -186,6 +207,10 @@ video {
   }
 
   .config-form {
+    grid-template-columns: 1fr;
+  }
+
+  .upload-row {
     grid-template-columns: 1fr;
   }
 }
