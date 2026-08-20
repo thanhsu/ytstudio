@@ -29,16 +29,22 @@ const STAGE_TITLES = {
   config: "Config",
 };
 
+const RUN_AVAILABLE_TASKS_LABEL = "Run available tasks";
+
 const appState = {
   projects: [],
   selectedProject: null,
   activeStage: "brief",
   projectSnapshot: null,
   translationPresets: null,
+  workflowTemplates: null,
   config: null,
 };
 
 const projectList = document.querySelector("#project-list");
+const workflowTitle = document.querySelector("#workflow-title");
+const workflowDescription = document.querySelector("#workflow-description");
+const workflowSteps = document.querySelector("#workflow-steps");
 const stageRail = document.querySelector("#stage-rail");
 const stageTitle = document.querySelector("#stage-title");
 const stageContent = document.querySelector("#stage-content");
@@ -51,24 +57,22 @@ const videoPreview = document.querySelector("#video-preview");
 document.querySelector("#refresh-projects").addEventListener("click", () => loadProjects());
 document.querySelector("#new-project").addEventListener("click", () => renderCreateProject());
 document.querySelector("#open-config").addEventListener("click", () => renderConfig());
+document.querySelector("#run-ready-tasks").addEventListener("click", () => runAvailableTasks());
 confirmPaidVoice.addEventListener("click", () => requestVoice(true));
 
-for (const button of stageRail.querySelectorAll("[data-stage]")) {
-  button.addEventListener("click", () => {
-    appState.activeStage = button.dataset.stage;
-    renderStage();
-  });
-}
+bindStageRail();
 
 async function loadProjects() {
   setStatus("Loading projects...");
-  const [projectsResponse, presetsResponse, configResponse] = await Promise.all([
+  const [projectsResponse, presetsResponse, workflowsResponse, configResponse] = await Promise.all([
     fetch("/api/projects"),
     fetch("/api/translation-presets"),
+    fetch("/api/workflow-templates"),
     fetch("/api/config"),
   ]);
   const data = await projectsResponse.json();
   appState.translationPresets = await presetsResponse.json();
+  appState.workflowTemplates = await workflowsResponse.json();
   appState.config = (await configResponse.json()).config;
   appState.projects = data.projects ?? [];
   renderProjects();
@@ -94,11 +98,104 @@ function renderProjects() {
   );
 }
 
+function renderWorkflowBoard() {
+  const workflow = appState.projectSnapshot?.workflow;
+  if (!workflow) {
+    workflowTitle.textContent = "Workflow";
+    workflowDescription.textContent = "Create or select a project to load its flow.";
+    workflowSteps.replaceChildren(...workflowTemplateCards());
+    return;
+  }
+
+  workflowTitle.textContent = workflow.title;
+  workflowDescription.textContent = workflow.description;
+  workflowSteps.replaceChildren(
+    ...workflow.steps.map((step) => {
+      const item = document.createElement("li");
+      item.className = `workflow-step ${step.status}`;
+      if (step.parallelGroup) item.dataset.parallelGroup = step.parallelGroup;
+
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = step.stage === appState.activeStage ? "selected" : "";
+      button.addEventListener("click", () => {
+        appState.activeStage = step.stage;
+        renderStage();
+      });
+
+      const badge = document.createElement("span");
+      badge.className = "step-status";
+      badge.textContent = step.status;
+
+      const title = document.createElement("strong");
+      title.textContent = step.title;
+
+      const description = document.createElement("small");
+      description.textContent = step.parallelGroup
+        ? `${step.description} Parallel group: ${step.parallelGroup}.`
+        : step.description;
+
+      button.append(badge, title, description);
+      item.append(button);
+      return item;
+    }),
+  );
+}
+
+function workflowTemplateCards() {
+  return (appState.workflowTemplates?.templates ?? []).map((template) => {
+    const item = document.createElement("li");
+    item.className = "workflow-step ready";
+    const block = document.createElement("div");
+    block.className = "workflow-template-card";
+    const title = document.createElement("strong");
+    title.textContent = template.title;
+    const description = document.createElement("small");
+    description.textContent = template.description;
+    block.append(title, description);
+    item.append(block);
+    return item;
+  });
+}
+
+function renderStageRail() {
+  const workflow = appState.projectSnapshot?.workflow;
+  const stages = workflow ? unique(workflow.steps.map((step) => step.stage)) : STAGES;
+  stageRail.replaceChildren(
+    ...stages.map((stage) => {
+      const item = document.createElement("li");
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.stage = stage;
+      button.textContent = STAGE_TITLES[stage] ?? stage;
+      item.append(button);
+      return item;
+    }),
+  );
+  bindStageRail();
+  setActiveStageButton();
+}
+
+function bindStageRail() {
+  for (const button of stageRail.querySelectorAll("[data-stage]")) {
+    button.addEventListener("click", () => {
+      appState.activeStage = button.dataset.stage;
+      renderStage();
+    });
+  }
+}
+
 async function selectProject(projectId) {
   appState.selectedProject = projectId;
   const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}`);
   appState.projectSnapshot = await response.json();
+  const workflowStages = appState.projectSnapshot.workflow?.steps?.map((step) => step.stage) ?? [];
+  if (!workflowStages.includes(appState.activeStage)) {
+    appState.activeStage = workflowStages[0] ?? "brief";
+  }
   renderProjects();
+  renderWorkflowBoard();
+  renderStageRail();
   renderStage();
   setStatus(`Loaded ${projectId}.`);
 }
@@ -128,11 +225,15 @@ function renderStage() {
     export: renderExport,
   }[stage];
   renderer(snapshot);
+  renderWorkflowBoard();
   renderPreviews(snapshot);
 }
 
 function renderCreateProject() {
   stageTitle.textContent = "Create Project";
+  workflowTitle.textContent = "Workflow";
+  workflowDescription.textContent = "Pick the type of video before creating the project.";
+  workflowSteps.replaceChildren(...workflowTemplateCards());
   const form = document.createElement("form");
   form.className = "form-grid";
   form.addEventListener("submit", (event) => {
@@ -147,6 +248,7 @@ function renderCreateProject() {
       ["shorts", "Shorts"],
       ["longform", "Longform"],
     ]),
+    selectField("Workflow type", "workflowType", "review-recap", workflowTypeOptions()),
     field("Audience", "audience", "", "text", "Vietnamese review viewers"),
     field("Language", "language", "Vietnamese"),
     textareaField("Notes", "notes", ""),
@@ -415,6 +517,98 @@ function renderConfig() {
   );
   stageContent.replaceChildren(form);
   setStatus("Config loaded. Secrets stay in environment variables, not in this file.");
+}
+
+async function runAvailableTasks() {
+  const workflow = appState.projectSnapshot?.workflow;
+  if (!workflow || !appState.selectedProject) {
+    setStatus("Select a project first.");
+    return;
+  }
+
+  const runnable = workflow.steps.filter((step) => step.canRun && taskActionForStep(step));
+  if (runnable.length === 0) {
+    setStatus("No UI-runnable tasks are ready. Complete the current manual step first.");
+    return;
+  }
+
+  const groups = runnable.reduce((map, step) => {
+    const key = step.parallelGroup ?? step.id;
+    map.set(key, [...(map.get(key) ?? []), step]);
+    return map;
+  }, new Map());
+  const groupLabel = [...groups.entries()].map(([group, steps]) => `${group}: ${steps.map((step) => step.title).join(", ")}`);
+  setStatus(`Running available tasks. ${groupLabel.join(" | ")}`);
+
+  const results = await Promise.allSettled(runnable.map((step) => runStepTask(step)));
+  const failures = results.filter((result) => result.status === "rejected");
+  await selectProject(appState.selectedProject);
+  if (failures.length > 0) {
+    setStatus(`${runnable.length - failures.length}/${runnable.length} tasks completed. ${failures[0].reason.message}`);
+    return;
+  }
+  setStatus(`${runnable.length} available task(s) completed.`);
+}
+
+function taskActionForStep(step) {
+  return {
+    script: "script",
+    "extract-audio": "media/audio",
+    asr: "asr",
+    translation: "subtitles/translation-prompt",
+    voice: "voice",
+    captions: "captions",
+    assets: "assets/approve",
+    "source-risk": "copyright-check",
+    copyright: "copyright-check",
+    render: "render",
+  }[step.id];
+}
+
+async function runStepTask(step) {
+  if (step.id === "voice" && appState.config?.tts?.defaultProvider === "openai") {
+    throw new Error("OpenAI voice needs paid confirmation. Run Voice step manually.");
+  }
+  if (step.id === "copyright" || step.id === "source-risk") {
+    await runProjectRoute("copyright-check", {
+      commentaryPercent: 70,
+      footagePercent: 15,
+      longestClipSeconds: 5,
+      usesFullScene: false,
+      thumbnailFromCopyrightFrame: false,
+      clipsHaveCommentaryPurpose: true,
+    });
+    await runProjectRoute("copyright/approve", {});
+    return;
+  }
+  if (step.id === "voice") {
+    const provider = appState.config?.tts?.defaultProvider ?? "piper";
+    const voice = appState.config?.tts?.[provider === "vietnamese-local" ? "vietnameseLocal" : provider]?.voice;
+    await runProjectRoute("voice", { provider, voice, confirmedPaidRequest: false });
+    return;
+  }
+  if (step.id === "translation") {
+    await runProjectRoute("subtitles/translation-prompt", {
+      source: sourceSubtitlePath(),
+      target: appState.config?.translation?.defaultTarget ?? "vi",
+      genre: appState.config?.translation?.defaultGenre ?? "cultivation",
+    });
+    return;
+  }
+  await runProjectRoute(taskActionForStep(step), {});
+}
+
+async function runProjectRoute(route, body) {
+  const response = await fetch(projectApiUrl(route), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(`${data.code}: ${data.message}`);
+  }
+  return data;
 }
 
 async function saveConfig(form) {
@@ -722,8 +916,16 @@ function targetOptions() {
   return (appState.translationPresets?.presets ?? []).map((preset) => [preset.language ?? preset.target, preset.label]);
 }
 
+function workflowTypeOptions() {
+  return (appState.workflowTemplates?.templates ?? []).map((template) => [template.type, template.title]);
+}
+
 function translationTargetLabels() {
   return (appState.translationPresets?.presets ?? []).map((preset) => preset.label);
+}
+
+function unique(values) {
+  return [...new Set(values)];
 }
 
 function setActiveStageButton(stage = appState.activeStage) {

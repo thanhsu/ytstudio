@@ -8,9 +8,10 @@ import { createStudioServer, startStudioServer } from "../src/server.ts";
 test("web shell exposes the complete approval pipeline", async () => {
   const html = await readFile("src/web/index.html", "utf8");
 
-  for (const stage of ["Brief", "Script", "Subtitles", "ASR", "Voice", "Assets", "Copyright", "Render", "Config"]) {
+  for (const stage of ["Workflow", "Brief", "Script", "Subtitles", "ASR", "Voice", "Assets", "Copyright", "Render", "Config"]) {
     assert.match(html, new RegExp(stage));
   }
+  assert.match(html, /id="workflow-board"/);
   assert.match(html, /id="open-config"/);
   assert.match(html, /aria-live="polite"/);
 });
@@ -35,6 +36,10 @@ test("web app exposes UI controls for media, ASR, captions, and render actions",
   assert.match(script, /uploadProjectFile/);
   assert.match(script, /Build Translation Prompt/);
   assert.match(script, /Create Project/);
+  assert.match(script, /Workflow type/);
+  assert.match(script, /Run available tasks/);
+  assert.match(script, /parallelGroup/);
+  assert.match(script, /workflow.steps/);
   assert.match(script, /Copyright Check/);
   assert.match(script, /Upload Asset/);
   assert.match(script, /Export/);
@@ -55,6 +60,8 @@ test("server serves the studio shell without exposing project files", async () =
       assert.equal((await fetch(`${running.url}/projects/sample-project/brief.json`)).status, 404);
       const presets = await (await fetch(`${running.url}/api/translation-presets`)).json();
       assert.equal(presets.presets.some((preset: { language: string }) => preset.language === "vi"), true);
+      const workflows = await (await fetch(`${running.url}/api/workflow-templates`)).json();
+      assert.equal(workflows.templates.some((template: { type: string }) => template.type === "audio-story"), true);
     } finally {
       await running.close();
     }

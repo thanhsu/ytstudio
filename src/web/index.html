@@ -26,6 +26,17 @@
       </aside>
 
       <section class="workspace">
+        <section id="workflow-board" class="workflow-board" aria-label="Workflow">
+          <div class="workflow-header">
+            <div>
+              <h2 id="workflow-title">Workflow</h2>
+              <p id="workflow-description">Select a project to load its step-by-step flow.</p>
+            </div>
+            <button id="run-ready-tasks" type="button">Run available tasks</button>
+          </div>
+          <ol id="workflow-steps" class="workflow-steps"></ol>
+        </section>
+
         <nav aria-label="Pipeline stages">
           <ol id="stage-rail" class="stage-rail">
             <li><button type="button" data-stage="brief">Brief</button></li>

@@ -28,6 +28,7 @@ import {
   prepareCaptions,
   renderDraftProject,
 } from "./workflow.ts";
+import { deriveWorkflowStepStates, getWorkflowTemplate, WORKFLOW_TEMPLATES } from "./workflow-templates.ts";
 
 export type StudioServerOptions = {
   projectsRoot?: string;
@@ -123,6 +124,7 @@ async function routeRequest(
       topic: requiredString(body.topic, "topic"),
       show: requiredString(body.show, "show"),
       format: body.format === "longform" ? "longform" : "shorts",
+      workflowType: body.workflowType,
       audience: requiredString(body.audience, "audience"),
       language: requiredString(body.language, "language"),
       notes: typeof body.notes === "string" ? body.notes : "",
@@ -147,6 +149,11 @@ async function routeRequest(
       presets: Object.values(TRANSLATION_PRESETS),
       genres: ["cultivation", "fantasy-system", "modern-drama"],
     });
+    return;
+  }
+
+  if (method === "GET" && url.pathname === "/api/workflow-templates") {
+    sendJson(response, 200, { templates: WORKFLOW_TEMPLATES });
     return;
   }
 
@@ -358,7 +365,16 @@ async function sendProject(response: ServerResponse, projectsRoot: string, proje
   const briefPath = join(projectsRoot, projectId, "brief.json");
   const brief = JSON.parse(await readFile(briefPath, "utf8")) as unknown;
   const state = await loadProjectState(projectId);
-  sendJson(response, 200, { brief, state });
+  const workflowType = typeof brief === "object" && brief !== null && "workflowType" in brief ? brief.workflowType : undefined;
+  const template = getWorkflowTemplate(workflowType);
+  sendJson(response, 200, {
+    brief,
+    state,
+    workflow: {
+      ...template,
+      steps: deriveWorkflowStepStates(template.type, state),
+    },
+  });
 }
 
 async function sendProjectFile(response: ServerResponse, projectId: string, relativePath: string): Promise<void> {

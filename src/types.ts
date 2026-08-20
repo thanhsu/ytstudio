@@ -1,10 +1,13 @@
 export type VideoFormat = "shorts" | "longform";
 
+export type WorkflowType = "review-recap" | "audio-story" | "subtitle-render" | "licensed-source";
+
 export type VideoBrief = {
   id: string;
   topic: string;
   show: string;
   format: VideoFormat;
+  workflowType?: WorkflowType;
   audience: string;
   language: string;
   notes: string;

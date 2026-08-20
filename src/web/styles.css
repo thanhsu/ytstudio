@@ -103,6 +103,94 @@ select:focus-visible {
   padding: 1rem;
 }
 
+.workflow-board {
+  border: 1px solid #d7dde5;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.workflow-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.workflow-header h2,
+.workflow-header p {
+  margin: 0;
+}
+
+.workflow-header p {
+  color: #5f6b7a;
+  margin-top: 0.2rem;
+}
+
+.workflow-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.5rem;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.workflow-step {
+  min-width: 0;
+}
+
+.workflow-step button,
+.workflow-template-card {
+  width: 100%;
+  min-height: 112px;
+  display: grid;
+  align-content: start;
+  gap: 0.35rem;
+  text-align: left;
+  border-radius: 8px;
+  border: 1px solid #d7dde5;
+  background: #ffffff;
+  padding: 0.75rem;
+}
+
+.workflow-step button.selected {
+  border-color: #2364aa;
+  background: #e8f1fb;
+}
+
+.workflow-step small,
+.workflow-template-card small {
+  color: #5f6b7a;
+  line-height: 1.35;
+}
+
+.step-status {
+  width: max-content;
+  border-radius: 999px;
+  padding: 0.15rem 0.45rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.workflow-step.done .step-status {
+  background: #dff7e7;
+  color: #17663a;
+}
+
+.workflow-step.ready .step-status {
+  background: #e8f1fb;
+  color: #163f6b;
+}
+
+.workflow-step.blocked .step-status {
+  background: #eef1f5;
+  color: #5f6b7a;
+}
+
 .project-list {
   list-style: none;
   padding: 0;
@@ -292,6 +380,10 @@ video {
 
   .stage-rail {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .workflow-header {
+    display: grid;
   }
 
   .config-form {

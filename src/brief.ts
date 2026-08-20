@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { ensureProjectDir, writeJson } from "./fs.ts";
+import { normalizeWorkflowType } from "./workflow-templates.ts";
 import type { VideoBrief, VideoFormat } from "./types.ts";
 
 export type CreateBriefInput = {
@@ -7,6 +8,7 @@ export type CreateBriefInput = {
   topic: string;
   show: string;
   format: VideoFormat;
+  workflowType?: unknown;
   audience: string;
   language: string;
   notes?: string;
@@ -14,7 +16,7 @@ export type CreateBriefInput = {
 
 export function validateBrief(input: CreateBriefInput): void {
   const missing = Object.entries(input)
-    .filter(([key, value]) => key !== "notes" && String(value ?? "").trim() === "")
+    .filter(([key, value]) => key !== "notes" && key !== "workflowType" && String(value ?? "").trim() === "")
     .map(([key]) => key);
 
   if (missing.length > 0) {
@@ -38,6 +40,7 @@ export async function createBrief(input: CreateBriefInput): Promise<VideoBrief> 
     topic: input.topic.trim(),
     show: input.show.trim(),
     format: input.format,
+    workflowType: normalizeWorkflowType(input.workflowType),
     audience: input.audience.trim(),
     language: input.language.trim(),
     notes: input.notes?.trim() ?? "",
