@@ -34,7 +34,9 @@ const RUN_AVAILABLE_TASKS_LABEL = "Run available tasks";
 const appState = {
   projects: [],
   series: [],
+  reviewProjectsBySeries: {},
   selectedSeries: null,
+  selectedReviewProjectId: null,
   selectedProject: null,
   activeStage: "brief",
   projectSnapshot: null,
@@ -81,6 +83,14 @@ async function loadProjects() {
   appState.workflowTemplates = await workflowsResponse.json();
   appState.config = (await configResponse.json()).config;
   appState.projects = data.projects ?? [];
+  appState.reviewProjectsBySeries = Object.fromEntries(
+    await Promise.all(
+      appState.series.map(async (series) => {
+        const response = await fetch(`/api/series/${encodeURIComponent(series.id)}/review-projects`);
+        return [series.id, (await response.json()).reviewProjects ?? []];
+      }),
+    ),
+  );
   if (!appState.selectedSeries && appState.series.length > 0) {
     appState.selectedSeries = appState.series[0];
   }
@@ -289,6 +299,7 @@ function renderSeriesList() {
   for (const series of appState.series) {
     const button = actionButton(`${series.title} (${series.episodes.length})`, () => {
       appState.selectedSeries = series;
+      appState.selectedReviewProjectId = null;
       renderSeriesManager();
     });
     if (appState.selectedSeries?.id === series.id) button.classList.add("selected");
@@ -329,7 +340,160 @@ function renderSeriesDetail(series) {
     }),
     planForm,
     table,
+    renderBatchReviewPanel(series),
   );
+}
+
+function renderBatchReviewPanel(series) {
+  const batches = appState.reviewProjectsBySeries[series.id] ?? [];
+  const selectedBatch = batches.find((batch) => batch.id === appState.selectedReviewProjectId) ?? batches[0];
+  if (!appState.selectedReviewProjectId && selectedBatch) appState.selectedReviewProjectId = selectedBatch.id;
+
+  return wrapSection(
+    "Batch Reviews",
+    paragraph("Create one review video from multiple episodes, then process each episode independently before merging the story."),
+    renderCreateBatchReviewForm(series),
+    renderBatchReviewList(series, batches),
+    selectedBatch ? renderBatchReviewDetail(series, selectedBatch) : paragraph("No batch review project yet."),
+  );
+}
+
+function renderCreateBatchReviewForm(series) {
+  const form = document.createElement("form");
+  form.className = "form-grid compact-form";
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    createBatchReview(series.id, formValues(form)).catch((error) => setStatus(error.message));
+  });
+  form.replaceChildren(
+    field("Batch id", "id", "ep01-05", "text"),
+    field("Source range", "sourceRange", "Episodes 01-05", "text"),
+    field("Episode numbers", "episodeNumbers", "1,2,3,4,5", "text"),
+    field("Target minutes", "targetDurationMinutes", "20", "number"),
+    selectField("Spoiler mode", "spoilerMode", "donghua-only", [
+      ["donghua-only", "Donghua only"],
+      ["novel-spoilers", "Novel spoilers"],
+    ]),
+    actionButton("Create Batch Review", null, "submit", "primary"),
+  );
+  return form;
+}
+
+function renderBatchReviewList(series, batches) {
+  const list = document.createElement("div");
+  list.className = "series-list";
+  if (batches.length === 0) {
+    list.append(paragraph("No batch reviews yet."));
+    return list;
+  }
+  for (const batch of batches) {
+    const button = actionButton(`${batch.sourceRange} - ${batch.status}`, () => {
+      appState.selectedReviewProjectId = batch.id;
+      renderSeriesManager();
+    });
+    if (batch.id === appState.selectedReviewProjectId) button.classList.add("selected");
+    list.append(button);
+  }
+  return list;
+}
+
+function renderBatchReviewDetail(series, batch) {
+  const section = document.createElement("section");
+  section.className = "batch-workflow";
+  const episodeTable = document.createElement("div");
+  episodeTable.className = "batch-episode-table";
+  episodeTable.append(batchEpisodeHeader());
+  for (const episode of batch.episodes) {
+    episodeTable.append(renderBatchEpisodeRow(series.id, batch.id, episode));
+  }
+  section.append(
+    sectionTitle(`${batch.title} ${batch.sourceRange}`),
+    summaryGrid({
+      Status: batch.status,
+      Duration: `${batch.targetDurationMinutes} min`,
+      Spoilers: batch.spoilerMode,
+      Outputs: Object.keys(batch.outputs ?? {}).join(", ") || "none",
+    }),
+    renderBatchActionBar(series.id, batch),
+    episodeTable,
+    renderBatchOutputLinks(series.id, batch),
+  );
+  return section;
+}
+
+function batchEpisodeHeader() {
+  const row = document.createElement("div");
+  row.className = "batch-episode-row batch-header";
+  for (const label of ["Episode", "Status", "Source", "Subtitle", "AI steps"]) {
+    const cell = document.createElement("strong");
+    cell.textContent = label;
+    row.append(cell);
+  }
+  return row;
+}
+
+function renderBatchEpisodeRow(seriesId, reviewProjectId, episode) {
+  const row = document.createElement("div");
+  row.className = "batch-episode-row";
+  const mediaInput = `batch-media-${reviewProjectId}-${episode.episodeNumber}`;
+  const subtitleInput = `batch-subtitle-${reviewProjectId}-${episode.episodeNumber}`;
+  row.append(
+    paragraph(episode.label),
+    paragraph(episode.status),
+    uploadField("Media", mediaInput, "video/*,.mkv,.mov,.mp4,.webm", () =>
+      uploadReviewEpisodeFile(seriesId, reviewProjectId, episode.episodeNumber, "media", mediaInput),
+    ),
+    uploadField("Subtitle", subtitleInput, ".srt,.vtt,.ass,.ssa", () =>
+      uploadReviewEpisodeFile(seriesId, reviewProjectId, episode.episodeNumber, "subtitle", subtitleInput),
+    ),
+    batchEpisodeActions(seriesId, reviewProjectId, episode),
+  );
+  return row;
+}
+
+function batchEpisodeActions(seriesId, reviewProjectId, episode) {
+  const actions = document.createElement("div");
+  actions.className = "episode-actions";
+  actions.append(
+    actionButton("Scene Map", () => postReviewProjectAction(seriesId, reviewProjectId, `episodes/${episode.episodeNumber}/scene-map`, {}, "Scene map built."), "button"),
+    actionButton("Analyze", () => postReviewProjectAction(seriesId, reviewProjectId, `episodes/${episode.episodeNumber}/analysis`, {}, "Episode analyzed."), "button", "primary"),
+  );
+  return actions;
+}
+
+function renderBatchActionBar(seriesId, batch) {
+  const actions = document.createElement("div");
+  actions.className = "batch-actions";
+  actions.append(
+    actionButton("Generate Story Arc", () => postReviewProjectAction(seriesId, batch.id, "story-arc", {}, "Story arc generated."), "button", "primary"),
+    actionButton("Generate Review Script", () => postReviewProjectAction(seriesId, batch.id, "script", {}, "Review script generated."), "button"),
+    actionButton("Generate Editing Plan", () => postReviewProjectAction(seriesId, batch.id, "editing-plan", {}, "Editing plan generated."), "button"),
+    actionButton("Export Review Package", () => postReviewProjectAction(seriesId, batch.id, "export", {}, "Review package exported."), "button"),
+  );
+  return actions;
+}
+
+function renderBatchOutputLinks(seriesId, batch) {
+  const outputs = batch.outputs ?? {};
+  const list = document.createElement("ul");
+  list.className = "artifact-list";
+  const entries = Object.entries(outputs);
+  if (entries.length === 0) {
+    const empty = document.createElement("li");
+    empty.textContent = "No batch outputs yet.";
+    list.append(empty);
+    return list;
+  }
+  for (const [label, path] of entries) {
+    const item = document.createElement("li");
+    const link = document.createElement("a");
+    link.href = seriesFileUrl(seriesId, path);
+    link.target = "_blank";
+    link.textContent = `${label}: ${path}`;
+    item.append(link);
+    list.append(item);
+  }
+  return list;
 }
 
 function episodeHeader() {
@@ -424,6 +588,71 @@ async function updateEpisode(seriesId, episodeId, values) {
   appState.selectedSeries = appState.series.find((series) => series.id === data.series.id) ?? data.series;
   renderSeriesManager();
   setStatus(`Saved ${data.episode.id}.`);
+}
+
+async function createBatchReview(seriesId, values) {
+  const payload = {
+    ...values,
+    title: appState.selectedSeries?.show ?? appState.selectedSeries?.title ?? seriesId,
+    episodeNumbers: parseEpisodeNumbers(values.episodeNumbers),
+  };
+  const response = await fetch(`/api/series/${encodeURIComponent(seriesId)}/review-projects`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
+  appState.selectedReviewProjectId = data.reviewProject.id;
+  await loadProjects();
+  appState.selectedSeries = appState.series.find((series) => series.id === seriesId) ?? appState.selectedSeries;
+  renderSeriesManager();
+  setStatus(`Created batch review ${data.reviewProject.sourceRange}.`);
+}
+
+async function uploadReviewEpisodeFile(seriesId, reviewProjectId, episodeNumber, kind, inputId) {
+  const input = document.querySelector(`#${inputId}`);
+  const file = input?.files?.[0];
+  if (!file) {
+    setStatus("Choose a file first.");
+    return;
+  }
+  const body = new FormData();
+  body.append("file", file);
+  if (kind === "subtitle") body.append("language", "zh");
+  const response = await fetch(reviewProjectApiUrl(seriesId, reviewProjectId, `episodes/${episodeNumber}/${kind}`), {
+    method: "POST",
+    body,
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    setStatus(`${data.code}: ${data.message}`);
+    return;
+  }
+  await refreshSeriesReviewProjects(seriesId);
+  renderSeriesManager();
+  setStatus(`Imported ${kind} for episode ${episodeNumber}.`);
+}
+
+async function postReviewProjectAction(seriesId, reviewProjectId, route, body, successMessage) {
+  const response = await fetch(reviewProjectApiUrl(seriesId, reviewProjectId, route), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    setStatus(`${data.code}: ${data.message}`);
+    return;
+  }
+  await refreshSeriesReviewProjects(seriesId);
+  renderSeriesManager();
+  setStatus(successMessage);
+}
+
+async function refreshSeriesReviewProjects(seriesId) {
+  const response = await fetch(`/api/series/${encodeURIComponent(seriesId)}/review-projects`);
+  appState.reviewProjectsBySeries[seriesId] = (await response.json()).reviewProjects ?? [];
 }
 
 async function performEpisodeTask(episode) {
@@ -1124,8 +1353,23 @@ function projectApiUrl(route) {
   return `/api/projects/${encodeURIComponent(appState.selectedProject)}/${route}`;
 }
 
+function reviewProjectApiUrl(seriesId, reviewProjectId, route) {
+  return `/api/series/${encodeURIComponent(seriesId)}/review-projects/${encodeURIComponent(reviewProjectId)}/${route}`;
+}
+
 function projectFileUrl(relativePath) {
   return `/api/projects/${encodeURIComponent(appState.selectedProject)}/files/${encodeURIComponent(relativePath)}`;
+}
+
+function seriesFileUrl(seriesId, relativePath) {
+  return `/api/projects/${encodeURIComponent(seriesId)}/files/${encodeURIComponent(relativePath)}`;
+}
+
+function parseEpisodeNumbers(value) {
+  return String(value)
+    .split(/[,\s]+/)
+    .map((item) => Number(item.trim()))
+    .filter((number) => Number.isInteger(number) && number > 0);
 }
 
 function targetOptions() {
