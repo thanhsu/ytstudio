@@ -26,6 +26,23 @@ button {
   border-radius: 6px;
   padding: 0.55rem 0.75rem;
   cursor: pointer;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+button:hover {
+  background: #f2f5f8;
+}
+
+button.primary,
+.button-link {
+  border-color: #2364aa;
+  background: #2364aa;
+  color: #ffffff;
+}
+
+button.primary:hover,
+.button-link:hover {
+  background: #1f5a99;
 }
 
 button:focus-visible,
@@ -98,6 +115,13 @@ select:focus-visible {
   margin-bottom: 0.5rem;
 }
 
+.project-list button.selected,
+.stage-rail button.selected {
+  border-color: #2364aa;
+  background: #e8f1fb;
+  color: #163f6b;
+}
+
 .stage-rail {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
@@ -108,10 +132,12 @@ select:focus-visible {
 }
 
 .stage-rail li {
-  border: 1px solid #c8d0db;
-  border-radius: 6px;
-  padding: 0.55rem;
-  background: #ffffff;
+  min-width: 0;
+}
+
+.stage-rail button {
+  width: 100%;
+  min-height: 44px;
   text-align: center;
 }
 
@@ -128,7 +154,15 @@ select:focus-visible {
   gap: 0.75rem;
 }
 
-.config-form h3 {
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.config-form h3,
+.form-grid h3 {
   grid-column: 1 / -1;
   margin: 0.5rem 0 0;
   padding-top: 0.75rem;
@@ -147,8 +181,29 @@ select:focus-visible {
 }
 
 .field input,
-.field select {
+.field select,
+.field textarea {
   width: 100%;
+  border: 1px solid #c8d0db;
+  border-radius: 6px;
+  padding: 0.55rem 0.65rem;
+  background: #ffffff;
+}
+
+.field-wide {
+  grid-column: 1 / -1;
+}
+
+.checkbox-field {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-height: 44px;
+}
+
+.checkbox-field input {
+  width: 1rem;
+  height: 1rem;
 }
 
 .upload-row {
@@ -170,6 +225,39 @@ select:focus-visible {
 .artifact-list li {
   overflow-wrap: anywhere;
   margin-bottom: 0.35rem;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: minmax(120px, 180px) minmax(0, 1fr);
+  gap: 0.5rem 0.75rem;
+  border: 1px solid #d7dde5;
+  border-radius: 8px;
+  padding: 0.75rem;
+  background: #f9fafb;
+}
+
+.summary-grid dt {
+  color: #4b5563;
+  font-weight: 600;
+}
+
+.summary-grid dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.button-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0.55rem 0.75rem;
+  border-radius: 6px;
+  text-decoration: none;
+}
+
+.checklist {
+  padding-left: 1.25rem;
 }
 
 .config-form button[type="submit"] {
@@ -207,6 +295,10 @@ video {
   }
 
   .config-form {
+    grid-template-columns: 1fr;
+  }
+
+  .form-grid {
     grid-template-columns: 1fr;
   }
 

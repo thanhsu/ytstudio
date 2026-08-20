@@ -18,11 +18,26 @@ test("web shell exposes the complete approval pipeline", async () => {
 test("web app exposes UI controls for media, ASR, captions, and render actions", async () => {
   const script = await readFile("src/web/app.js", "utf8");
 
-  for (const route of ["media", "media/audio", "asr", "subtitles/source", "subtitles/translation-prompt", "captions", "voice", "render"]) {
+  for (const route of [
+    "media",
+    "media/audio",
+    "asr",
+    "subtitles/source",
+    "subtitles/translation-prompt",
+    "captions",
+    "voice",
+    "assets",
+    "copyright-check",
+    "render",
+  ]) {
     assert.match(script, new RegExp(route.replace("/", "\\/")));
   }
   assert.match(script, /uploadProjectFile/);
   assert.match(script, /Build Translation Prompt/);
+  assert.match(script, /Create Project/);
+  assert.match(script, /Copyright Check/);
+  assert.match(script, /Upload Asset/);
+  assert.match(script, /Export/);
 });
 
 test("server serves the studio shell without exposing project files", async () => {

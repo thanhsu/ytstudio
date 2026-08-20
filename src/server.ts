@@ -1,13 +1,18 @@
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import { createWriteStream } from "node:fs";
-import { mkdir, readdir, readFile, rm } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
 import { basename, extname, join, resolve } from "node:path";
+import { createReadStream } from "node:fs";
 import Busboy from "busboy";
+import { saveAsset, type AssetMediaType } from "./assets.ts";
 import { generateSourceSrtFromAsr } from "./asr.ts";
+import { createBrief } from "./brief.ts";
 import { loadStudioConfig, saveStudioConfig } from "./config.ts";
+import { saveCopyrightCheck } from "./copyright.ts";
 import { extractAudioForAsr, importMedia } from "./media-ingest.ts";
 import { loadProjectState } from "./project-state.ts";
 import { resolveProjectPath, validateProjectId } from "./project-paths.ts";
+import { generateDryRunScript } from "./script.ts";
 import {
   buildTranslationDraft,
   importSubtitle,
@@ -111,6 +116,21 @@ async function routeRequest(
     return;
   }
 
+  if (method === "POST" && url.pathname === "/api/projects") {
+    const body = await readJsonBody(request);
+    const brief = await createBrief({
+      id: requiredString(body.id, "id"),
+      topic: requiredString(body.topic, "topic"),
+      show: requiredString(body.show, "show"),
+      format: body.format === "longform" ? "longform" : "shorts",
+      audience: requiredString(body.audience, "audience"),
+      language: requiredString(body.language, "language"),
+      notes: typeof body.notes === "string" ? body.notes : "",
+    });
+    sendJson(response, 200, { ok: true, brief });
+    return;
+  }
+
   if (method === "GET" && url.pathname === "/api/config") {
     sendJson(response, 200, { config: await loadStudioConfig() });
     return;
@@ -149,6 +169,12 @@ async function routeRequest(
     return;
   }
 
+  const fileMatch = /^files\/(.+)$/.exec(rest);
+  if (method === "GET" && fileMatch) {
+    await sendProjectFile(response, projectId, decodeURIComponent(fileMatch[1]));
+    return;
+  }
+
   if (method === "POST" && rest === "voice") {
     const body = await readJsonBody(request);
     if (body.provider === "openai" && body.confirmedPaidRequest !== true) {
@@ -167,6 +193,12 @@ async function routeRequest(
       confirmedPaidRequest: body.confirmedPaidRequest === true,
     });
     sendJson(response, 200, { ok: true, artifact });
+    return;
+  }
+
+  if (method === "POST" && rest === "script") {
+    await generateDryRunScript(projectId);
+    sendJson(response, 200, { ok: true });
     return;
   }
 
@@ -200,8 +232,47 @@ async function routeRequest(
   }
 
   if (method === "POST" && rest === "assets") {
-    await consumeUpload(request);
-    sendJson(response, 202, { ok: true, queued: true });
+    const uploaded = await saveMultipartUpload(request, projectId, "asset-upload");
+    try {
+      const asset = await saveAsset(projectId, {
+        filename: uploaded.filename,
+        stream: createReadStream(uploaded.path),
+        mediaType: assetMediaType(uploaded.fields.mediaType),
+        mimeType: uploaded.mimeType,
+        rightsConfirmed: uploaded.fields.rightsConfirmed === "true",
+        usagePurpose: uploaded.fields.usagePurpose,
+      });
+      sendJson(response, 200, { ok: true, asset });
+    } finally {
+      await rm(uploaded.path, { force: true });
+    }
+    return;
+  }
+
+  if (method === "POST" && rest === "assets/approve") {
+    await approveEmptyAssetManifest(projectId);
+    sendJson(response, 200, { ok: true });
+    return;
+  }
+
+  if (method === "POST" && rest === "copyright-check") {
+    const body = await readJsonBody(request);
+    const check = await saveCopyrightCheck({
+      projectId,
+      commentaryPercent: numberBody(body.commentaryPercent, 70),
+      footagePercent: numberBody(body.footagePercent, 15),
+      longestClipSeconds: numberBody(body.longestClipSeconds, 5),
+      usesFullScene: body.usesFullScene === true,
+      thumbnailFromCopyrightFrame: body.thumbnailFromCopyrightFrame === true,
+      clipsHaveCommentaryPurpose: body.clipsHaveCommentaryPurpose !== false,
+    });
+    sendJson(response, 200, { ok: true, check });
+    return;
+  }
+
+  if (method === "POST" && rest === "copyright/approve") {
+    await approveCurrentCopyrightCheck(projectId);
+    sendJson(response, 200, { ok: true });
     return;
   }
 
@@ -290,6 +361,20 @@ async function sendProject(response: ServerResponse, projectsRoot: string, proje
   sendJson(response, 200, { brief, state });
 }
 
+async function sendProjectFile(response: ServerResponse, projectId: string, relativePath: string): Promise<void> {
+  const filePath = resolveProjectPath(projectId, relativePath);
+  const info = await stat(filePath);
+  if (!info.isFile()) {
+    sendError(response, 404, { code: "not-found", message: "File not found." });
+    return;
+  }
+  response.writeHead(200, {
+    "content-type": contentTypeFor(filePath),
+    "cache-control": "no-store",
+  });
+  createReadStream(filePath).pipe(response);
+}
+
 async function readJsonBody(request: IncomingMessage): Promise<Record<string, unknown>> {
   const contentType = request.headers["content-type"] ?? "";
   if (!contentType.includes("application/json")) {
@@ -321,7 +406,7 @@ async function saveMultipartUpload(
   request: IncomingMessage,
   projectId: string,
   purpose: string,
-): Promise<{ path: string; filename: string }> {
+): Promise<{ path: string; filename: string; mimeType: string; fields: Record<string, string> }> {
   const uploadDir = resolveProjectPath(projectId, join("workspace", "uploads"));
   await mkdir(uploadDir, { recursive: true });
 
@@ -330,6 +415,8 @@ async function saveMultipartUpload(
     let saved = false;
     let outputPath = "";
     let originalName = "upload.bin";
+    let mimeType = "application/octet-stream";
+    const fields: Record<string, string> = {};
 
     busboy.on("file", (_name, file, info) => {
       if (saved) {
@@ -338,6 +425,7 @@ async function saveMultipartUpload(
       }
       saved = true;
       originalName = basename(info.filename || "upload.bin");
+      mimeType = info.mimeType || mimeType;
       outputPath = resolveProjectPath(
         projectId,
         join("workspace", "uploads", `${Date.now()}-${purpose}-${safeFileName(originalName)}`),
@@ -346,13 +434,16 @@ async function saveMultipartUpload(
       file.pipe(output);
       output.on("error", reject);
     });
+    busboy.on("field", (name, value) => {
+      fields[name] = value;
+    });
     busboy.on("error", reject);
     busboy.on("finish", () => {
       if (!saved || !outputPath) {
         reject(new Error("No upload file was provided."));
         return;
       }
-      resolve({ path: outputPath, filename: originalName });
+      resolve({ path: outputPath, filename: originalName, mimeType, fields });
     });
     request.pipe(busboy);
   });
@@ -367,6 +458,22 @@ function voiceProvider(value: unknown): "piper" | "openai" | "vietnamese-local" 
 
 function safeFileName(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "upload.bin";
+}
+
+function requiredString(value: unknown, field: string): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(`${field} is required.`);
+  }
+  return value;
+}
+
+function numberBody(value: unknown, fallback: number): number {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function assetMediaType(value: unknown): AssetMediaType {
+  return value === "video" ? "video" : "image";
 }
 
 function isSameOrigin(request: IncomingMessage): boolean {
@@ -417,6 +524,14 @@ function contentTypeFor(filePath: string): string {
   if (extension === ".html") return "text/html; charset=utf-8";
   if (extension === ".css") return "text/css; charset=utf-8";
   if (extension === ".js") return "text/javascript; charset=utf-8";
+  if (extension === ".srt") return "text/plain; charset=utf-8";
+  if (extension === ".wav") return "audio/wav";
+  if (extension === ".mp3") return "audio/mpeg";
+  if (extension === ".mp4") return "video/mp4";
+  if (extension === ".webm") return "video/webm";
+  if (extension === ".png") return "image/png";
+  if (extension === ".jpg" || extension === ".jpeg") return "image/jpeg";
+  if (extension === ".webp") return "image/webp";
   return "application/octet-stream";
 }
 

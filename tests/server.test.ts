@@ -142,3 +142,77 @@ test("subtitle upload route imports source SRT through the API", async () => {
     }
   });
 });
+
+test("project brief can be created from the studio API", async () => {
+  const previousCwd = process.cwd();
+  const root = await mkdtemp(join(tmpdir(), "yt-server-create-"));
+  try {
+    process.chdir(root);
+    const running = await startStudioServer(createStudioServer(), { port: 0 });
+    try {
+      const response = await fetch(`${running.url}/api/projects`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: running.url },
+        body: JSON.stringify({
+          id: "new-ui-project",
+          topic: "A normal drama recap angle",
+          show: "Sample Show",
+          format: "shorts",
+          audience: "Vietnamese review viewers",
+          language: "Vietnamese",
+          notes: "Created in UI",
+        }),
+      });
+
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.brief.id, "new-ui-project");
+      assert.match(await readFile(join("projects", "new-ui-project", "brief.json"), "utf8"), /Sample Show/);
+    } finally {
+      await running.close();
+    }
+  } finally {
+    process.chdir(previousCwd);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("copyright and asset actions run from the studio API", async () => {
+  await withTempCwd(async () => {
+    const running = await startStudioServer(createStudioServer(), { port: 0 });
+    try {
+      const copyright = await fetch(`${running.url}/api/projects/sample-project/copyright-check`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: running.url },
+        body: JSON.stringify({
+          commentaryPercent: 75,
+          footagePercent: 10,
+          longestClipSeconds: 4,
+          usesFullScene: false,
+          thumbnailFromCopyrightFrame: false,
+          clipsHaveCommentaryPurpose: true,
+        }),
+      });
+      assert.equal(copyright.status, 200);
+      assert.equal((await copyright.json()).check.risk, "low");
+
+      const form = new FormData();
+      form.append("rightsConfirmed", "true");
+      form.append("usagePurpose", "Generated background for review intro");
+      form.append("mediaType", "image");
+      form.append("file", new Blob(["fake-png"], { type: "image/png" }), "asset.png");
+
+      const asset = await fetch(`${running.url}/api/projects/sample-project/assets`, {
+        method: "POST",
+        headers: { origin: running.url },
+        body: form,
+      });
+      assert.equal(asset.status, 200);
+      const body = await asset.json();
+      assert.equal(body.asset.rightsConfirmed, true);
+      assert.match(body.asset.relativePath, /assets\/images\//);
+    } finally {
+      await running.close();
+    }
+  });
+});

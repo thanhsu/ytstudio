@@ -13,6 +13,7 @@
         <p>Local production pipeline for original review videos.</p>
       </div>
       <div class="topbar-actions">
+        <button id="new-project" type="button">New Project</button>
         <button id="open-config" type="button">Config</button>
         <button id="refresh-projects" type="button">Refresh</button>
       </div>
@@ -26,16 +27,19 @@
 
       <section class="workspace">
         <nav aria-label="Pipeline stages">
-          <ol class="stage-rail">
-            <li>Brief</li>
-            <li>Script</li>
-            <li>Subtitles</li>
-            <li>ASR</li>
-            <li>Voice</li>
-            <li>Assets</li>
-            <li>Copyright</li>
-            <li>Render</li>
-            <li>Config</li>
+          <ol id="stage-rail" class="stage-rail">
+            <li><button type="button" data-stage="brief">Brief</button></li>
+            <li><button type="button" data-stage="script">Script</button></li>
+            <li><button type="button" data-stage="media">Media</button></li>
+            <li><button type="button" data-stage="asr">ASR/OCR</button></li>
+            <li><button type="button" data-stage="subtitles">Subtitles</button></li>
+            <li><button type="button" data-stage="translation">Translation</button></li>
+            <li><button type="button" data-stage="voice">Voice</button></li>
+            <li><button type="button" data-stage="captions">Captions</button></li>
+            <li><button type="button" data-stage="assets">Assets</button></li>
+            <li><button type="button" data-stage="copyright">Copyright</button></li>
+            <li><button type="button" data-stage="render">Render</button></li>
+            <li><button type="button" data-stage="export">Export</button></li>
           </ol>
         </nav>
 
