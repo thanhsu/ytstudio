@@ -1,12 +1,13 @@
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import { readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { extname, join, resolve } from "node:path";
 import Busboy from "busboy";
 import { loadProjectState } from "./project-state.ts";
 import { validateProjectId } from "./project-paths.ts";
 
 export type StudioServerOptions = {
   projectsRoot?: string;
+  staticRoot?: string;
 };
 
 export type RunningStudioServer = {
@@ -25,10 +26,11 @@ type ApiError = {
 
 export function createStudioServer(options: StudioServerOptions = {}): http.Server {
   const projectsRoot = options.projectsRoot ?? "projects";
+  const staticRoot = options.staticRoot ?? process.cwd();
 
   return http.createServer(async (request, response) => {
     try {
-      await routeRequest(request, response, projectsRoot);
+      await routeRequest(request, response, projectsRoot, staticRoot);
     } catch (error: unknown) {
       sendError(response, 500, {
         code: "internal-error",
@@ -66,9 +68,19 @@ export async function startStudioServer(
   };
 }
 
-async function routeRequest(request: IncomingMessage, response: ServerResponse, projectsRoot: string): Promise<void> {
+async function routeRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  projectsRoot: string,
+  staticRoot: string,
+): Promise<void> {
   const url = new URL(request.url ?? "/", "http://127.0.0.1");
   const method = request.method ?? "GET";
+
+  if (method === "GET" && (url.pathname === "/" || url.pathname === "/styles.css" || url.pathname === "/app.js")) {
+    await sendStatic(response, staticRoot, url.pathname);
+    return;
+  }
 
   if (method !== "GET" && !isSameOrigin(request)) {
     sendError(response, 403, { code: "same-origin-required", message: "Mutating requests require same-origin." });
@@ -215,6 +227,36 @@ function sendJson(response: ServerResponse, status: number, body: unknown): void
 
 function sendError(response: ServerResponse, status: number, error: ApiError): void {
   sendJson(response, status, error);
+}
+
+async function sendStatic(response: ServerResponse, staticRoot: string, pathname: string): Promise<void> {
+  const relativePath = pathname === "/" ? "src/web/index.html" : `src/web${pathname}`;
+  const root = resolve(staticRoot);
+  const filePath = resolve(root, relativePath);
+
+  if (!filePath.startsWith(root)) {
+    sendError(response, 404, { code: "not-found", message: "Route not found." });
+    return;
+  }
+
+  try {
+    const body = await readFile(filePath);
+    response.writeHead(200, {
+      "content-type": contentTypeFor(filePath),
+      "cache-control": "no-store",
+    });
+    response.end(body);
+  } catch {
+    sendError(response, 404, { code: "not-found", message: "Route not found." });
+  }
+}
+
+function contentTypeFor(filePath: string): string {
+  const extension = extname(filePath);
+  if (extension === ".html") return "text/html; charset=utf-8";
+  if (extension === ".css") return "text/css; charset=utf-8";
+  if (extension === ".js") return "text/javascript; charset=utf-8";
+  return "application/octet-stream";
 }
 
 async function sendProjectEvents(response: ServerResponse, projectId: string): Promise<void> {

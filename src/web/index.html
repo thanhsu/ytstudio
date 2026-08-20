@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>YT Review Studio</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>YT Review Studio</h1>
+        <p>Local production pipeline for original review videos.</p>
+      </div>
+      <button id="refresh-projects" type="button">Refresh</button>
+    </header>
+
+    <main class="layout">
+      <aside class="sidebar" aria-label="Projects">
+        <h2>Projects</h2>
+        <ul id="project-list" class="project-list"></ul>
+      </aside>
+
+      <section class="workspace">
+        <nav aria-label="Pipeline stages">
+          <ol class="stage-rail">
+            <li>Brief</li>
+            <li>Script</li>
+            <li>Voice</li>
+            <li>Assets</li>
+            <li>Copyright</li>
+            <li>Render</li>
+          </ol>
+        </nav>
+
+        <section class="panel" aria-labelledby="stage-title">
+          <h2 id="stage-title">Brief</h2>
+          <div id="stage-content"></div>
+        </section>
+      </section>
+
+      <aside class="preview" aria-label="Preview">
+        <h2>Preview</h2>
+        <audio id="audio-preview" controls></audio>
+        <video id="video-preview" controls></video>
+        <div id="status" class="status" aria-live="polite">Loading studio...</div>
+      </aside>
+    </main>
+
+    <dialog id="paid-voice-dialog">
+      <form method="dialog">
+        <h2>Confirm Paid Voice</h2>
+        <p>OpenAI speech generation may incur API cost. Confirm only after reviewing the script and estimate.</p>
+        <menu>
+          <button value="cancel">Cancel</button>
+          <button id="confirm-paid-voice" value="confirm">Confirm</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

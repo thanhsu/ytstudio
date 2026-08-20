@@ -595,7 +595,7 @@ git commit -m "feat: expose local studio API and job events"
 - Consumes: Task 7 HTTP routes and SSE events
 - Produces: project list, stage navigation, script editor, voice controls, asset form, copyright approval, render controls, audio/video preview
 
-- [ ] **Step 1: Write static shell and route tests**
+- [x] **Step 1: Write static shell and route tests**
 
 ```typescript
 test("web shell exposes the complete approval pipeline", async () => {
@@ -612,25 +612,25 @@ test("server serves the studio shell without exposing project files", async () =
 });
 ```
 
-- [ ] **Step 2: Run web tests and verify RED**
+- [x] **Step 2: Run web tests and verify RED**
 
 Run: `node --test tests/web.test.ts`
 
 Expected: FAIL because the web files are missing.
 
-- [ ] **Step 3: Implement accessible application shell and responsive styles**
+- [x] **Step 3: Implement accessible application shell and responsive styles**
 
 Create a project sidebar, ordered stage rail, focused stage workspace, preview panel, and status/log region. Use native buttons, forms, progress elements, dialogs, audio, and video elements. Ensure keyboard focus states, readable contrast, 320px reflow, and reduced-motion support.
 
-- [ ] **Step 4: Implement browser state and API interactions**
+- [x] **Step 4: Implement browser state and API interactions**
 
 Keep one `appState` object with selected project, project snapshot, active stage, and current job. Render from state; use delegated events; escape project content before inserting it; connect one `EventSource` per selected project and close it when switching.
 
-- [ ] **Step 5: Implement paid confirmation dialog**
+- [x] **Step 5: Implement paid confirmation dialog**
 
 Fetch or calculate the server-provided estimate first, show model, voice, word count, duration, and USD estimate, then send `confirmedPaidRequest: true` only from the dialog's confirm action. Never persist confirmation in browser storage.
 
-- [ ] **Step 6: Run web and full tests**
+- [x] **Step 6: Run web and full tests**
 
 Run: `node --test tests/web.test.ts tests/server.test.ts && npm test`
 
