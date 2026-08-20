@@ -216,3 +216,98 @@ test("copyright and asset actions run from the studio API", async () => {
     }
   });
 });
+
+test("batch review API builds episode analysis and story arc", async () => {
+  const previousCwd = process.cwd();
+  const root = await mkdtemp(join(tmpdir(), "yt-server-batch-ai-"));
+  try {
+    process.chdir(root);
+    const running = await startStudioServer(createStudioServer(), { port: 0 });
+    try {
+      await fetch(`${running.url}/api/series`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: running.url },
+        body: JSON.stringify({
+          id: "muc-than-ky",
+          title: "Muc Than Ky",
+          show: "Tales of Herding Gods",
+          audience: "EU",
+          language: "English",
+        }),
+      });
+      await fetch(`${running.url}/api/series/muc-than-ky/review-projects`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: running.url },
+        body: JSON.stringify({
+          id: "ep01-02",
+          title: "Tales of Herding Gods",
+          sourceRange: "Episodes 01-02",
+          episodeNumbers: [1, 2],
+          targetDurationMinutes: 20,
+          spoilerMode: "donghua-only",
+        }),
+      });
+      for (const episodeNumber of [1, 2]) {
+        const sourceDir = join(
+          "projects",
+          "muc-than-ky",
+          "review-projects",
+          "ep01-02",
+          "sources",
+          `ep${String(episodeNumber).padStart(3, "0")}`,
+        );
+        await mkdir(sourceDir, { recursive: true });
+        await writeFile(
+          join(sourceDir, "scenes.json"),
+          JSON.stringify([
+            {
+              episode: episodeNumber,
+              sceneId: `EP0${episodeNumber}-SC001`,
+              startMs: 0,
+              endMs: 4000,
+              dialogue: `Episode ${episodeNumber} reveals the danger around Qin Mu.`,
+              characters: ["Qin Mu"],
+              visualSummary: `Episode ${episodeNumber} reveals the danger.`,
+              importance: 0.82,
+              tags: ["conflict"],
+              sourceCueIds: ["1"],
+              keyframes: [],
+            },
+          ]),
+          "utf8",
+        );
+        const projectRaw = JSON.parse(await readFile(join("projects", "muc-than-ky", "review-projects", "ep01-02", "batch.json"), "utf8"));
+        projectRaw.episodes[episodeNumber - 1].sceneMapPath = `review-projects/ep01-02/sources/ep${String(episodeNumber).padStart(3, "0")}/scenes.json`;
+        projectRaw.episodes[episodeNumber - 1].status = "scene-ready";
+        await writeFile(join("projects", "muc-than-ky", "review-projects", "ep01-02", "batch.json"), JSON.stringify(projectRaw), "utf8");
+      }
+
+      const analysisResponse = await fetch(`${running.url}/api/series/muc-than-ky/review-projects/ep01-02/episodes/1/analysis`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: running.url },
+        body: "{}",
+      });
+      assert.equal(analysisResponse.status, 200);
+      assert.equal((await analysisResponse.json()).analysis.episodeNumber, 1);
+
+      await fetch(`${running.url}/api/series/muc-than-ky/review-projects/ep01-02/episodes/2/analysis`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: running.url },
+        body: "{}",
+      });
+      const storyResponse = await fetch(`${running.url}/api/series/muc-than-ky/review-projects/ep01-02/story-arc`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: running.url },
+        body: "{}",
+      });
+      assert.equal(storyResponse.status, 200);
+      const storyBody = await storyResponse.json();
+      assert.equal(storyBody.storyArc.storyArcPath, "review-projects/ep01-02/story-arc.json");
+    } finally {
+      await running.close();
+    }
+  } finally {
+    process.chdir(previousCwd);
+    await rm(root, { recursive: true, force: true });
+  }
+});

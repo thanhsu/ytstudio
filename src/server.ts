@@ -9,6 +9,7 @@ import { generateSourceSrtFromAsr } from "./asr.ts";
 import { createBrief } from "./brief.ts";
 import { loadStudioConfig, saveStudioConfig } from "./config.ts";
 import { saveCopyrightCheck } from "./copyright.ts";
+import { saveEpisodeAnalysis, type EpisodeAnalysis } from "./episode-analysis.ts";
 import { extractAudioForAsr, importMedia } from "./media-ingest.ts";
 import { loadProjectState } from "./project-state.ts";
 import { resolveProjectPath, validateProjectId } from "./project-paths.ts";
@@ -21,6 +22,7 @@ import {
 import { importReviewEpisodeMedia, importReviewEpisodeSubtitle } from "./review-source.ts";
 import { saveReviewEpisodeSceneMap } from "./scene-map.ts";
 import { generateDryRunScript } from "./script.ts";
+import { saveStoryArc } from "./story-arc.ts";
 import {
   createSeriesProject,
   generateEpisodePlan,
@@ -310,6 +312,53 @@ async function routeRequest(
       sendJson(response, 200, {
         ok: true,
         sceneMap,
+        reviewProject: await loadReviewProject(seriesId, reviewProjectId),
+      });
+      return;
+    }
+    const reviewEpisodeAnalysisMatch = /^review-projects\/([a-z0-9-]+)\/episodes\/(\d+)\/analysis$/.exec(rest);
+    if (method === "POST" && reviewEpisodeAnalysisMatch) {
+      const [, reviewProjectId, episodeNumberText] = reviewEpisodeAnalysisMatch;
+      const episodeNumber = numberBody(episodeNumberText, 0);
+      const reviewProject = await loadReviewProject(seriesId, reviewProjectId);
+      const episode = reviewProject.episodes.find((item) => item.episodeNumber === episodeNumber);
+      if (!episode?.sceneMapPath) {
+        sendError(response, 409, {
+          code: "scene-map-required",
+          message: `Episode ${episodeNumber} needs a scene map before analysis.`,
+        });
+        return;
+      }
+      const saved = await saveEpisodeAnalysis(seriesId, reviewProjectId, episodeNumber, episode.sceneMapPath, {
+        title: reviewProject.title,
+        spoilerMode: reviewProject.spoilerMode,
+      });
+      const analysis = JSON.parse(await readFile(join("projects", seriesId, saved.analysisPath), "utf8")) as EpisodeAnalysis;
+      sendJson(response, 200, {
+        ok: true,
+        analysis,
+        saved,
+        reviewProject: await loadReviewProject(seriesId, reviewProjectId),
+      });
+      return;
+    }
+    const reviewStoryArcMatch = /^review-projects\/([a-z0-9-]+)\/story-arc$/.exec(rest);
+    if (method === "POST" && reviewStoryArcMatch) {
+      const [, reviewProjectId] = reviewStoryArcMatch;
+      const reviewProject = await loadReviewProject(seriesId, reviewProjectId);
+      const missing = reviewProject.episodes.filter((episode) => !episode.analysisPath).map((episode) => episode.episodeNumber);
+      if (missing.length > 0) {
+        sendError(response, 409, {
+          code: "analysis-required",
+          message: `Episodes need analysis before story merge: ${missing.join(", ")}.`,
+          details: { missingEpisodes: missing },
+        });
+        return;
+      }
+      const storyArc = await saveStoryArc(seriesId, reviewProjectId);
+      sendJson(response, 200, {
+        ok: true,
+        storyArc,
         reviewProject: await loadReviewProject(seriesId, reviewProjectId),
       });
       return;
