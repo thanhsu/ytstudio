@@ -385,7 +385,7 @@ git commit -m "feat: add local and confirmed paid TTS providers"
 - Produces: `buildShortsRenderArgs(input: RenderInput): string[]`
 - Produces: `renderDraft(input: RenderInput, signal?: AbortSignal): Promise<RenderArtifact>`
 
-- [ ] **Step 1: Write asset validation tests**
+- [x] **Step 1: Write asset validation tests**
 
 ```typescript
 test("asset without rights confirmation blocks use", () => {
@@ -399,17 +399,17 @@ test("asset destination remains inside project assets", async () => {
 });
 ```
 
-- [ ] **Step 2: Run asset tests and verify RED**
+- [x] **Step 2: Run asset tests and verify RED**
 
 Run: `node --test tests/assets.test.ts`
 
 Expected: FAIL because asset services are missing.
 
-- [ ] **Step 3: Implement streaming asset ingestion and manifest validation**
+- [x] **Step 3: Implement streaming asset ingestion and manifest validation**
 
 Generate stored filenames from a UUID plus validated extension. Permit `.png`, `.jpg`, `.jpeg`, `.webp`, `.mp4`, `.mov`, and `.webm`; cap configured upload size; require non-empty usage purpose and rights confirmation before an asset becomes renderable.
 
-- [ ] **Step 4: Write render gate and command tests**
+- [x] **Step 4: Write render gate and command tests**
 
 ```typescript
 test("render is blocked by stale copyright approval", () => {
@@ -427,23 +427,23 @@ test("shorts render targets vertical H264 MP4", () => {
 });
 ```
 
-- [ ] **Step 5: Run render tests and verify RED**
+- [x] **Step 5: Run render tests and verify RED**
 
 Run: `node --test tests/render.test.ts`
 
 Expected: FAIL because render services are missing.
 
-- [ ] **Step 6: Implement render gates and FFmpeg argument construction**
+- [x] **Step 6: Implement render gates and FFmpeg argument construction**
 
 Create a generated gradient/color background, title and closing cards, voice input, SRT subtitles, and optional manifest assets. Use `-filter_complex` through an argument value, not shell quoting. Refuse unsupported long-form briefs in this MVP and record render metadata after success.
 
-- [ ] **Step 7: Run focused tests**
+- [x] **Step 7: Run focused tests**
 
 Run: `node --test tests/assets.test.ts tests/render.test.ts`
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit the task**
+- [x] **Step 8: Commit the task**
 
 ```bash
 git add src/assets.ts src/render.ts tests/assets.test.ts tests/render.test.ts
