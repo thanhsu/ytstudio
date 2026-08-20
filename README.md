@@ -61,4 +61,56 @@ Run tests:
 
 ```powershell
 npm test
+npm run typecheck
 ```
+
+## Local Studio
+
+Start the browser UI:
+
+```powershell
+npm run studio
+```
+
+Open `http://127.0.0.1:3000`.
+
+Or use the CLI server command with a custom port:
+
+```powershell
+npm run cli -- studio --port 4317
+```
+
+## Free Draft Workflow
+
+Prerequisites for local rendering:
+
+- `PIPER_PATH`: path to Piper executable.
+- `PIPER_MODEL_PATH`: path to a local Piper voice model.
+- `FFMPEG_PATH`: path to FFmpeg executable.
+- `FFPROBE_PATH`: path to FFprobe executable.
+
+Set them in your shell or `.env` loader. The app does not read real secrets from
+`.env.example`.
+
+```powershell
+npm run sample
+npm run cli -- generate-voice --project tales-herding-gods-qin-mu --provider piper
+npm run cli -- prepare-captions --project tales-herding-gods-qin-mu
+npm run cli -- render-draft --project tales-herding-gods-qin-mu
+```
+
+Optional paid OpenAI voice requires explicit confirmation:
+
+```powershell
+npm run cli -- generate-voice --project tales-herding-gods-qin-mu --provider openai --voice alloy --confirm-paid true
+```
+
+No Piper failure falls back to OpenAI automatically.
+
+## Safety Gates
+
+- Script approval is tied to the extracted narration hash.
+- Asset approval requires rights confirmation and a usage purpose.
+- Copyright approval refuses blocked checks.
+- Render requires current approvals, voice, and captions.
+- Generated files stay under ignored `projects/<id>/workspace/`.

@@ -8,7 +8,8 @@
     "cli": "node src/cli.ts",
     "sample": "node src/cli.ts sample",
     "studio": "node src/server.ts",
-    "test": "node --test tests/*.test.ts"
+    "test": "node --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit"
   },
   "engines": {
     "node": ">=22.6.0"
@@ -17,6 +18,8 @@
     "busboy": "^1.6.0"
   },
   "devDependencies": {
-    "@types/busboy": "^1.5.4"
+    "@types/busboy": "^1.5.4",
+    "@types/node": "^26.2.0",
+    "typescript": "^7.0.2"
   }
 }

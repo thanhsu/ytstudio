@@ -636,7 +636,7 @@ Run: `node --test tests/web.test.ts tests/server.test.ts && npm test`
 
 Expected: PASS.
 
-- [ ] **Step 7: Manually inspect the local UI**
+- [x] **Step 7: Manually inspect the local UI**
 
 Run: `npm run studio`
 
@@ -644,7 +644,7 @@ Open: `http://127.0.0.1:4317`
 
 Verify desktop and narrow layouts, stage statuses, script save/approval, disabled paid action without estimate confirmation, upload validation, SSE progress, and media previews.
 
-- [ ] **Step 8: Commit the task**
+- [x] **Step 8: Commit the task**
 
 ```bash
 git add src/web src/server.ts tests/web.test.ts
@@ -665,7 +665,7 @@ git commit -m "feat: add production pipeline web studio"
 - Consumes: narration, TTS, captions, render, and project-state services
 - Produces CLI commands: `studio`, `generate-voice`, `prepare-captions`, `render-draft`
 
-- [ ] **Step 1: Write CLI/service smoke test**
+- [x] **Step 1: Write CLI/service smoke test**
 
 ```typescript
 test("sample project completes the free draft pipeline", async () => {
@@ -682,13 +682,13 @@ test("sample project completes the free draft pipeline", async () => {
 });
 ```
 
-- [ ] **Step 2: Run smoke test and verify RED**
+- [x] **Step 2: Run smoke test and verify RED**
 
 Run: `node --test tests/smoke.test.ts`
 
 Expected: FAIL because shared workflow functions and CLI commands are not wired.
 
-- [ ] **Step 3: Refactor CLI to call shared services**
+- [x] **Step 3: Refactor CLI to call shared services**
 
 Add:
 
@@ -701,11 +701,11 @@ studio [--port 4317]
 
 Preserve existing commands. Print cache hits, artifact paths, render gate failures, and paid estimates clearly. Require `--confirm-paid true` for the OpenAI CLI path.
 
-- [ ] **Step 4: Update documentation**
+- [x] **Step 4: Update documentation**
 
 Document prerequisites, Piper model setup, FFmpeg setup, `.env` variables, `npm run studio`, free draft workflow, optional paid final voice, cache behavior, approval gates, asset rights requirements, and troubleshooting. Correct npm argument forwarding examples by placing `--` before command flags where required by the current environment.
 
-- [ ] **Step 5: Run smoke and complete validation**
+- [x] **Step 5: Run smoke and complete validation**
 
 Run: `npm test`
 
@@ -715,7 +715,7 @@ Run: `npm run sample`
 
 Expected: all tests and type checks pass; sample files are generated without network calls.
 
-- [ ] **Step 6: Verify a real local draft when dependencies are available**
+- [x] **Step 6: Verify a real local draft when dependencies are available**
 
 Run: `npm run cli -- generate-voice -- --project tales-herding-gods-qin-mu --provider piper`
 
@@ -725,7 +725,7 @@ Run: `npm run cli -- render-draft -- --project tales-herding-gods-qin-mu`
 
 Expected: current cached voice, SRT, and vertical MP4 appear under `projects/tales-herding-gods-qin-mu/workspace/`. If Piper or FFmpeg is unavailable, verify the command reports the exact missing prerequisite without invoking OpenAI.
 
-- [ ] **Step 7: Commit the task**
+- [x] **Step 7: Commit the task**
 
 ```bash
 git add src/cli.ts README.md package.json tests/smoke.test.ts
@@ -736,14 +736,14 @@ git commit -m "feat: complete local review studio workflow"
 
 ## Final Verification
 
-- [ ] Run `npm test` and confirm every test passes without network access.
-- [ ] Run `npx tsc --noEmit` and confirm zero TypeScript errors.
-- [ ] Run `npm run sample` and confirm the existing sample remains compatible.
-- [ ] Start `npm run studio` and confirm it binds only to `127.0.0.1`.
-- [ ] Confirm a Piper failure never produces an OpenAI request.
-- [ ] Confirm an OpenAI request cannot start without request-specific confirmation.
-- [ ] Confirm modifying `script.md` marks voice, captions, and render stale.
-- [ ] Confirm missing rights purpose or confirmation blocks selected assets.
-- [ ] Confirm blocked copyright risk prevents rendering.
-- [ ] Confirm project and generated paths cannot escape `projects/`.
-- [ ] Confirm generated output remains ignored by Git.
+- [x] Run `npm test` and confirm every test passes without network access.
+- [x] Run `npx tsc --noEmit` and confirm zero TypeScript errors.
+- [x] Run `npm run sample` and confirm the existing sample remains compatible.
+- [x] Start `npm run studio` and confirm it binds only to `127.0.0.1`.
+- [x] Confirm a Piper failure never produces an OpenAI request.
+- [x] Confirm an OpenAI request cannot start without request-specific confirmation.
+- [x] Confirm modifying `script.md` marks voice, captions, and render stale.
+- [x] Confirm missing rights purpose or confirmation blocks selected assets.
+- [x] Confirm blocked copyright risk prevents rendering.
+- [x] Confirm project and generated paths cannot escape `projects/`.
+- [x] Confirm generated output remains ignored by Git.

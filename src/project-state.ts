@@ -4,6 +4,8 @@ import { dirname } from "node:path";
 import { resolveProjectPath } from "./project-paths.ts";
 import type { ArtifactRecord, ApprovalStage, ProjectState, StageApproval } from "./types.ts";
 
+export type { ArtifactRecord, ApprovalStage, ProjectState, StageApproval } from "./types.ts";
+
 export type SourceHashes = {
   script?: string;
   assets?: string;

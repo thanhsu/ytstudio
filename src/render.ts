@@ -27,6 +27,7 @@ export type RenderInput = {
   outputPath: string;
   assetPaths: string[];
   ffmpegPath?: string;
+  ffmpegPrefixArgs?: string[];
 };
 
 export type RenderArtifact = ArtifactRecord & {
@@ -88,7 +89,10 @@ export function buildShortsRenderArgs(input: RenderInput): string[] {
 
 export async function renderDraft(input: RenderInput, signal?: AbortSignal): Promise<RenderArtifact> {
   await mkdir(dirname(input.outputPath), { recursive: true });
-  await runProcess(input.ffmpegPath ?? process.env.FFMPEG_PATH ?? "ffmpeg", buildShortsRenderArgs(input), { signal });
+  await runProcess(input.ffmpegPath ?? process.env.FFMPEG_PATH ?? "ffmpeg", [
+    ...(input.ffmpegPrefixArgs ?? []),
+    ...buildShortsRenderArgs(input),
+  ], { signal });
 
   const sourceHash = sha256(
     JSON.stringify({
