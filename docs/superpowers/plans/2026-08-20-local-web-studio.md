@@ -149,7 +149,7 @@ git commit -m "feat: add project state and approval tracking"
 - Produces: `toSrt(cues: CaptionCue[]): string`
 - Produces: `saveCaptions(projectId: string, narration: NarrationDocument, durationSeconds: number): Promise<CaptionArtifact>`
 
-- [ ] **Step 1: Write narration extraction tests**
+- [x] **Step 1: Write narration extraction tests**
 
 ```typescript
 test("extracts only spoken review sections", () => {
@@ -171,17 +171,17 @@ Qin Mu breaks the usual cultivation pattern.
 });
 ```
 
-- [ ] **Step 2: Run narration test and verify RED**
+- [x] **Step 2: Run narration test and verify RED**
 
 Run: `node --test tests/narration.test.ts`
 
 Expected: FAIL because `extractNarration` is missing.
 
-- [ ] **Step 3: Implement deterministic narration extraction**
+- [x] **Step 3: Implement deterministic narration extraction**
 
 Skip the title, `Format`, `Target audience`, `Language`, and `Runtime target` lines. Preserve paragraph boundaries below spoken section headings, remove ordered-list markers, normalize whitespace, and hash the final text.
 
-- [ ] **Step 4: Write caption allocation tests**
+- [x] **Step 4: Write caption allocation tests**
 
 ```typescript
 test("caption cues cover the audio without overlap", () => {
@@ -197,23 +197,23 @@ test("writes valid SRT timestamps", () => {
 });
 ```
 
-- [ ] **Step 5: Run caption tests and verify RED**
+- [x] **Step 5: Run caption tests and verify RED**
 
 Run: `node --test tests/captions.test.ts`
 
 Expected: FAIL because caption functions are missing.
 
-- [ ] **Step 6: Implement phrase segmentation and proportional timing**
+- [x] **Step 6: Implement phrase segmentation and proportional timing**
 
 Split first on sentence boundaries, then split long sentences into phrases of at most 9 words. Allocate the measured duration by cue word count, enforce a 0.8-second minimum while preserving total duration, round to milliseconds, and force the final cue to end exactly at audio duration.
 
-- [ ] **Step 7: Run narration and caption tests**
+- [x] **Step 7: Run narration and caption tests**
 
 Run: `node --test tests/narration.test.ts tests/captions.test.ts`
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit the task**
+- [x] **Step 8: Commit the task**
 
 ```bash
 git add src/narration.ts src/captions.ts tests/narration.test.ts tests/captions.test.ts
