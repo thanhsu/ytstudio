@@ -12,6 +12,12 @@ import { saveCopyrightCheck } from "./copyright.ts";
 import { extractAudioForAsr, importMedia } from "./media-ingest.ts";
 import { loadProjectState } from "./project-state.ts";
 import { resolveProjectPath, validateProjectId } from "./project-paths.ts";
+import {
+  createReviewProject,
+  listReviewProjects,
+  loadReviewProject,
+  updateReviewProject,
+} from "./review-project.ts";
 import { generateDryRunScript } from "./script.ts";
 import {
   createSeriesProject,
@@ -206,6 +212,46 @@ async function routeRequest(
         startEpisode: numberBody(body.startEpisode, 1),
       });
       sendJson(response, 200, { ok: true, series });
+      return;
+    }
+    if (method === "GET" && rest === "review-projects") {
+      sendJson(response, 200, { reviewProjects: await listReviewProjects(seriesId) });
+      return;
+    }
+    if (method === "POST" && rest === "review-projects") {
+      const body = await readJsonBody(request);
+      const reviewProject = await createReviewProject({
+        seriesId,
+        id: requiredString(body.id, "id"),
+        title: requiredString(body.title, "title"),
+        sourceRange: requiredString(body.sourceRange, "sourceRange"),
+        episodeNumbers: numberArrayBody(body.episodeNumbers),
+        targetLanguage: "English",
+        reviewStyle: "story-review",
+        targetDurationMinutes: numberBody(body.targetDurationMinutes, 20),
+        spoilerMode: body.spoilerMode === "novel-spoilers" ? "novel-spoilers" : "donghua-only",
+      });
+      sendJson(response, 200, { ok: true, reviewProject });
+      return;
+    }
+    const reviewProjectMatch = /^review-projects\/([a-z0-9-]+)$/.exec(rest);
+    if (method === "GET" && reviewProjectMatch) {
+      sendJson(response, 200, { reviewProject: await loadReviewProject(seriesId, reviewProjectMatch[1]) });
+      return;
+    }
+    if (method === "PATCH" && reviewProjectMatch) {
+      const body = await readJsonBody(request);
+      const reviewProject = await updateReviewProject(seriesId, reviewProjectMatch[1], {
+        title: optionalString(body.title),
+        sourceRange: optionalString(body.sourceRange),
+        episodeNumbers: Array.isArray(body.episodeNumbers) ? numberArrayBody(body.episodeNumbers) : undefined,
+        targetDurationMinutes:
+          body.targetDurationMinutes === undefined ? undefined : numberBody(body.targetDurationMinutes, 20),
+        spoilerMode: body.spoilerMode === "novel-spoilers" || body.spoilerMode === "donghua-only" ? body.spoilerMode : undefined,
+        status: reviewProjectStatusBody(body.status),
+        outputs: recordStringBody(body.outputs),
+      });
+      sendJson(response, 200, { ok: true, reviewProject });
       return;
     }
     const episodeMatch = /^episodes\/([a-z0-9-]+)$/.exec(rest);
@@ -580,6 +626,22 @@ function stringArrayBody(value: unknown): string[] | undefined {
   return value.map(String);
 }
 
+function numberArrayBody(value: unknown): number[] {
+  if (!Array.isArray(value)) {
+    throw new Error("episodeNumbers must be an array.");
+  }
+  return value.map(Number);
+}
+
+function recordStringBody(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([, item]) => typeof item === "string")
+      .map(([key, item]) => [key, String(item)]),
+  );
+}
+
 function episodeStatusBody(value: unknown): EpisodeStatus | undefined {
   if (
     value === "idea" ||
@@ -589,6 +651,21 @@ function episodeStatusBody(value: unknown): EpisodeStatus | undefined {
     value === "render" ||
     value === "ready" ||
     value === "published"
+  ) {
+    return value;
+  }
+  return undefined;
+}
+
+function reviewProjectStatusBody(value: unknown) {
+  if (
+    value === "draft" ||
+    value === "sources" ||
+    value === "analyzed" ||
+    value === "story" ||
+    value === "script" ||
+    value === "editing-plan" ||
+    value === "exported"
   ) {
     return value;
   }
