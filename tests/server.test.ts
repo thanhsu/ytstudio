@@ -755,3 +755,19 @@ test("the project snapshot carries no metadata before a script exists", async ()
     }
   });
 });
+
+test("a typo in the script provider fails the request instead of generating template output", async () => {
+  await withTempCwd(async () => {
+    await writeFile("studio.config.json", JSON.stringify({ script: { provider: "openai_compatible" } }), "utf8");
+    const running = await startStudioServer(createStudioServer(), { port: 0 });
+    try {
+      const response = await postJson(running, "script");
+
+      assert.equal(response.status, 500);
+      assert.match((await response.json()).message, /openai_compatible/);
+      await assert.rejects(() => readFile(join("projects", "sample-project", "script.md"), "utf8"), /ENOENT/);
+    } finally {
+      await running.close();
+    }
+  });
+});

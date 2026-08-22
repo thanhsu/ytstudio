@@ -127,7 +127,7 @@ export function normalizeStudioConfig(value: unknown): StudioConfig {
   const candidate = value && typeof value === "object" ? (value as Partial<StudioConfig>) : {};
   return {
     script: {
-      provider: enumValue(candidate.script?.provider, ["dry-run", "openai-compatible"], "dry-run"),
+      provider: scriptProvider(candidate.script?.provider),
       model: stringValue(candidate.script?.model, DEFAULT_STUDIO_CONFIG.script.model),
       baseUrl: stringValue(candidate.script?.baseUrl, DEFAULT_STUDIO_CONFIG.script.baseUrl),
       apiKeyEnv: stringValue(candidate.script?.apiKeyEnv, DEFAULT_STUDIO_CONFIG.script.apiKeyEnv),
@@ -208,6 +208,26 @@ function booleanValue(value: unknown, fallback: boolean): boolean {
 function rangeValue(value: unknown, fallback: number, min: number, max: number): number {
   const number = Number(value);
   return Number.isFinite(number) && number >= min && number <= max ? number : fallback;
+}
+
+const SCRIPT_PROVIDERS = ["dry-run", "openai-compatible"] as const;
+
+/**
+ * The one setting that decides whether a real model runs, so it is strict rather
+ * than lenient: a typo such as "openai_compatible" pasted from the README would
+ * otherwise normalize to "dry-run" and the studio would report success over
+ * template output. Absent or empty still defaults, so existing configs load.
+ */
+function scriptProvider(value: unknown): StudioConfig["script"]["provider"] {
+  if (value === undefined || value === null || value === "") {
+    return "dry-run";
+  }
+  if (typeof value === "string" && (SCRIPT_PROVIDERS as readonly string[]).includes(value)) {
+    return value as StudioConfig["script"]["provider"];
+  }
+  throw new Error(
+    `Unknown script.provider ${JSON.stringify(value)} in studio config. Valid values are ${SCRIPT_PROVIDERS.join(", ")}.`,
+  );
 }
 
 function enumValue<const T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {

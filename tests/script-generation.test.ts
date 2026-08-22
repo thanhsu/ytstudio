@@ -3,7 +3,8 @@ import test from "node:test";
 import { mkdtemp, readFile, rm, stat, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { generateScript } from "../src/script.ts";
+import { createConfiguredProvider, generateScript } from "../src/script.ts";
+import { normalizeStudioConfig } from "../src/config.ts";
 import type { LlmProvider } from "../src/llm/types.ts";
 
 async function withProject<T>(fn: () => Promise<T>): Promise<T> {
@@ -101,4 +102,14 @@ test("the metadata records which provider and model produced the script", async 
     const persisted = JSON.parse(await readFile(join("projects", "sample-project", "metadata.json"), "utf8"));
     assert.deepEqual(persisted.generator, { provider: "stub", model: "stub-model" });
   });
+});
+
+test("configuration selects the HTTP adapter or the template, and never silently falls through", () => {
+  const openAiCompatible = createConfiguredProvider(
+    normalizeStudioConfig({ script: { provider: "openai-compatible", model: "qwen2.5:14b" } }),
+  );
+  const dryRun = createConfiguredProvider(normalizeStudioConfig({ script: { provider: "dry-run" } }));
+
+  assert.equal(openAiCompatible.name, "openai-compatible");
+  assert.equal(dryRun.name, "dry-run");
 });

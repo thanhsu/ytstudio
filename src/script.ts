@@ -47,7 +47,12 @@ export async function generateDryRunScript(projectId: string): Promise<ScriptGen
   return generateScript(projectId, { provider: createDryRunProvider() });
 }
 
-function createConfiguredProvider(config: StudioConfig): LlmProvider {
+/**
+ * The single place where configuration decides whether a real model runs. It is
+ * exported so a test can pin the branch: silently falling through to the template
+ * is this feature's cardinal failure mode.
+ */
+export function createConfiguredProvider(config: StudioConfig): LlmProvider {
   if (config.script.provider === "openai-compatible") {
     return createOpenAiCompatibleProvider({
       baseUrl: config.script.baseUrl,

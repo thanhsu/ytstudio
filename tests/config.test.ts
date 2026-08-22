@@ -104,3 +104,35 @@ test("a zero temperature is preserved rather than replaced by the default", asyn
     assert.equal(saved.script.temperature, 0);
   });
 });
+
+test("an unrecognized script provider is rejected by name instead of reverting to the template", async () => {
+  await withTempCwd(async () => {
+    await writeFile("studio.config.json", JSON.stringify({ script: { provider: "openai_compatible" } }), "utf8");
+
+    await assert.rejects(() => loadStudioConfig(), (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /openai_compatible/);
+      assert.match(error.message, /dry-run/);
+      assert.match(error.message, /openai-compatible/);
+      return true;
+    });
+  });
+});
+
+test("an absent or empty script provider still defaults to the template", async () => {
+  await withTempCwd(async () => {
+    await writeFile("studio.config.json", JSON.stringify({ script: { model: "template-v2" } }), "utf8");
+    assert.equal((await loadStudioConfig()).script.provider, "dry-run");
+
+    await writeFile("studio.config.json", JSON.stringify({ script: { provider: "" } }), "utf8");
+    assert.equal((await loadStudioConfig()).script.provider, "dry-run");
+  });
+});
+
+test("a lenient enum elsewhere is unchanged by the strict script provider", async () => {
+  await withTempCwd(async () => {
+    await writeFile("studio.config.json", JSON.stringify({ translation: { provider: "unsafe-provider" } }), "utf8");
+
+    assert.equal((await loadStudioConfig()).translation.provider, "prompt-only");
+  });
+});
