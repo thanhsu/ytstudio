@@ -134,3 +134,24 @@ test("draft render output is versioned to avoid overwriting an open preview", ()
     resolveProjectPath("sample-project", "workspace", "renders", "draft-20260821-024000-123.mp4"),
   );
 });
+
+test("background video input index follows any mapped scene inputs", () => {
+  const args = buildShortsRenderArgs({
+    ...sampleRenderInput(),
+    visualSegments: [{
+      sceneId: "scene-001", startSeconds: 0, endSeconds: 4, assetPath: "projects/sample-project/assets/images/card.png",
+      mediaType: "image", fitMode: "cover", sourceStartSeconds: 0, sourceDurationSeconds: 4, muteSourceAudio: true,
+    }],
+    backgroundVideoPath: "projects/sample-project/workspace/renders/timeline.mp4",
+  });
+  const filter = args[args.indexOf("-filter_complex") + 1];
+
+  assert.match(filter, /\[3:v\]trim=duration=8/);
+});
+
+test("long-form briefs are renderable", () => {
+  const result = evaluateRenderGate({ ...readyRenderInput(), briefFormat: "longform" });
+
+  assert.equal(result.allowed, true);
+  assert.deepEqual(result.reasons, []);
+});

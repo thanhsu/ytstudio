@@ -12,7 +12,7 @@ import { loadVisualMapping } from "./visual-mapping.ts";
 import { createPiperProvider } from "./tts/piper.ts";
 import { createOpenAiProvider } from "./tts/openai.ts";
 import { createVietnameseLocalProvider } from "./tts/vietnamese-local.ts";
-import type { ArtifactRecord, CopyrightCheckResult, VideoBrief } from "./types.ts";
+import type { ArtifactRecord, CopyrightCheckResult, VideoBrief, VideoFormat } from "./types.ts";
 import type { TtsArtifact, TtsRequest } from "./tts/types.ts";
 
 export type GenerateVoiceOptions = {
@@ -197,9 +197,17 @@ export async function renderDraftProject(projectId: string, options: RenderDraft
     visualSegments,
     ffmpegPath: options.ffmpegPath ?? (config.render.ffmpegPath || undefined),
     ffmpegPrefixArgs: options.ffmpegPrefixArgs,
-    width: config.render.shortsWidth,
-    height: config.render.shortsHeight,
+    ...renderDimensions(brief.format, config),
   });
+}
+
+function renderDimensions(
+  format: VideoFormat,
+  config: Awaited<ReturnType<typeof loadStudioConfig>>,
+): { width: number; height: number } {
+  return format === "longform"
+    ? { width: config.render.longformWidth, height: config.render.longformHeight }
+    : { width: config.render.shortsWidth, height: config.render.shortsHeight };
 }
 
 export function draftRenderOutputPath(projectId: string, now = new Date()): string {

@@ -41,6 +41,8 @@ export type StudioConfig = {
     ffprobePath: string;
     shortsWidth: number;
     shortsHeight: number;
+    longformWidth: number;
+    longformHeight: number;
   };
 };
 
@@ -87,6 +89,8 @@ export const DEFAULT_STUDIO_CONFIG: StudioConfig = {
     ffprobePath: "",
     shortsWidth: 1080,
     shortsHeight: 1920,
+    longformWidth: 1920,
+    longformHeight: 1080,
   },
 };
 
@@ -156,6 +160,8 @@ export function normalizeStudioConfig(value: unknown): StudioConfig {
       ffprobePath: stringValue(candidate.render?.ffprobePath, ""),
       shortsWidth: numberValue(candidate.render?.shortsWidth, 1080),
       shortsHeight: numberValue(candidate.render?.shortsHeight, 1920),
+      longformWidth: numberValue(candidate.render?.longformWidth, 1920),
+      longformHeight: numberValue(candidate.render?.longformHeight, 1080),
     },
   };
 }

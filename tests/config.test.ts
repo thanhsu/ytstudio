@@ -74,3 +74,12 @@ test("normalizes saved config and rejects invalid enum values", async () => {
     assert.equal(reloaded.render.shortsWidth, 1080);
   });
 });
+
+test("studio config carries long-form output dimensions", async () => {
+  await withTempCwd(async () => {
+    const config = await loadStudioConfig();
+
+    assert.equal(config.render.longformWidth, 1920);
+    assert.equal(config.render.longformHeight, 1080);
+  });
+});

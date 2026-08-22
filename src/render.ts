@@ -57,7 +57,6 @@ export type RenderArtifact = ArtifactRecord & {
 export function evaluateRenderGate(input: RenderGateInput): RenderGateResult {
   const reasons: string[] = [];
 
-  if (input.briefFormat !== "shorts") reasons.push("longform-not-supported");
   if (!input.scriptApprovalCurrent) reasons.push("script-approval-stale");
   if (!input.assetsApprovalCurrent) reasons.push("assets-approval-stale");
   if (!input.copyrightApprovalCurrent) reasons.push("copyright-approval-stale");
@@ -88,6 +87,9 @@ export function buildShortsRenderArgs(input: RenderInput): string[] {
   ];
   const filters: string[] = [];
   const visualLabels: string[] = [];
+  // FFmpeg input 0 is the silent base and input 1 is the voice track, so mapped
+  // scenes claim indexes from 2 upward and anything appended later must follow.
+  let nextInputIndex = 2;
   for (const [index, segment] of (input.visualSegments ?? []).entries()) {
     const sceneDuration = Math.max(0, segment.endSeconds - segment.startSeconds);
     if (!segment.assetPath || !segment.mediaType) {
@@ -95,7 +97,7 @@ export function buildShortsRenderArgs(input: RenderInput): string[] {
       visualLabels.push(`[scene${index}]`);
       continue;
     }
-    const inputIndex = index + 2;
+    const inputIndex = nextInputIndex++;
     if (segment.mediaType === "image") {
       args.push("-loop", "1", "-t", String(sceneDuration), "-i", segment.assetPath);
       filters.push(`${visualFilter(inputIndex, width, height, segment.fitMode)},trim=duration=${sceneDuration},setpts=PTS-STARTPTS[scene${index}]`);
@@ -115,8 +117,9 @@ export function buildShortsRenderArgs(input: RenderInput): string[] {
     visualLabels.push(`[scene${index}]`);
   }
   if (input.backgroundVideoPath) {
+    const backgroundIndex = nextInputIndex++;
     args.push("-i", input.backgroundVideoPath);
-    filters.push(`[2:v]trim=duration=${input.durationSeconds},setpts=PTS-STARTPTS[bg]`);
+    filters.push(`[${backgroundIndex}:v]trim=duration=${input.durationSeconds},setpts=PTS-STARTPTS[bg]`);
   } else if (visualLabels.length > 0) {
     filters.push(`${visualLabels.join("")}concat=n=${visualLabels.length}:v=1:a=0[bg]`);
   } else {
