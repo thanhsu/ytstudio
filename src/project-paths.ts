@@ -1,5 +1,5 @@
 import { sep, resolve } from "node:path";
-import { PROJECTS_DIR } from "./fs.ts";
+import { projectsRoot } from "./fs.ts";
 
 const PROJECT_ID_PATTERN = /^[a-z0-9][a-z0-9-]{2,80}$/;
 
@@ -13,7 +13,7 @@ export function validateProjectId(projectId: string): string {
 
 export function resolveProjectPath(projectId: string, ...segments: string[]): string {
   const safeProjectId = validateProjectId(projectId);
-  const projectRoot = resolve(PROJECTS_DIR, safeProjectId);
+  const projectRoot = resolve(projectsRoot(), safeProjectId);
   const resolvedPath = resolve(projectRoot, ...segments);
 
   if (resolvedPath !== projectRoot && !resolvedPath.startsWith(`${projectRoot}${sep}`)) {

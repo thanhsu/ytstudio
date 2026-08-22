@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { resolveProjectPath } from "../src/project-paths.ts";
 import {
@@ -81,4 +81,20 @@ test("project state persists approvals and artifacts", async () => {
     process.chdir(previousCwd);
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("projects root is relocatable and always resolves absolute", () => {
+  const previous = process.env.YT_STUDIO_PROJECTS_DIR;
+  const relocated = join(tmpdir(), "yt-studio-relocated");
+  process.env.YT_STUDIO_PROJECTS_DIR = relocated;
+  try {
+    assert.equal(resolveProjectPath("sample-project", "brief.json"), join(relocated, "sample-project", "brief.json"));
+  } finally {
+    if (previous === undefined) delete process.env.YT_STUDIO_PROJECTS_DIR;
+    else process.env.YT_STUDIO_PROJECTS_DIR = previous;
+  }
+});
+
+test("default projects root resolves against the working directory", () => {
+  assert.equal(resolveProjectPath("sample-project"), resolve(process.cwd(), "projects", "sample-project"));
 });

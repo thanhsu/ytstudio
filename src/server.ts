@@ -29,6 +29,7 @@ import { saveEditingPlan } from "./editing-plan.ts";
 import { saveEpisodeAnalysis, type EpisodeAnalysis } from "./episode-analysis.ts";
 import { exportReviewPackage } from "./export-package.ts";
 import { extractAudioForAsr, importMedia } from "./media-ingest.ts";
+import { projectsRoot } from "./fs.ts";
 import { loadProjectState } from "./project-state.ts";
 import { resolveProjectPath, validateProjectId } from "./project-paths.ts";
 import {
@@ -75,7 +76,6 @@ import {
 } from "./visual-mapping.ts";
 
 export type StudioServerOptions = {
-  projectsRoot?: string;
   staticRoot?: string;
 };
 
@@ -94,12 +94,11 @@ type ApiError = {
 };
 
 export function createStudioServer(options: StudioServerOptions = {}): http.Server {
-  const projectsRoot = options.projectsRoot ?? "projects";
   const staticRoot = options.staticRoot ?? process.cwd();
 
   return http.createServer(async (request, response) => {
     try {
-      await routeRequest(request, response, projectsRoot, staticRoot);
+      await routeRequest(request, response, staticRoot);
     } catch (error: unknown) {
       sendError(response, 500, {
         code: "internal-error",
@@ -140,7 +139,6 @@ export async function startStudioServer(
 async function routeRequest(
   request: IncomingMessage,
   response: ServerResponse,
-  projectsRoot: string,
   staticRoot: string,
 ): Promise<void> {
   const url = new URL(request.url ?? "/", "http://127.0.0.1");
@@ -157,7 +155,7 @@ async function routeRequest(
   }
 
   if (method === "GET" && url.pathname === "/api/projects") {
-    await sendProjects(response, projectsRoot);
+    await sendProjects(response);
     return;
   }
 
@@ -601,7 +599,7 @@ async function routeRequest(
   const rest = projectMatch[2] ?? "";
 
   if (method === "GET" && rest === "") {
-    await sendProject(response, projectsRoot, projectId);
+    await sendProject(response, projectId);
     return;
   }
 
@@ -883,10 +881,11 @@ async function routeRequest(
   sendError(response, 404, { code: "not-found", message: "Route not found." });
 }
 
-async function sendProjects(response: ServerResponse, projectsRoot: string): Promise<void> {
+async function sendProjects(response: ServerResponse): Promise<void> {
+  const root = projectsRoot();
   let ids: string[] = [];
   try {
-    const candidates = (await readdir(projectsRoot, { withFileTypes: true }))
+    const candidates = (await readdir(root, { withFileTypes: true }))
       .filter((entry) => entry.isDirectory())
       .map((entry) => entry.name)
       .filter((name) => {
@@ -899,7 +898,7 @@ async function sendProjects(response: ServerResponse, projectsRoot: string): Pro
       });
     for (const id of candidates) {
       try {
-        await readFile(join(projectsRoot, id, "brief.json"), "utf8");
+        await readFile(join(root, id, "brief.json"), "utf8");
         ids.push(id);
       } catch {
         // Series roots and incomplete folders are managed by other endpoints.
@@ -911,8 +910,8 @@ async function sendProjects(response: ServerResponse, projectsRoot: string): Pro
   sendJson(response, 200, { projects: ids });
 }
 
-async function sendProject(response: ServerResponse, projectsRoot: string, projectId: string): Promise<void> {
-  const briefPath = join(projectsRoot, projectId, "brief.json");
+async function sendProject(response: ServerResponse, projectId: string): Promise<void> {
+  const briefPath = resolveProjectPath(projectId, "brief.json");
   const brief = JSON.parse(await readFile(briefPath, "utf8")) as unknown;
   const state = await loadProjectState(projectId);
   const assetManifest = await loadAssetManifest(projectId);

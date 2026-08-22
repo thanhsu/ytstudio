@@ -1,9 +1,20 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
 
-export const PROJECTS_DIR = "projects";
+const DEFAULT_PROJECTS_DIR = "projects";
+
+/**
+ * Absolute root for all project folders. Resolved per call so the working
+ * directory stays authoritative by default, while YT_STUDIO_PROJECTS_DIR can
+ * point the studio at a library that lives outside the checkout.
+ */
+export function projectsRoot(): string {
+  const configured = process.env.YT_STUDIO_PROJECTS_DIR;
+  return configured ? resolve(configured) : resolve(process.cwd(), DEFAULT_PROJECTS_DIR);
+}
 
 export function projectDir(projectId: string): string {
-  return `${PROJECTS_DIR}/${projectId}`;
+  return join(projectsRoot(), projectId);
 }
 
 export async function ensureProjectDir(projectId: string): Promise<string> {

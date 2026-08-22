@@ -1,6 +1,6 @@
 import { mkdir, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { ensureProjectDir, PROJECTS_DIR, writeJson } from "./fs.ts";
+import { ensureProjectDir, projectsRoot, writeJson } from "./fs.ts";
 import { validateProjectId } from "./project-paths.ts";
 
 export type ReviewProjectStatus =
@@ -254,7 +254,7 @@ function buildEpisodeSource(episodeNumber: number): EpisodeSource {
 }
 
 function reviewProjectsDir(seriesId: string): string {
-  return join(PROJECTS_DIR, validateProjectId(seriesId), "review-projects");
+  return join(projectsRoot(), validateProjectId(seriesId), "review-projects");
 }
 
 function reviewProjectPath(seriesId: string, reviewProjectId: string): string {

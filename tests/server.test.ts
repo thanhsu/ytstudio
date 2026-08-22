@@ -455,3 +455,34 @@ test("mutating requests without an Origin header are refused", async () => {
     }
   });
 });
+
+test("project listing follows the configured projects root", async () => {
+  const previousCwd = process.cwd();
+  const previousRoot = process.env.YT_STUDIO_PROJECTS_DIR;
+  const workingDirectory = await mkdtemp(join(tmpdir(), "yt-server-cwd-"));
+  const library = await mkdtemp(join(tmpdir(), "yt-server-library-"));
+  try {
+    process.chdir(workingDirectory);
+    process.env.YT_STUDIO_PROJECTS_DIR = library;
+    await mkdir(join(library, "relocated-project"), { recursive: true });
+    await writeFile(
+      join(library, "relocated-project", "brief.json"),
+      JSON.stringify({ id: "relocated-project", topic: "Relocated", format: "shorts" }),
+      "utf8",
+    );
+
+    const running = await startStudioServer(createStudioServer(), { port: 0 });
+    try {
+      const response = await fetch(`${running.url}/api/projects`);
+      assert.deepEqual((await response.json()).projects, ["relocated-project"]);
+    } finally {
+      await running.close();
+    }
+  } finally {
+    process.chdir(previousCwd);
+    if (previousRoot === undefined) delete process.env.YT_STUDIO_PROJECTS_DIR;
+    else process.env.YT_STUDIO_PROJECTS_DIR = previousRoot;
+    await rm(workingDirectory, { recursive: true, force: true });
+    await rm(library, { recursive: true, force: true });
+  }
+});

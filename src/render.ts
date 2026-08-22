@@ -1,6 +1,7 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { runProcess } from "./process.ts";
+import { resolveProjectPath } from "./project-paths.ts";
 import { setArtifact, sha256 } from "./project-state.ts";
 import type { ArtifactRecord, VideoFormat } from "./types.ts";
 
@@ -242,6 +243,15 @@ function visualFilter(inputIndex: number, width: number, height: number, fitMode
 }
 
 export function renderArtifactRelativePath(projectId: string, outputPath: string): string {
+  // The configured projects root is authoritative, so derive the relative path
+  // from it first. The string markers below stay as a fallback for paths written
+  // by another checkout, whose root this process cannot resolve.
+  const projectRoot = resolveProjectPath(projectId);
+  const inside = relative(projectRoot, resolve(outputPath));
+  if (inside && !inside.startsWith("..") && !isAbsolute(inside)) {
+    return inside.replace(/\\/g, "/");
+  }
+
   const normalized = outputPath.replace(/\\/g, "/");
   const projectPrefix = `projects/${projectId}/`;
   if (normalized.startsWith(projectPrefix)) {

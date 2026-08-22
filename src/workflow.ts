@@ -177,7 +177,7 @@ export async function renderDraftProject(projectId: string, options: RenderDraft
       sceneId: segment.id,
       startSeconds: segment.startSeconds,
       endSeconds: segment.endSeconds,
-      assetPath: asset ? join("projects", projectId, asset.relativePath) : undefined,
+      assetPath: asset ? resolveProjectPath(projectId, asset.relativePath) : undefined,
       mediaType: asset?.mediaType,
       fitMode: segment.fitMode,
       sourceStartSeconds: segment.sourceStartSeconds,
@@ -190,8 +190,8 @@ export async function renderDraftProject(projectId: string, options: RenderDraft
     projectId,
     title: brief.topic,
     durationSeconds: Number(voice.metadata.durationSeconds ?? 75),
-    voicePath: join("projects", projectId, voice.relativePath),
-    captionsPath: join("projects", projectId, captions.relativePath),
+    voicePath: resolveProjectPath(projectId, voice.relativePath),
+    captionsPath: resolveProjectPath(projectId, captions.relativePath),
     outputPath,
     assetPaths: visualSegments?.flatMap((segment) => segment.assetPath ? [segment.assetPath] : []) ?? [],
     visualSegments,
@@ -205,7 +205,7 @@ export async function renderDraftProject(projectId: string, options: RenderDraft
 export function draftRenderOutputPath(projectId: string, now = new Date()): string {
   const timestamp = now.toISOString().replace(/[-:TZ.]/g, "").slice(0, 17);
   const version = `${timestamp.slice(0, 8)}-${timestamp.slice(8, 14)}-${timestamp.slice(14)}`;
-  return join("projects", projectId, "workspace", "renders", `draft-${version}.mp4`);
+  return resolveProjectPath(projectId, "workspace", "renders", `draft-${version}.mp4`);
 }
 
 async function readProjectNarration(projectId: string) {

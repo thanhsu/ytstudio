@@ -1,7 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createBrief } from "./brief.ts";
-import { ensureProjectDir, PROJECTS_DIR, writeJson } from "./fs.ts";
+import { ensureProjectDir, projectsRoot, writeJson } from "./fs.ts";
 import { validateProjectId } from "./project-paths.ts";
 import { normalizeWorkflowType } from "./workflow-templates.ts";
 import type { WorkflowType } from "./types.ts";
@@ -116,7 +116,7 @@ export async function loadSeriesProject(seriesId: string): Promise<SeriesProject
 export async function listSeriesProjects(): Promise<string[]> {
   let entries: string[] = [];
   try {
-    entries = (await readdir(PROJECTS_DIR, { withFileTypes: true }))
+    entries = (await readdir(projectsRoot(), { withFileTypes: true }))
       .filter((entry) => entry.isDirectory())
       .map((entry) => entry.name);
   } catch {
@@ -316,7 +316,7 @@ function isEpisodeStatus(value: unknown): value is EpisodeStatus {
 }
 
 function seriesPath(seriesId: string): string {
-  return join(PROJECTS_DIR, validateProjectId(seriesId), SERIES_FILE);
+  return join(projectsRoot(), validateProjectId(seriesId), SERIES_FILE);
 }
 
 function required(value: string, field: string): string {

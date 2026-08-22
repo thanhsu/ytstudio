@@ -7,6 +7,7 @@ import {
   type RenderGateInput,
   type RenderInput,
 } from "../src/render.ts";
+import { resolveProjectPath } from "../src/project-paths.ts";
 import { draftRenderOutputPath } from "../src/workflow.ts";
 
 function readyRenderInput(): RenderGateInput {
@@ -130,6 +131,6 @@ test("render artifact path is project-relative with URL-safe separators", () => 
 test("draft render output is versioned to avoid overwriting an open preview", () => {
   assert.equal(
     draftRenderOutputPath("sample-project", new Date("2026-08-21T02:40:00.123Z")),
-    "projects\\sample-project\\workspace\\renders\\draft-20260821-024000-123.mp4",
+    resolveProjectPath("sample-project", "workspace", "renders", "draft-20260821-024000-123.mp4"),
   );
 });
