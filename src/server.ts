@@ -679,7 +679,9 @@ async function routeRequest(
   if (method === "POST" && rest === "script") {
     const body = await readJsonBody(request);
     const config = await loadStudioConfig();
-    if (config.script.paid && body.confirmedPaidRequest !== true) {
+    // The offline template spends nothing, so a leftover `paid: true` beside
+    // `provider: "dry-run"` must not raise a spend dialog for a local string.
+    if (config.script.provider === "openai-compatible" && config.script.paid && body.confirmedPaidRequest !== true) {
       sendError(response, 409, {
         code: "paid-confirmation-required",
         message: "The configured script model is paid and requires explicit confirmation.",

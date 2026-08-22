@@ -771,3 +771,24 @@ test("a typo in the script provider fails the request instead of generating temp
     }
   });
 });
+
+test("a paid flag left on the offline template does not demand spend confirmation", async () => {
+  await withTempCwd(async () => {
+    await writeFile("studio.config.json", JSON.stringify({ script: { provider: "dry-run", paid: true } }), "utf8");
+    const running = await startStudioServer(createStudioServer(), { port: 0 });
+    try {
+      const events = await fetch(`${running.url}/api/projects/sample-project/events`);
+      const started = await postJson(running, "script");
+
+      assert.equal(started.status, 202);
+      const { job } = await started.json();
+      const finished = await readEventStreamUntil(
+        events,
+        (payload) => payload.id === job.id && payload.status !== "running",
+      );
+      assert.equal(finished.status, "succeeded");
+    } finally {
+      await running.close();
+    }
+  });
+});

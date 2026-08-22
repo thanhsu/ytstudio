@@ -1726,7 +1726,7 @@ async function runStepTask(step) {
   if (step.id === "voice" && appState.config?.tts?.defaultProvider === "openai") {
     throw new Error("OpenAI voice needs paid confirmation. Run Voice step manually.");
   }
-  if (step.id === "script" && appState.config?.script?.paid) {
+  if (step.id === "script" && paidScriptModelConfigured()) {
     throw new Error("Paid script model needs confirmation. Run Generate Script manually.");
   }
   if (step.id === "copyright" || step.id === "source-risk") {
@@ -1812,8 +1812,14 @@ async function requestVoice(confirmedPaidRequest) {
   await selectProject(appState.selectedProject);
 }
 
+// Only a hosted model can cost money. A leftover `paid: true` on the offline
+// template must not raise a spend dialog for a local string template.
+function paidScriptModelConfigured() {
+  return appState.config?.script?.provider === "openai-compatible" && appState.config?.script?.paid === true;
+}
+
 async function requestScript(confirmedPaidRequest) {
-  if (!confirmedPaidRequest && appState.config?.script?.paid) {
+  if (!confirmedPaidRequest && paidScriptModelConfigured()) {
     paidScriptDialog.showModal();
     return;
   }

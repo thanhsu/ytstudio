@@ -84,8 +84,9 @@ Commands:
   create-brief --id <id> --topic <topic> --show <show> --format <shorts|longform> --audience <audience> --language <language> [--notes <notes>]
     Create projects/<id>/brief.json.
 
-  generate-script --project <id>
-    Generate dry-run script.md, metadata.json, and scene-plan.json.
+  generate-script --project <id> [--confirm-paid true]
+    Generate script.md, metadata.json, and scene-plan.json with the configured
+    script model. Pass --confirm-paid true to authorize spend on a paid model.
 
   copyright-check --project <id> --commentary-percent <n> --footage-percent <n> --longest-clip-seconds <n> [--uses-full-scene true|false] [--thumbnail-from-frame true|false] [--clips-have-purpose true|false]
     Save a conservative copyright-risk checklist.
@@ -174,7 +175,7 @@ async function run(): Promise<void> {
       throw new Error("--project is required.");
     }
 
-    await generateScript(projectId);
+    await generateScript(projectId, { confirmedPaidRequest: boolArg(args, "confirm-paid") });
     console.log(`Generated script files for ${projectId}.`);
     return;
   }

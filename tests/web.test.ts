@@ -152,3 +152,13 @@ test("the script stage shows the model that produced the script and gates paid g
   assert.match(script, /No script generated yet/);
   assert.doesNotMatch(script, /"Script model": `\$\{appState\.config/);
 });
+
+test("the paid script dialog is raised only for a hosted model, never for the offline template", async () => {
+  const script = await readFile("src/web/app.js", "utf8");
+
+  assert.match(script, /function paidScriptModelConfigured/);
+  assert.match(script, /appState\.config\?\.script\?\.provider === "openai-compatible"/);
+  assert.match(script, /if \(!confirmedPaidRequest && paidScriptModelConfigured\(\)\)/);
+  assert.match(script, /step\.id === "script" && paidScriptModelConfigured\(\)/);
+  assert.doesNotMatch(script, /appState\.config\?\.script\?\.paid\)/);
+});
