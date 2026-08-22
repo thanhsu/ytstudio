@@ -7,6 +7,9 @@ export type OpenAiCompatibleConfig = {
   baseUrl: string;
   model: string;
   apiKey: string;
+  // The environment variable the key was read from, so a missing key can point
+  // at the exact variable to set rather than at "an API key".
+  apiKeyEnv: string;
   paid: boolean;
   temperature: number;
   maxOutputTokens: number;
@@ -29,8 +32,11 @@ export function createOpenAiCompatibleProvider(config: OpenAiCompatibleConfig): 
       if (config.paid && !request.confirmedPaidRequest) {
         throw new Error("This model is marked paid and requires an explicit confirmed paid request.");
       }
-      if (config.paid && !config.apiKey) {
-        throw new Error("An API key is required for the configured paid model provider.");
+      // A configured key that is not in the environment is a mistake whether or
+      // not the endpoint is marked paid: sending an unauthenticated request to a
+      // hosted endpoint only turns it into a 401 further downstream.
+      if (!config.apiKey && (config.apiKeyEnv || config.paid)) {
+        throw new Error(missingApiKeyMessage(config));
       }
 
       const endpoint = `${config.baseUrl.replace(/\/+$/, "")}/chat/completions`;
@@ -64,7 +70,9 @@ export function createOpenAiCompatibleProvider(config: OpenAiCompatibleConfig): 
 
       if (!response.ok) {
         const body = await response.text().catch(() => "");
-        throw new Error(`Model request failed with status ${response.status}: ${redact(body)}`);
+        throw new Error(
+          `Model request to ${endpoint} failed with status ${response.status}: ${truncate(redact(body))}`,
+        );
       }
 
       let payload: ChatCompletionResponse;
@@ -74,9 +82,14 @@ export function createOpenAiCompatibleProvider(config: OpenAiCompatibleConfig): 
         throw new Error(`Model response from ${endpoint} was not valid JSON: ${messageOf(error)}`);
       }
 
+      // A 200 carrying {"error":{...}} is a real shape from several LM Studio and
+      // vLLM front-ends. Calling every one of these "an empty response" discarded
+      // the only text that said what actually went wrong.
       const content = payload.choices?.[0]?.message?.content;
       if (typeof content !== "string" || !content.trim()) {
-        throw new Error("Model returned an empty response.");
+        throw new Error(
+          `Model ${config.model} at ${endpoint} returned no usable message content: ${truncate(redact(describePayload(payload)))}`,
+        );
       }
 
       return {
@@ -86,6 +99,35 @@ export function createOpenAiCompatibleProvider(config: OpenAiCompatibleConfig): 
       };
     },
   };
+}
+
+// Thrown messages are persisted to the job file, pushed through SSE, and dropped
+// into the status bar, so an unbounded upstream body cannot travel with them.
+const MAX_UPSTREAM_EXCERPT = 400;
+
+function truncate(value: string): string {
+  const collapsed = value.trim();
+  if (!collapsed) {
+    return "(empty body)";
+  }
+  return collapsed.length > MAX_UPSTREAM_EXCERPT
+    ? `${collapsed.slice(0, MAX_UPSTREAM_EXCERPT)}… (truncated)`
+    : collapsed;
+}
+
+function describePayload(payload: unknown): string {
+  try {
+    return JSON.stringify(payload) ?? String(payload);
+  } catch {
+    return String(payload);
+  }
+}
+
+function missingApiKeyMessage(config: OpenAiCompatibleConfig): string {
+  if (config.apiKeyEnv) {
+    return `No API key: the ${config.apiKeyEnv} environment variable named by script.apiKeyEnv is empty. Set it in the shell that starts the studio, or clear script.apiKeyEnv for an endpoint that needs no key.`;
+  }
+  return "An API key is required for the configured paid model provider. Set script.apiKeyEnv to the name of the environment variable that holds it.";
 }
 
 function messageOf(error: unknown): string {

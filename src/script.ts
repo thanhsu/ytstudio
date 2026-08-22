@@ -58,6 +58,7 @@ export function createConfiguredProvider(config: StudioConfig): LlmProvider {
       baseUrl: config.script.baseUrl,
       model: config.script.model,
       apiKey: config.script.apiKeyEnv ? process.env[config.script.apiKeyEnv] ?? "" : "",
+      apiKeyEnv: config.script.apiKeyEnv,
       paid: config.script.paid,
       temperature: config.script.temperature,
       maxOutputTokens: config.script.maxOutputTokens,

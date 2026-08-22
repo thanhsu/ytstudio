@@ -25,9 +25,11 @@ function createFakeFetch(content = modelContent(), status = 200): FakeFetch {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   const fakeFetch = (async (url: string | URL | Request, init?: RequestInit) => {
     calls.push({ url: String(url), init });
+    // A non-200 returns the caller's content as the raw upstream body, so error
+    // reporting is exercised against the text a real proxy would send back.
     const body = status === 200
       ? JSON.stringify({ choices: [{ message: { content } }] })
-      : "upstream failure";
+      : content;
     return new Response(body, { status });
   }) as FakeFetch;
   fakeFetch.calls = calls;
@@ -57,6 +59,7 @@ function localConfig(fakeFetch: FakeFetch) {
     baseUrl: "http://127.0.0.1:11434/v1/",
     model: "qwen2.5:14b",
     apiKey: "",
+    apiKeyEnv: "",
     paid: false,
     temperature: 0.8,
     maxOutputTokens: 4000,
@@ -101,6 +104,46 @@ test("a paid provider without a key fails before any request", async () => {
 
   await assert.rejects(() => provider.generate(sampleRequest({ confirmedPaidRequest: true })), /api key/i);
   assert.equal(fakeFetch.calls.length, 0);
+});
+
+test("a missing key names the environment variable that was consulted", async () => {
+  const fakeFetch = createFakeFetch();
+  const provider = createOpenAiCompatibleProvider({
+    ...localConfig(fakeFetch),
+    paid: true,
+    apiKey: "",
+    apiKeyEnv: "OPENAI_API_KEY",
+  });
+
+  await assert.rejects(() => provider.generate(sampleRequest({ confirmedPaidRequest: true })), (error: unknown) => {
+    assert.ok(error instanceof Error);
+    assert.match(error.message, /OPENAI_API_KEY/);
+    assert.match(error.message, /api key/i);
+    return true;
+  });
+  assert.equal(fakeFetch.calls.length, 0);
+});
+
+test("an unpaid endpoint with a configured key still refuses to send an unauthenticated request", async () => {
+  const fakeFetch = createFakeFetch();
+  const provider = createOpenAiCompatibleProvider({
+    ...localConfig(fakeFetch),
+    paid: false,
+    apiKey: "",
+    apiKeyEnv: "GROQ_API_KEY",
+  });
+
+  await assert.rejects(() => provider.generate(sampleRequest()), /GROQ_API_KEY/);
+  assert.equal(fakeFetch.calls.length, 0);
+});
+
+test("a local endpoint that names no key variable still needs none", async () => {
+  const fakeFetch = createFakeFetch();
+  const provider = createOpenAiCompatibleProvider(localConfig(fakeFetch));
+
+  await provider.generate(sampleRequest());
+
+  assert.equal(fakeFetch.calls.length, 1);
 });
 
 test("an unreachable server names the endpoint", async () => {
@@ -225,4 +268,37 @@ test("the request body carries the model, prompt messages, and generation parame
   assert.equal(body.max_tokens, 4000);
   assert.deepEqual(body.response_format, { type: "json_object" });
   assert.deepEqual(body.messages, buildScriptPrompt(request.brief));
+});
+
+test("a 200 carrying an upstream error names the endpoint, the model, and the real error", async () => {
+  const errorPayloadFetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    void url;
+    void init;
+    return new Response(JSON.stringify({ error: { message: "model not loaded" } }), { status: 200 });
+  }) as FakeFetch;
+  errorPayloadFetch.calls = [];
+  const provider = createOpenAiCompatibleProvider(localConfig(errorPayloadFetch));
+
+  await assert.rejects(() => provider.generate(sampleRequest()), (error: unknown) => {
+    assert.ok(error instanceof Error);
+    assert.match(error.message, /model not loaded/);
+    assert.match(error.message, /127\.0\.0\.1:11434\/v1\/chat\/completions/);
+    assert.match(error.message, /qwen2\.5:14b/);
+    return true;
+  });
+});
+
+test("an upstream excerpt is truncated and redacted before it reaches the operator", async () => {
+  const noisyBody = `Authorization: Bearer sk-test-abcdefgh ${"x".repeat(5000)}`;
+  const provider = createOpenAiCompatibleProvider(localConfig(createFakeFetch(noisyBody, 500)));
+
+
+  await assert.rejects(() => provider.generate(sampleRequest()), (error: unknown) => {
+    assert.ok(error instanceof Error);
+    assert.ok(error.message.length < 700, `message was ${error.message.length} characters`);
+    assert.doesNotMatch(error.message, /sk-test-abcdefgh/);
+    assert.match(error.message, /truncated/);
+    assert.match(error.message, /500/);
+    return true;
+  });
 });
