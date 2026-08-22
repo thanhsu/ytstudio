@@ -99,6 +99,19 @@ test("translation stage exposes the human subtitle segment editor", async () => 
   assert.match(styles, /\.decision-remove/);
 });
 
+test("render stage exposes the subtitle-driven cut", async () => {
+  const script = await readFile("src/web/app.js", "utf8");
+  const styles = await readFile("src/web/styles.css", "utf8");
+
+  assert.match(script, /Render Cut/);
+  assert.match(script, /projectApiUrl\("edit-render"\)/);
+  assert.match(script, /EDIT_RENDER_GATE_LABELS/);
+  assert.match(script, /source-media-missing/);
+  assert.match(script, /edit-manifest-keeps-no-cues/);
+  assert.match(script, /"voice", "captions", "render", "cut"/);
+  assert.match(styles, /\.cut-toolbar/);
+});
+
 test("server serves the studio shell without exposing project files", async () => {
   const previousCwd = process.cwd();
   const root = await mkdtemp(join(tmpdir(), "yt-web-"));

@@ -2,13 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Give the studio a way to trigger the subtitle-driven cut, so the render path that already exists behind `POST /api/projects/:id/edit-render` becomes reachable without curl.
+**Goal:** Give the studio a way to trigger the subtitle-driven cut, so the render path that already exists behind `POST /api/projects/:id/edit-render` becomes reachable without curl — and stop the cut from overwriting the narrated draft on its way there.
 
-**Architecture:** The cut gate joins the project snapshot beside the existing draft gate, and the Render stage grows a second, clearly separated control block for the cut. The segment editor stays where Codex put it, in the Translation stage — that is where cue decisions are made; the Render stage is where renders are started.
+**Architecture:** The cut gets its own artifact kind so a project can hold a draft and a cut at once. The cut gate joins the project snapshot beside the draft gate, and the Render stage grows a second, clearly separated control block. The segment editor stays where it is, in the Translation stage — that is where cue decisions are made; the Render stage is where renders are started.
 
 **Tech Stack:** Node 22 native TypeScript type-stripping, `node:test`, vanilla DOM in `src/web/app.js` (no framework, no build step).
 
-**Spec:** No separate spec document. This plan extends `docs/superpowers/specs/2026-08-22-segment-editor-design.md` (the segment editor) with the cut render that landed in commits `17f776e` and `70b27ff`.
+**Spec:** No separate spec document. This plan extends `docs/superpowers/specs/2026-08-22-segment-editor-design.md` with the cut render that landed in `17f776e` and `70b27ff`.
 
 ## Global Constraints
 
@@ -20,19 +20,150 @@
 - Mutations are already protected by the server same-origin rule. Do not add a second check.
 - `src/web/app.js` is plain JavaScript, not TypeScript. No type annotations.
 
+## Review Outcome (Codex, 2026-08-22)
+
+Codex reviewed the first draft and found no execution defects — anchors, helper signatures, gate reason order, and test regexes all verified against the real code. It overturned two decisions, and both are folded in below:
+
+- **Separate artifact kind (was: share the `render` slot).** Accepted. `renderDraftProject` and `renderEditedCutProject` both wrote `artifacts.render`, so the second render silently replaced the first in `project-state.json`. Silent data loss beats the convenience of one slot. This became Task 1.
+- **Artifact-oriented gate wording (was: name the stage).** Accepted. The cut gate can fire on a workflow template that has no Media step, so a label reading "in the Media stage" would point at a screen that is not there.
+
+Kept as drafted: the trigger lives in the Render stage, and the cut gate ships inside the project snapshot rather than on its own lazy route.
+
 ---
 
-### Task 1: Expose the cut gate in the project snapshot
+### Task 1: Give the cut its own artifact kind
+
+**Files:**
+- Modify: `src/types.ts:74` (`ArtifactKind`)
+- Modify: `src/edit-render.ts` (return type and emitted `kind`)
+- Modify: `src/workflow.ts` (return type of `renderEditedCutProject`)
+- Test: `tests/edit-render.test.ts`, `tests/edit-render-gate.test.ts`
+
+**Interfaces:**
+- Produces: `CutArtifact = ArtifactRecord & { kind: "cut" }`, exported from `src/edit-render.ts`; project state key `artifacts.cut`. Task 3 lists it in the UI.
+
+- [ ] **Step 1: Change the failing assertions**
+
+In `tests/edit-render.test.ts`, in "records a render artifact describing the cut", change the kind assertion:
+
+```ts
+    assert.equal(artifact.kind, "cut");
+```
+
+In `tests/edit-render-gate.test.ts`, in "the cut is written with subtitles realigned to it", the same:
+
+```ts
+    assert.equal(artifact.kind, "cut");
+```
+
+Add a test to `tests/edit-render-gate.test.ts` proving the two renders no longer collide:
+
+```ts
+test("the cut does not displace a narrated draft render", async () => {
+  await withProjectsRoot(async () => {
+    await scaffoldProject();
+    await setArtifact(PROJECT_ID, {
+      kind: "render",
+      sourceHash: "draft-hash",
+      relativePath: "workspace/renders/draft-20260822-000000-000.mp4",
+      createdAt: "2026-08-22T00:00:00.000Z",
+      metadata: {},
+    });
+
+    await renderEditedCutProject(PROJECT_ID, {
+      ffmpegPath: process.execPath,
+      ffmpegPrefixArgs: [await fakeFfmpeg()],
+    });
+
+    const state = await loadProjectState(PROJECT_ID);
+    assert.equal(state.artifacts.render?.sourceHash, "draft-hash");
+    assert.equal(state.artifacts.cut?.kind, "cut");
+  });
+});
+```
+
+Hoist the fake ffmpeg into a `fakeFfmpeg()` helper in that file, and import `loadProjectState` from `../src/project-state.ts`.
+
+- [ ] **Step 2: Run them and watch them fail**
+
+Run: `node --test tests/edit-render.test.ts tests/edit-render-gate.test.ts`
+Expected: FAIL — kind is still `render`, and `state.artifacts.cut` is undefined.
+
+- [ ] **Step 3: Add the kind**
+
+`src/types.ts`:
+
+```ts
+export type ArtifactKind = "media" | "audio" | "source-subtitles" | "voice" | "captions" | "render" | "cut";
+```
+
+- [ ] **Step 4: Emit it**
+
+In `src/edit-render.ts`, replace the `RenderArtifact` import and usage. Keep `renderArtifactRelativePath`, which is kind-agnostic:
+
+```ts
+import { renderArtifactRelativePath } from "./render.ts";
+import type { ArtifactRecord } from "./types.ts";
+
+/** Its own kind so a cut never displaces the narrated draft in project state. */
+export type CutArtifact = ArtifactRecord & { kind: "cut" };
+```
+
+Change the signature and the literal:
+
+```ts
+export async function renderEditedCut(input: EditRenderInput, signal?: AbortSignal): Promise<CutArtifact> {
+```
+
+```ts
+  const artifact: CutArtifact = {
+    kind: "cut",
+```
+
+In `src/workflow.ts`, import the type and change the return type of `renderEditedCutProject`:
+
+```ts
+import { buildCutSrt, cutTimeline, renderEditedCut, type CutArtifact } from "./edit-render.ts";
+```
+
+```ts
+export async function renderEditedCutProject(
+  projectId: string,
+  options: RenderDraftOptions = {},
+): Promise<CutArtifact> {
+```
+
+- [ ] **Step 5: Verify**
+
+Run: `node --test tests/edit-render.test.ts tests/edit-render-gate.test.ts`
+Expected: PASS
+
+Run: `npx tsc --noEmit`
+Expected: clean.
+
+Run: `npm test`
+Expected: PASS.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/types.ts src/edit-render.ts src/workflow.ts tests/edit-render.test.ts tests/edit-render-gate.test.ts
+git commit -m "fix: stop a cut render from displacing the narrated draft"
+```
+
+---
+
+### Task 2: Expose the cut gate in the project snapshot
 
 The client cannot explain why the cut is blocked without the gate. `sendProject` already ships `renderGate`; the cut gate goes beside it under its own key, because the two gates disagree on purpose — the draft gate demands a script and a voice track that a cut never produces.
 
 **Files:**
-- Modify: `src/server.ts:1063-1075` (the `sendJson` payload inside `sendProject`)
+- Modify: `src/server.ts` (the `sendJson` payload inside `sendProject`)
 - Test: `tests/server.test.ts`
 
 **Interfaces:**
 - Consumes: `evaluateEditRenderGate(projectId: string): Promise<RenderGateResult>` from `src/workflow.ts`, already imported into `src/server.ts`.
-- Produces: snapshot key `editRenderGate: { allowed: boolean; reasons: string[] }`, consumed by Task 2.
+- Produces: snapshot key `editRenderGate: { allowed: boolean; reasons: string[] }`, consumed by Task 3.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -61,7 +192,7 @@ test("project snapshot carries the cut gate beside the draft gate", async () => 
 - [ ] **Step 2: Run it and watch it fail**
 
 Run: `node --test tests/server.test.ts`
-Expected: FAIL reading `allowed` of undefined, because the snapshot has no `editRenderGate`.
+Expected: FAIL reading `allowed` of undefined.
 
 - [ ] **Step 3: Add the key to the payload**
 
@@ -74,13 +205,13 @@ In `src/server.ts`, inside `sendProject`, add one line after `renderGate`:
     workflow: {
 ```
 
-- [ ] **Step 4: Run the test and the suite**
+- [ ] **Step 4: Verify**
 
 Run: `node --test tests/server.test.ts`
 Expected: PASS
 
 Run: `npm test`
-Expected: PASS, no other suite disturbed.
+Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -91,7 +222,7 @@ git commit -m "feat: report the cut gate in the project snapshot"
 
 ---
 
-### Task 2: Add cut controls to the Render stage
+### Task 3: Add cut controls to the Render stage
 
 **The trap to avoid:** `renderRender` early-returns when the project has no visual mapping, printing "Generate a visual mapping to open the timeline editor." A cut project has no visual mapping and never will — mapping belongs to the narrated draft. If the cut controls are appended only on the normal path, they are invisible to exactly the projects that need them. The controls must appear on **both** paths.
 
@@ -101,8 +232,7 @@ git commit -m "feat: report the cut gate in the project snapshot"
 - Test: `tests/web.test.ts`
 
 **Interfaces:**
-- Consumes: `snapshot.editRenderGate` from Task 1; existing helpers `wrapSection(title, ...children)`, `paragraph(text)`, `actionButton(text, onClick, type = "button", variant = "")`, `projectApiUrl(route)`, `reportedAsJob(response, data)`, `setStatus(text)`, `selectProject(projectId)`.
-- Produces: nothing consumed by later tasks.
+- Consumes: `snapshot.editRenderGate` from Task 2; `artifacts.cut` from Task 1; existing helpers `wrapSection(title, ...children)`, `paragraph(text)`, `actionButton(text, onClick, type = "button", variant = "")`, `artifactList(artifacts, kinds)`, `projectApiUrl(route)`, `reportedAsJob(response, data)`, `setStatus(text)`, `selectProject(projectId)`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -118,6 +248,7 @@ test("render stage exposes the subtitle-driven cut", async () => {
   assert.match(script, /EDIT_RENDER_GATE_LABELS/);
   assert.match(script, /source-media-missing/);
   assert.match(script, /edit-manifest-keeps-no-cues/);
+  assert.match(script, /"voice", "captions", "render", "cut"/);
   assert.match(styles, /\.cut-toolbar/);
 });
 ```
@@ -125,18 +256,18 @@ test("render stage exposes the subtitle-driven cut", async () => {
 - [ ] **Step 2: Run it and watch it fail**
 
 Run: `node --test tests/web.test.ts`
-Expected: FAIL on `/Render Cut/`, since no such string exists yet.
+Expected: FAIL on `/Render Cut/`.
 
 - [ ] **Step 3: Add the gate labels**
 
-In `src/web/app.js`, directly below the existing `RENDER_GATE_LABELS` object (around line 1503):
+In `src/web/app.js`, directly below the existing `RENDER_GATE_LABELS` object. The labels name artifacts, not stages, because the cut gate can fire on a workflow template that has no Media step:
 
 ```js
 const EDIT_RENDER_GATE_LABELS = {
-  "copyright-approval-missing": "Run and approve the copyright check before cutting source footage.",
+  "copyright-approval-missing": "Approve the copyright check before cutting source footage.",
   "copyright-approval-stale": "The copyright check changed after approval. Approve it again.",
-  "source-media-missing": "Import the source video in the Media stage.",
-  "edit-manifest-missing": "Create an edit manifest in the Translation stage.",
+  "source-media-missing": "Import a source video into this project.",
+  "edit-manifest-missing": "Create an edit manifest from a subtitle file.",
   "edit-manifest-keeps-no-cues": "Every cue is marked remove. Keep at least one cue to cut.",
 };
 ```
@@ -175,7 +306,7 @@ function renderCutControls(snapshot) {
 
 - [ ] **Step 5: Show it on both paths of the Render stage**
 
-In `src/web/app.js`, `renderRender`. Add the `cutControls` line after `gateNotice`, then append it to **both** `replaceChildren` calls:
+In `renderRender`, add `cutControls` after `gateNotice`:
 
 ```js
 function renderRender(snapshot) {
@@ -183,6 +314,8 @@ function renderRender(snapshot) {
   const gateNotice = renderGateNotice(snapshot);
   const cutControls = renderCutControls(snapshot);
 ```
+
+Append it to the early-return branch:
 
 ```js
   if (!mapping?.segments?.length) {
@@ -196,19 +329,21 @@ function renderRender(snapshot) {
   }
 ```
 
+And to the normal branch, where the artifact list also gains the cut:
+
 ```js
   stageContent.replaceChildren(
     toolbar,
     ...(gateNotice ? [gateNotice] : []),
     editor,
-    artifactList(snapshot.state?.artifacts ?? {}, ["voice", "captions", "render"]),
+    artifactList(snapshot.state?.artifacts ?? {}, ["voice", "captions", "render", "cut"]),
     cutControls,
   );
 ```
 
 - [ ] **Step 6: Add the request function**
 
-In `src/web/app.js`, directly below `requestRender` (around line 2006). It mirrors `requestRender` because the route behaves identically: 409 with gate reasons, or 202 with a job record.
+Directly below `requestRender`. It mirrors `requestRender` because the route behaves identically: 409 with gate reasons, or 202 with a job record.
 
 ```js
 async function requestCutRender() {
@@ -244,20 +379,17 @@ In `src/web/styles.css`, beside the existing `.render-toolbar` rule:
 }
 ```
 
-- [ ] **Step 8: Run the test and the suite**
+- [ ] **Step 8: Verify**
 
 Run: `node --test tests/web.test.ts`
 Expected: PASS
 
-Run: `npm test`
-Expected: PASS
-
-Run: `npx tsc --noEmit`
-Expected: clean. (`src/web/app.js` is not typechecked, but `src/server.ts` from Task 1 is.)
+Run: `npm test` then `npx tsc --noEmit`
+Expected: PASS, clean.
 
 - [ ] **Step 9: Drive it in the browser**
 
-Run: `npm run studio`, open `http://127.0.0.1:3000`, pick a project, open the Render stage.
+Run `npm run studio`, open `http://127.0.0.1:3000`, pick a project, open the Render stage.
 Expected: the "Subtitle-driven cut" block is visible **even on a project with no visual mapping**, and lists the unmet gates in plain language.
 
 - [ ] **Step 10: Commit**
@@ -266,17 +398,3 @@ Expected: the "Subtitle-driven cut" block is visible **even on a project with no
 git add src/web/app.js src/web/styles.css tests/web.test.ts
 git commit -m "feat: start the subtitle-driven cut from the render stage"
 ```
-
----
-
-## Review Questions for Codex
-
-These are the four decisions the plan makes that a reviewer could reasonably overturn. Answers should land before Task 1 starts.
-
-**1. Button placement.** The plan puts the cut trigger in the Render stage and leaves the segment editor in the Translation stage, splitting decision from execution across two stages. The alternative is one "Export Clean SRT / Render Cut" row inside the existing segment editor, keeping the whole cut workflow on one screen at the cost of a render button living outside the Render stage. Which reads better to the operator?
-
-**2. The shared `render` artifact slot.** `renderDraftProject` and `renderEditedCutProject` both call `setArtifact(projectId, { kind: "render", ... })`, so a project records either a narrated draft or a cut, never both — the second render silently replaces the first in `project-state.json`. The plan accepts this on the grounds that a project is one workflow or the other. Rejecting it means adding a `cut` member to `ArtifactKind`, which touches `src/types.ts`, `deriveStepStates`, and the artifact list UI. Is the shared slot acceptable?
-
-**3. Snapshot cost.** `evaluateEditRenderGate` internally calls `projectPipelineStatus`, which loads project state, and then loads project state a second time for the media artifact, and reads the edit manifest. Task 1 puts all of that on `GET /api/projects/:id`, which the client calls on every project selection and after every job. Is that acceptable, or should the gate move to its own lazily-fetched route?
-
-**4. Gate wording.** `EDIT_RENDER_GATE_LABELS` names the stage the operator must visit ("Import the source video in the Media stage"). The existing `RENDER_GATE_LABELS` does the same, so this is consistent — but the cut gate can fire on a project whose workflow type has no Media step. Should the labels name artifacts instead of stages?

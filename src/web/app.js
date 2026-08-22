@@ -1502,6 +1502,16 @@ const RENDER_GATE_LABELS = {
   "visual-mapping-not-approved": "Approve the visual mapping below.",
 };
 
+// Named after artifacts rather than stages: the cut gate can fire on a workflow
+// template that has no Media step, and a label may not point at a missing screen.
+const EDIT_RENDER_GATE_LABELS = {
+  "copyright-approval-missing": "Approve the copyright check before cutting source footage.",
+  "copyright-approval-stale": "The copyright check changed after approval. Approve it again.",
+  "source-media-missing": "Import a source video into this project.",
+  "edit-manifest-missing": "Create an edit manifest from a subtitle file.",
+  "edit-manifest-keeps-no-cues": "Every cue is marked remove. Keep at least one cue to cut.",
+};
+
 function renderGateNotice(snapshot) {
   const gate = snapshot.renderGate;
   if (!gate || gate.allowed) {
@@ -1517,9 +1527,39 @@ function renderGateNotice(snapshot) {
   return notice;
 }
 
+function renderCutControls(snapshot) {
+  const gate = snapshot.editRenderGate;
+  const toolbar = document.createElement("div");
+  toolbar.className = "cut-toolbar";
+  const badge = document.createElement("span");
+  badge.className = `mapping-status mapping-status-${gate?.allowed ? "approved" : "missing"}`;
+  badge.textContent = gate?.allowed ? "cut ready" : "cut gated";
+  toolbar.append(badge, actionButton("Render Cut", () => requestCutRender(), "button", "primary"));
+
+  const children = [
+    paragraph("Cuts the imported source video down to the cues kept in the Translation stage, and writes subtitles realigned to the cut."),
+    toolbar,
+  ];
+  if (gate && !gate.allowed) {
+    const notice = document.createElement("ul");
+    notice.className = "render-gate-notice";
+    for (const reason of gate.reasons) {
+      const item = document.createElement("li");
+      item.textContent = EDIT_RENDER_GATE_LABELS[reason] ?? reason;
+      notice.append(item);
+    }
+    children.push(notice);
+  }
+  return wrapSection("Subtitle-driven cut", ...children);
+}
+
 function renderRender(snapshot) {
   const mapping = snapshot.visualMapping;
   const gateNotice = renderGateNotice(snapshot);
+  // Built before the early return below: a cut project never has a visual
+  // mapping, so appending it only on the mapped path hides it from every
+  // project that actually needs it.
+  const cutControls = renderCutControls(snapshot);
   const toolbar = document.createElement("div");
   toolbar.className = "render-toolbar";
   const statusBadge = document.createElement("span");
@@ -1537,6 +1577,7 @@ function renderRender(snapshot) {
       toolbar,
       ...(gateNotice ? [gateNotice] : []),
       paragraph("Generate a visual mapping to open the timeline editor."),
+      cutControls,
     );
     return;
   }
@@ -1551,7 +1592,8 @@ function renderRender(snapshot) {
     toolbar,
     ...(gateNotice ? [gateNotice] : []),
     editor,
-    artifactList(snapshot.state?.artifacts ?? {}, ["voice", "captions", "render"]),
+    artifactList(snapshot.state?.artifacts ?? {}, ["voice", "captions", "render", "cut"]),
+    cutControls,
   );
 }
 
@@ -2002,6 +2044,24 @@ async function requestRender() {
     return;
   }
   setStatus(`Rendered: ${data.artifact.relativePath}`);
+  await selectProject(appState.selectedProject);
+}
+
+async function requestCutRender() {
+  const response = await fetch(projectApiUrl("edit-render"), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    setStatus(`${data.code}: ${data.message || (data.details?.reasons ?? []).join(", ")}`);
+    return;
+  }
+  if (reportedAsJob(response, data)) {
+    return;
+  }
+  setStatus(`Cut rendered: ${data.artifact.relativePath}`);
   await selectProject(appState.selectedProject);
 }
 
