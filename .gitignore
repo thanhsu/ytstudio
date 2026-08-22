@@ -8,6 +8,7 @@ build/
 .next/
 coverage/
 projects/
+/sources/
 projects/*/workspace/
 renders/
 tmp/
