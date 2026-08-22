@@ -956,6 +956,25 @@ video {
   gap: 0.75rem;
 }
 
+.source-search-form {
+  align-items: end;
+}
+
+.source-search-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.source-query-preview textarea {
+  min-height: 124px;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
 .source-result-card {
   border: 1px solid #d7dde5;
   border-radius: 8px;
@@ -984,6 +1003,13 @@ video {
   color: #2364aa;
   overflow-wrap: anywhere;
   font-size: 0.88rem;
+}
+
+.source-matched-query {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
 }
 
 .source-triage {

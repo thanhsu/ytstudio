@@ -287,6 +287,22 @@ test("the sources screen can filter and triage keyword search results", async ()
 }
 );
 
+test("the sources screen exposes editable Bilibili query expansion", async () => {
+  const script = await readFile("src/web/app.js", "utf8");
+  const styles = await readFile("src/web/styles.css", "utf8");
+
+  assert.match(script, /Expand Bilibili query/);
+  assert.match(script, /Expanded queries/);
+  assert.match(script, /buildSourceSearchQueries/);
+  assert.match(script, /牧神记/);
+  assert.match(script, /Tales of Herding Gods/);
+  assert.match(script, /matchedQuery/);
+  assert.match(script, /dedupeSourceSearchResults/);
+  assert.match(script, /Promise\.all/);
+  assert.match(styles, /\.source-search-toolbar/);
+  assert.match(styles, /\.source-query-preview/);
+});
+
 test("the sources screen refuses to imply that declaring rights clears a project gate", async () => {
   const script = await readFile("src/web/app.js", "utf8");
 

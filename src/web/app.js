@@ -53,7 +53,9 @@ const appState = {
   eventStreamProject: null,
   activeJob: null,
   sourceSearchResults: [],
-  sourceSearchFilters: {},
+  sourceSearchFilters: {
+    expandBilibiliQuery: true,
+  },
 };
 
 const JOB_LABELS = { voice: "Voice", render: "Render", asr: "ASR", captions: "Captions", asset: "Asset analysis", script: "Script" };
@@ -2515,11 +2517,17 @@ async function renderSources() {
   });
 
   const searchForm = document.createElement("form");
-  searchForm.className = "form-grid";
+  searchForm.className = "form-grid source-search-form";
   searchForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     await searchSources(boolFormValues(searchForm));
   });
+  const expandedQueries = textareaField(
+    "Expanded queries",
+    "expandedQueries",
+    (appState.sourceSearchFilters.expandedQueries ?? buildSourceSearchQueries(appState.sourceSearchFilters)).join("\n"),
+  );
+  expandedQueries.classList.add("source-query-preview");
   searchForm.replaceChildren(
     field("Keyword", "query", appState.sourceSearchFilters.query ?? "", "text", "牧神记 episode 1"),
     selectField("Platform", "platform", appState.sourceSearchFilters.platform ?? appState.config?.sources?.defaultSearchPlatform ?? "youtube", [
@@ -2527,11 +2535,13 @@ async function renderSources() {
       ["bilibili", "Bilibili"],
     ]),
     field("Limit", "limit", String(appState.sourceSearchFilters.limit ?? appState.config?.sources?.searchLimit ?? 8), "number"),
+    checkboxField("Expand Bilibili query", "expandBilibiliQuery", appState.sourceSearchFilters.expandBilibiliQuery !== false),
     field("Include keywords", "includeKeywords", appState.sourceSearchFilters.includeKeywords ?? "", "text", "episode, recap"),
     field("Exclude keywords", "excludeKeywords", appState.sourceSearchFilters.excludeKeywords ?? "", "text", "official, trailer"),
     field("Max views", "maxViews", String(appState.sourceSearchFilters.maxViews || ""), "number"),
     checkboxField("Hide likely official", "hideLikelyOfficial", appState.sourceSearchFilters.hideLikelyOfficial === true),
-    actionButton("Search Sources", null, "submit", "primary"),
+    expandedQueries,
+    sourceSearchToolbar(),
   );
 
   addForm.replaceChildren(
@@ -2601,6 +2611,9 @@ function renderSourceSearchResults(results) {
     badge.className = `source-triage source-triage-${triage.risk}`;
     badge.textContent = triage.label;
     badge.title = triage.reason;
+    const matched = document.createElement("p");
+    matched.className = "source-matched-query";
+    matched.textContent = result.matchedQuery ? `Matched query: ${result.matchedQuery}` : "Matched query: original keyword";
     const link = document.createElement("a");
     link.href = result.url;
     link.target = "_blank";
@@ -2609,14 +2622,33 @@ function renderSourceSearchResults(results) {
     const actions = document.createElement("div");
     actions.className = "source-actions";
     actions.append(actionButton("Track Source", () => trackSource(result.url), "button", "primary"));
-    card.append(...children, title, meta, badge, link, actions);
+    card.append(...children, title, meta, badge, matched, link, actions);
     wrapper.append(card);
   }
   return wrapper;
 }
 
+function sourceSearchToolbar() {
+  const toolbar = document.createElement("div");
+  toolbar.className = "source-search-toolbar field-wide";
+  toolbar.append(
+    actionButton("Refresh expanded queries", () => refreshSourceExpandedQueries(), "button"),
+    actionButton("Search Sources", null, "submit", "primary"),
+  );
+  return toolbar;
+}
+
+function refreshSourceExpandedQueries() {
+  const form = document.querySelector(".source-search-form");
+  if (!form) return;
+  const values = boolFormValues(form);
+  const preview = form.elements.namedItem("expandedQueries");
+  if (preview) preview.value = buildSourceSearchQueries(values, { ignoreEditedQueryList: true }).join("\n");
+}
+
 async function searchSources(values) {
   try {
+    const queries = buildSourceSearchQueries(values);
     appState.sourceSearchFilters = {
       query: values.query,
       platform: values.platform,
@@ -2625,19 +2657,72 @@ async function searchSources(values) {
       excludeKeywords: values.excludeKeywords,
       maxViews: Number(values.maxViews) > 0 ? values.maxViews : "",
       hideLikelyOfficial: values.hideLikelyOfficial === true,
+      expandBilibiliQuery: values.expandBilibiliQuery !== false,
+      expandedQueries: queries,
     };
-    const data = await postJson("/api/sources/search", {
-      query: values.query,
-      platform: values.platform,
-      limit: values.limit,
-    });
-    appState.sourceSearchResults = data.results ?? [];
+    const searches = await Promise.all(
+      queries.map(async (query) => {
+        const data = await postJson("/api/sources/search", {
+          query,
+          platform: values.platform,
+          limit: values.limit,
+        });
+        return (data.results ?? []).map((result) => ({ ...result, matchedQuery: query }));
+      }),
+    );
+    appState.sourceSearchResults = dedupeSourceSearchResults(searches.flat());
     const visible = filterSourceSearchResults(appState.sourceSearchResults, appState.sourceSearchFilters).length;
     setStatus(`${visible}/${appState.sourceSearchResults.length} source search result(s) visible after filters.`);
     await renderSources();
   } catch (error) {
     setStatus(error.message);
   }
+}
+
+function buildSourceSearchQueries(values, options = {}) {
+  const edited = lines(values.expandedQueries);
+  if (!options.ignoreEditedQueryList && edited.length) return unique(edited).slice(0, 6);
+
+  const query = String(values.query ?? "").trim();
+  if (!query) return [];
+  if (values.platform !== "bilibili" || values.expandBilibiliQuery === false) return [query];
+
+  const aliases = expandSourceAliases(query);
+  return unique([query, ...aliases]).slice(0, 6);
+}
+
+function expandSourceAliases(query) {
+  const normalized = lower(query);
+  const candidates = [];
+  const knownTitles = [
+    {
+      tests: ["mục thần ký", "muc than ky", "tales of herding gods", "牧神记"],
+      aliases: ["牧神记", "Tales of Herding Gods", "牧神记 解说"],
+    },
+  ];
+  for (const title of knownTitles) {
+    if (title.tests.some((term) => normalized.includes(term))) {
+      candidates.push(...title.aliases);
+    }
+  }
+
+  const episode = normalized.match(/(?:tập|tap|ep|episode|第)\s*0*(\d{1,4})/);
+  if (episode) {
+    candidates.push(`牧神记 第${episode[1]}集`, `牧神记 ${episode[1].padStart(2, "0")}`);
+  }
+  return candidates;
+}
+
+function dedupeSourceSearchResults(results) {
+  const seen = new Set();
+  const deduped = [];
+  for (const result of results) {
+    const key = result.url || `${result.platform}:${result.id ?? result.title}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(result);
+  }
+  return deduped;
 }
 
 function filterSourceSearchResults(results, filters) {
