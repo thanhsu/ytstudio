@@ -3,8 +3,12 @@ import { dirname } from "node:path";
 import type { EditManifest } from "./edit-manifest.ts";
 import { runProcess } from "./process.ts";
 import { setArtifact, sha256 } from "./project-state.ts";
-import { renderArtifactRelativePath, type RenderArtifact } from "./render.ts";
+import { renderArtifactRelativePath } from "./render.ts";
 import { stringifySrt } from "./srt.ts";
+import type { ArtifactRecord } from "./types.ts";
+
+/** Its own kind so a cut never displaces the narrated draft in project state. */
+export type CutArtifact = ArtifactRecord & { kind: "cut" };
 
 export type CutSegment = {
   cueIndex: number;
@@ -113,15 +117,15 @@ export function buildEditRenderArgs(input: EditRenderInput): string[] {
   ];
 }
 
-export async function renderEditedCut(input: EditRenderInput, signal?: AbortSignal): Promise<RenderArtifact> {
+export async function renderEditedCut(input: EditRenderInput, signal?: AbortSignal): Promise<CutArtifact> {
   const args = buildEditRenderArgs(input);
   await mkdir(dirname(input.outputPath), { recursive: true });
   const ffmpeg = input.ffmpegPath ?? process.env.FFMPEG_PATH ?? "ffmpeg";
   await runProcess(ffmpeg, [...(input.ffmpegPrefixArgs ?? []), ...args], { signal });
 
   const timeline = cutTimeline(input.manifest);
-  const artifact: RenderArtifact = {
-    kind: "render",
+  const artifact: CutArtifact = {
+    kind: "cut",
     // Keyed to the editorial decisions, so toggling one cue makes an existing
     // render stale instead of passing as current.
     sourceHash: sha256(

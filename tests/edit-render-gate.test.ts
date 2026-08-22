@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { applyRemoveSelection, createEditManifest } from "../src/edit-manifest.ts";
 import { resolveProjectPath } from "../src/project-paths.ts";
-import { setArtifact } from "../src/project-state.ts";
+import { loadProjectState, setArtifact } from "../src/project-state.ts";
 import { approveCurrentCopyrightCheck, evaluateEditRenderGate, renderEditedCutProject } from "../src/workflow.ts";
 import { makeFakeExecutable } from "./helpers.ts";
 
@@ -107,26 +107,51 @@ test("cutting is refused when every cue was removed", async () => {
   });
 });
 
+async function fakeFfmpeg(): Promise<string> {
+  return makeFakeExecutable(
+    [
+      'import { mkdir, writeFile } from "node:fs/promises";',
+      'import { dirname } from "node:path";',
+      "const outputPath = process.argv.at(-1);",
+      "await mkdir(dirname(outputPath), { recursive: true });",
+      'await writeFile(outputPath, "video", "utf8");',
+    ].join("\n"),
+  );
+}
+
+test("the cut does not displace a narrated draft render", async () => {
+  await withProjectsRoot(async () => {
+    await scaffoldProject();
+    await setArtifact(PROJECT_ID, {
+      kind: "render",
+      sourceHash: "draft-hash",
+      relativePath: "workspace/renders/draft-20260822-000000-000.mp4",
+      createdAt: "2026-08-22T00:00:00.000Z",
+      metadata: {},
+    });
+
+    await renderEditedCutProject(PROJECT_ID, {
+      ffmpegPath: process.execPath,
+      ffmpegPrefixArgs: [await fakeFfmpeg()],
+    });
+
+    const state = await loadProjectState(PROJECT_ID);
+    assert.equal(state.artifacts.render?.sourceHash, "draft-hash");
+    assert.equal(state.artifacts.cut?.kind, "cut");
+  });
+});
+
 test("the cut is written with subtitles realigned to it", async () => {
   await withProjectsRoot(async () => {
     await scaffoldProject();
     await applyRemoveSelection(PROJECT_ID, "2");
-    const fakeFfmpeg = await makeFakeExecutable(
-      [
-        'import { mkdir, writeFile } from "node:fs/promises";',
-        'import { dirname } from "node:path";',
-        "const outputPath = process.argv.at(-1);",
-        "await mkdir(dirname(outputPath), { recursive: true });",
-        'await writeFile(outputPath, "video", "utf8");',
-      ].join("\n"),
-    );
 
     const artifact = await renderEditedCutProject(PROJECT_ID, {
       ffmpegPath: process.execPath,
-      ffmpegPrefixArgs: [fakeFfmpeg],
+      ffmpegPrefixArgs: [await fakeFfmpeg()],
     });
 
-    assert.equal(artifact.kind, "render");
+    assert.equal(artifact.kind, "cut");
     assert.equal(artifact.metadata.keptCues, 2);
     assert.equal(artifact.metadata.removedCues, 1);
     assert.match(artifact.relativePath, /^workspace\/renders\/cut-.+\.mp4$/);

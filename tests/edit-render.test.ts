@@ -138,7 +138,7 @@ test("records a render artifact describing the cut", async () => {
       ffmpegPrefixArgs: [await fakeFfmpeg()],
     });
 
-    assert.equal(artifact.kind, "render");
+    assert.equal(artifact.kind, "cut");
     assert.equal(artifact.relativePath, "renders/cut.mp4");
     assert.equal(artifact.metadata.durationSeconds, 8.5);
     assert.equal(artifact.metadata.keptCues, 2);

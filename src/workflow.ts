@@ -4,7 +4,7 @@ import { loadAssetManifest, validateAssetManifest } from "./assets.ts";
 import { saveCaptions, type CaptionArtifact } from "./captions.ts";
 import { loadStudioConfig } from "./config.ts";
 import { loadEditManifest, type EditManifest } from "./edit-manifest.ts";
-import { buildCutSrt, cutTimeline, renderEditedCut } from "./edit-render.ts";
+import { buildCutSrt, cutTimeline, renderEditedCut, type CutArtifact } from "./edit-render.ts";
 import {
   derivePipelineStatus,
   loadProjectState,
@@ -130,7 +130,7 @@ export async function evaluateEditRenderGate(projectId: string): Promise<RenderG
 export async function renderEditedCutProject(
   projectId: string,
   options: RenderDraftOptions = {},
-): Promise<RenderArtifact> {
+): Promise<CutArtifact> {
   const gate = await evaluateEditRenderGate(projectId);
   if (!gate.allowed) {
     throw new Error(`Cut render is gated: ${gate.reasons.join(", ")}.`);
