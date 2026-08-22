@@ -82,6 +82,30 @@ test("render route reports unmet approval gates", async () => {
   });
 });
 
+test("cut render route reports its own gates, not the narrated draft gates", async () => {
+  await withTempCwd(async () => {
+    const running = await startStudioServer(createStudioServer(), { port: 0 });
+    try {
+      const response = await fetch(`${running.url}/api/projects/sample-project/edit-render`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: running.url },
+        body: "{}",
+      });
+
+      assert.equal(response.status, 409);
+      const body = await response.json();
+      assert.equal(body.code, "edit-render-gates-unmet");
+      assert.deepEqual(body.details.reasons, [
+        "copyright-approval-missing",
+        "source-media-missing",
+        "edit-manifest-missing",
+      ]);
+    } finally {
+      await running.close();
+    }
+  });
+});
+
 test("config route loads and persists studio model settings", async () => {
   await withTempCwd(async () => {
     const running = await startStudioServer(createStudioServer(), { port: 0 });

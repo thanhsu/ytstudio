@@ -72,11 +72,13 @@ import {
   approveCurrentScript,
   approveCurrentCopyrightCheck,
   approveEmptyAssetManifest,
+  evaluateEditRenderGate,
   evaluateProjectRenderGate,
   generateVoice,
   prepareCaptions,
   projectPipelineStatus,
   renderDraftProject,
+  renderEditedCutProject,
 } from "./workflow.ts";
 import { deriveWorkflowStepStates, getWorkflowTemplate, WORKFLOW_TEMPLATES } from "./workflow-templates.ts";
 import {
@@ -796,6 +798,20 @@ async function routeRequest(
       return;
     }
     await startProjectJob(response, projectId, "render", () => renderDraftProject(projectId));
+    return;
+  }
+
+  if (method === "POST" && rest === "edit-render") {
+    const gate = await evaluateEditRenderGate(projectId);
+    if (!gate.allowed) {
+      sendError(response, 409, {
+        code: "edit-render-gates-unmet",
+        message: "The cut cannot start until rights are cleared and cues are kept.",
+        details: { reasons: gate.reasons },
+      });
+      return;
+    }
+    await startProjectJob(response, projectId, "render", () => renderEditedCutProject(projectId));
     return;
   }
 

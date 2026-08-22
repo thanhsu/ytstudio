@@ -1,8 +1,10 @@
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { loadAssetManifest, validateAssetManifest } from "./assets.ts";
 import { saveCaptions, type CaptionArtifact } from "./captions.ts";
 import { loadStudioConfig } from "./config.ts";
+import { loadEditManifest, type EditManifest } from "./edit-manifest.ts";
+import { buildCutSrt, cutTimeline, renderEditedCut } from "./edit-render.ts";
 import {
   derivePipelineStatus,
   loadProjectState,
@@ -95,6 +97,85 @@ export async function evaluateProjectRenderGate(projectId: string): Promise<Rend
     captions: status.captions,
     visualMapping: !hasAssets ? "not-required" : mapping?.status === "approved" ? "approved" : "missing",
   });
+}
+
+/**
+ * The cut path answers to different gates than the narrated draft: it publishes
+ * the source footage itself, so rights clearance is the whole gate, and it needs
+ * a video and a set of kept cues rather than narration and captions.
+ */
+export async function evaluateEditRenderGate(projectId: string): Promise<RenderGateResult> {
+  const reasons: string[] = [];
+
+  const copyright = (await projectPipelineStatus(projectId)).copyright;
+  if (copyright === "missing" || copyright === "stale") {
+    reasons.push(`copyright-approval-${copyright}`);
+  }
+
+  const state = await loadProjectState(projectId);
+  if (!state.artifacts.media) {
+    reasons.push("source-media-missing");
+  }
+
+  const manifest = await loadEditManifestOrNull(projectId);
+  if (!manifest) {
+    reasons.push("edit-manifest-missing");
+  } else if (!cutTimeline(manifest).length) {
+    reasons.push("edit-manifest-keeps-no-cues");
+  }
+
+  return { allowed: reasons.length === 0, reasons };
+}
+
+export async function renderEditedCutProject(
+  projectId: string,
+  options: RenderDraftOptions = {},
+): Promise<RenderArtifact> {
+  const gate = await evaluateEditRenderGate(projectId);
+  if (!gate.allowed) {
+    throw new Error(`Cut render is gated: ${gate.reasons.join(", ")}.`);
+  }
+
+  const config = await loadStudioConfig();
+  const state = await loadProjectState(projectId);
+  const manifest = requireEditManifest(await loadEditManifestOrNull(projectId));
+  const outputPath = editRenderOutputPath(projectId);
+
+  // Written before the cut so a failed encode never leaves subtitles that claim
+  // to describe a file that does not exist.
+  await mkdir(dirname(outputPath), { recursive: true });
+  await writeFile(outputPath.replace(/\.mp4$/, ".srt"), buildCutSrt(manifest), "utf8");
+
+  return renderEditedCut({
+    projectId,
+    manifest,
+    sourceVideoPath: resolveProjectPath(projectId, requireArtifact(state.artifacts.media, "media").relativePath),
+    outputPath,
+    ffmpegPath: options.ffmpegPath ?? (config.render.ffmpegPath || undefined),
+    ffmpegPrefixArgs: options.ffmpegPrefixArgs,
+  });
+}
+
+export function editRenderOutputPath(projectId: string, now = new Date()): string {
+  const timestamp = now.toISOString().replace(/[-:TZ.]/g, "").slice(0, 17);
+  const version = `${timestamp.slice(0, 8)}-${timestamp.slice(8, 14)}-${timestamp.slice(14)}`;
+  return resolveProjectPath(projectId, "workspace", "renders", `cut-${version}.mp4`);
+}
+
+async function loadEditManifestOrNull(projectId: string): Promise<EditManifest | null> {
+  try {
+    return await loadEditManifest(projectId);
+  } catch (error: unknown) {
+    if (isNotFound(error)) return null;
+    throw error;
+  }
+}
+
+function requireEditManifest(manifest: EditManifest | null): EditManifest {
+  if (!manifest) {
+    throw new Error("Edit manifest is missing.");
+  }
+  return manifest;
 }
 
 function isNotFound(error: unknown): boolean {
