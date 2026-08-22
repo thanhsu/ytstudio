@@ -1,3 +1,4 @@
+import { extractNarration, SPOKEN_SECTION_HEADINGS } from "../narration.ts";
 import type { Metadata, ScenePlan } from "../types.ts";
 
 export type ParsedScript = {
@@ -34,7 +35,23 @@ export function parseScriptGeneration(raw: string, projectId: string): ParsedScr
   });
 
   const scenePlan: ScenePlan = { projectId, scenes };
-  return { script: requireText(payload.script, "script"), metadata, scenePlan };
+  return { script: requireNarratableScript(payload.script), metadata, scenePlan };
+}
+
+/**
+ * A script the narration extractor cannot read is worse than a rejected one: it
+ * validates, gets written, gets approved, and only fails at the voice stage with
+ * an empty transcript. A model that translated or renamed the headings is caught
+ * here, while nothing has been written yet.
+ */
+function requireNarratableScript(value: unknown): string {
+  const script = requireText(value, "script");
+  if (!extractNarration(script).text.trim()) {
+    throw new Error(
+      `Model response field script contains no narration. The spoken body must sit under these markdown headings, written in English exactly as shown: ${SPOKEN_SECTION_HEADINGS.map((heading) => `## ${heading}`).join(", ")}.`,
+    );
+  }
+  return script;
 }
 
 function parseJsonObject(raw: string): Record<string, unknown> {

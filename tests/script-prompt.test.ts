@@ -51,3 +51,14 @@ test("the system message demands original commentary and JSON only", () => {
   assert.match(system.content, /single JSON object/i);
   assert.match(system.content, /scenePlan/);
 });
+
+test("the system message pins the section headings to English and the body to the brief language", () => {
+  const [system] = buildScriptPrompt(sampleBrief({ language: "Vietnamese" }));
+
+  for (const heading of ["## Hook", "## Context", "## Main Points", "## Closing"]) {
+    assert.ok(system.content.includes(heading), `system prompt should name ${heading}`);
+  }
+  assert.match(system.content, /in English/i);
+  assert.match(system.content, /verbatim/i);
+  assert.match(system.content, /do not translate them/i);
+});

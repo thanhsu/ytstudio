@@ -1,3 +1,4 @@
+import { SPOKEN_SECTION_HEADINGS } from "./narration.ts";
 import type { VideoBrief } from "./types.ts";
 
 export type ChatMessage = {
@@ -17,6 +18,8 @@ export function buildScriptPrompt(brief: VideoBrief): ChatMessage[] {
   ];
 }
 
+const HEADING_LIST = SPOKEN_SECTION_HEADINGS.map((heading) => `'## ${heading}'`).join(", ");
+
 const SYSTEM_PROMPT = `You write scripts for a YouTube review channel.
 
 Write original commentary, analysis, and opinion. Do not recap or retell the
@@ -28,7 +31,7 @@ Answer with a single JSON object and nothing else. No markdown fence, no
 commentary before or after. The object has exactly these fields:
 
 {
-  "script": "markdown with '## Hook', '## Context', '## Main Points', '## Closing' sections",
+  "script": "markdown with the four required section headings, in order",
   "metadata": {
     "titles": ["three to five title options, each under 100 characters"],
     "description": "two or three sentences for the video description",
@@ -46,7 +49,18 @@ commentary before or after. The object has exactly these fields:
 }
 
 Every durationSeconds must be a positive number, and the scene durations
-together should roughly match the runtime target. Write the script in the
+together should roughly match the runtime target.
+
+The "script" field must contain these four markdown headings and no other
+top-level spoken section: ${HEADING_LIST}.
+
+The headings themselves are keywords, not content. Write them in English,
+verbatim, character for character, exactly as listed above, even when the
+requested language is not English. Do not translate them, do not rename them,
+do not reorder them, and do not add or remove the '## ' prefix.
+
+Write every other part of the script — the body text under each heading, the
+titles, the description, the pinned comment, and the scene plan — in the
 requested language.`;
 
 function userPrompt(brief: VideoBrief): string {

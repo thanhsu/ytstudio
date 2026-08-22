@@ -15,7 +15,17 @@ const SKIPPED_LINE_PREFIXES = [
   "topic:",
 ];
 
-const SPOKEN_SECTIONS = new Set(["hook", "context", "main points", "closing", "review"]);
+/**
+ * The `##` headings a generated script must use for its spoken body. The prompt
+ * asks for exactly these and the response validator rejects a script that yields
+ * no narration under them, so all three stay in step from this one declaration.
+ */
+export const SPOKEN_SECTION_HEADINGS = ["Hook", "Context", "Main Points", "Closing"] as const;
+
+const SPOKEN_SECTIONS = new Set([
+  ...SPOKEN_SECTION_HEADINGS.map((heading) => heading.toLowerCase()),
+  "review",
+]);
 
 export function extractNarration(markdown: string): NarrationDocument {
   const paragraphs: string[] = [];

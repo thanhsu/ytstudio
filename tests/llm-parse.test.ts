@@ -63,3 +63,39 @@ test("a non-positive scene duration is rejected by position", () => {
 
   assert.throws(() => parseScriptGeneration(JSON.stringify(payload), "sample-project"), /scenePlan\[0\]\.durationSeconds/);
 });
+
+test("a script with translated section headings is rejected before anything is written", () => {
+  const payload = {
+    ...validPayload(),
+    script: "# Qin Mu\n\n## Mở đầu\n\nBình luận gốc.\n\n## Phân tích\n\nNội dung.\n\n## Kết luận\n\nKết.",
+  };
+
+  assert.throws(() => parseScriptGeneration(JSON.stringify(payload), "sample-project"), (error: unknown) => {
+    assert.ok(error instanceof Error);
+    assert.match(error.message, /no narration/i);
+    assert.match(error.message, /## Hook/);
+    assert.match(error.message, /## Closing/);
+    return true;
+  });
+});
+
+test("a script with common English aliases for the headings is rejected", () => {
+  const payload = {
+    ...validPayload(),
+    script: "# Title\n\n## Introduction\n\nSetup.\n\n## Analysis\n\nArgument.\n\n## Conclusion\n\nWrap up.",
+  };
+
+  assert.throws(() => parseScriptGeneration(JSON.stringify(payload), "sample-project"), /no narration/i);
+});
+
+test("a script with no headings at all is rejected", () => {
+  const payload = { ...validPayload(), script: "Just a wall of prose with no markdown headings anywhere." };
+
+  assert.throws(() => parseScriptGeneration(JSON.stringify(payload), "sample-project"), /no narration/i);
+});
+
+test("a script whose required headings are present but empty is rejected", () => {
+  const payload = { ...validPayload(), script: "# Title\n\n## Hook\n\n## Context\n\n## Main Points\n\n## Closing\n" };
+
+  assert.throws(() => parseScriptGeneration(JSON.stringify(payload), "sample-project"), /no narration/i);
+});
