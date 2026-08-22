@@ -1,7 +1,7 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { loadStudioConfig } from "./config.ts";
-import { loadAssetManifest, saveAssetManifest, type AssetRecord } from "./assets.ts";
+import { loadAssetManifest, saveAssetManifest, type AssetManifest, type AssetRecord } from "./assets.ts";
 import { resolveProjectPath } from "./project-paths.ts";
 import { runProcess } from "./process.ts";
 
@@ -70,6 +70,34 @@ export function buildAssetAsrCommand(config: AsrConfig, audioPath: string, outpu
     };
   }
   throw new Error("ASR provider is disabled.");
+}
+
+/**
+ * Analysis writes "running" to the manifest before spawning FFmpeg, so a crash or
+ * restart leaves assets permanently excluded from visual mapping. Any asset still
+ * marked running without a live job owning it is reported as failed and retryable.
+ */
+export async function recoverInterruptedAnalysis(
+  projectId: string,
+  activeAssetIds: Iterable<string> = [],
+): Promise<AssetManifest> {
+  const manifest = await loadAssetManifest(projectId);
+  const active = new Set(activeAssetIds);
+  let recovered = false;
+
+  for (const asset of manifest.assets) {
+    if (asset.analysisStatus === "running" && !active.has(asset.id)) {
+      asset.analysisStatus = "failed";
+      asset.analysisError = "Analysis was interrupted before it finished. Run it again.";
+      asset.analysisUpdatedAt = new Date().toISOString();
+      recovered = true;
+    }
+  }
+
+  if (recovered) {
+    await saveAssetManifest(projectId, manifest);
+  }
+  return manifest;
 }
 
 export async function analyzeAsset(projectId: string, assetId: string, projectLanguage?: string): Promise<AssetRecord> {

@@ -1,7 +1,7 @@
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import { createWriteStream } from "node:fs";
 import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { basename, extname, join, resolve } from "node:path";
+import { basename, extname, join, resolve, sep } from "node:path";
 import { createReadStream } from "node:fs";
 import Busboy from "busboy";
 import {
@@ -1139,7 +1139,7 @@ function brandAssetType(value: unknown): BrandAssetType {
 function isSameOrigin(request: IncomingMessage): boolean {
   const origin = request.headers.origin;
   if (!origin) {
-    return true;
+    return false;
   }
   const host = request.headers.host;
   return origin === `http://${host}` || origin === `https://${host}`;
@@ -1157,12 +1157,21 @@ function sendError(response: ServerResponse, status: number, error: ApiError): v
   sendJson(response, status, error);
 }
 
-async function sendStatic(response: ServerResponse, staticRoot: string, pathname: string): Promise<void> {
+export function resolveStaticFilePath(staticRoot: string, pathname: string): string | null {
   const relativePath = pathname === "/" ? "src/web/index.html" : `src/web${pathname}`;
   const root = resolve(staticRoot);
   const filePath = resolve(root, relativePath);
 
-  if (!filePath.startsWith(root)) {
+  if (filePath !== root && !filePath.startsWith(`${root}${sep}`)) {
+    return null;
+  }
+  return filePath;
+}
+
+async function sendStatic(response: ServerResponse, staticRoot: string, pathname: string): Promise<void> {
+  const filePath = resolveStaticFilePath(staticRoot, pathname);
+
+  if (!filePath) {
     sendError(response, 404, { code: "not-found", message: "Route not found." });
     return;
   }

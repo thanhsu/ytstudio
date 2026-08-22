@@ -5,9 +5,11 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createStudioServer, startStudioServer } from "../src/server.ts";
 import {
+  deriveStepStates,
   deriveWorkflowStepStates,
   getWorkflowTemplate,
   WORKFLOW_TEMPLATES,
+  type WorkflowStep,
 } from "../src/workflow-templates.ts";
 import type { ProjectState, WorkflowType } from "../src/types.ts";
 
@@ -117,4 +119,21 @@ test("unknown workflow type falls back to review recap", async () => {
     process.chdir(previousCwd);
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("step states resolve dependencies declared after their dependents", () => {
+  const steps: WorkflowStep[] = [
+    { id: "render", title: "Render", description: "", stage: "render", dependsOn: ["script"], output: "render" },
+    { id: "script", title: "Script", description: "", stage: "script", dependsOn: [], output: "script-approval" },
+  ];
+  const state: ProjectState = {
+    version: 1,
+    approvals: { script: { sourceHash: "hash", approvedAt: "2026-08-21T00:00:00.000Z", note: "" } },
+    artifacts: {},
+  };
+
+  const states = deriveStepStates(steps, state);
+
+  assert.equal(states.find((step) => step.id === "script")?.status, "done");
+  assert.equal(states.find((step) => step.id === "render")?.status, "ready");
 });

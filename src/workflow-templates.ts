@@ -338,23 +338,27 @@ export function getWorkflowTemplate(value: unknown): WorkflowTemplate {
 }
 
 export function deriveWorkflowStepStates(type: unknown, state: ProjectState): WorkflowStepState[] {
-  const steps = getWorkflowTemplate(type).steps;
-  const statuses = new Map<WorkflowStepId, WorkflowStepStatus>();
+  return deriveStepStates(getWorkflowTemplate(type).steps, state);
+}
 
+export function deriveStepStates(steps: WorkflowStep[], state: ProjectState): WorkflowStepState[] {
+  // Completion comes from persisted state alone, so resolve it for every step up
+  // front. Dependencies can then be read in any declaration order.
+  const done = new Set<WorkflowStepId>();
   for (const step of steps) {
-    const status = stepDone(step, state)
-      ? "done"
-      : step.dependsOn.every((dependency) => statuses.get(dependency) === "done")
-        ? "ready"
-        : "blocked";
-    statuses.set(step.id, status);
+    if (stepDone(step, state)) {
+      done.add(step.id);
+    }
   }
 
-  return steps.map((step) => ({
-    ...step,
-    status: statuses.get(step.id) ?? "blocked",
-    canRun: statuses.get(step.id) === "ready",
-  }));
+  return steps.map((step) => {
+    const status: WorkflowStepStatus = done.has(step.id)
+      ? "done"
+      : step.dependsOn.every((dependency) => done.has(dependency))
+        ? "ready"
+        : "blocked";
+    return { ...step, status, canRun: status === "ready" };
+  });
 }
 
 function stepDone(step: WorkflowStep, state: ProjectState): boolean {

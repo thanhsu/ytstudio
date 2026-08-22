@@ -34,3 +34,18 @@ test("rejects video excerpts over five seconds", () => {
   mapping.segments[0].sourceDurationSeconds = 6;
   assert.ok(validateVisualMapping(mapping, []).errors.includes("scene-001 exceeds the five-second video limit."));
 });
+
+test("scenes without a relevant asset fall back to a generated background", () => {
+  const mapping = generateVisualMapping(buildNarrationScenes(captions), [
+    {
+      id: "image-1", filename: "logo.png", relativePath: "assets/images/logo.png", mediaType: "image",
+      mimeType: "image/png", sizeBytes: 10, rightsConfirmed: true, usagePurpose: "channel branding",
+      createdAt: "2026-08-21T00:00:00.000Z", analysisStatus: "ready",
+      keywords: ["logo", "branding"], contextSummary: "channel logo plate",
+    },
+  ]);
+
+  assert.equal(mapping.segments[0].assetId, null);
+  assert.equal(mapping.segments[0].confidence, 0);
+  assert.equal(mapping.segments[0].fallback, "generated-background");
+});

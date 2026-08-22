@@ -32,9 +32,11 @@ export function generateVisualMapping(scenes: NarrationScene[], assets: AssetRec
   const segments = scenes.map((scene) => {
     const ranked = eligible
       .filter((asset) => !(asset.mediaType === "video" && asset.id === previousVideoId))
-      .map((asset) => ({ asset, score: scoreAsset(scene, asset) }))
+      .map((asset) => ({ asset, ...scoreAsset(scene, asset) }))
       .sort((left, right) => right.score - left.score || left.asset.id.localeCompare(right.asset.id));
-    const selected = ranked[0]?.score > 0 ? ranked[0] : undefined;
+    // Media-type and status bonuses only break ties between relevant assets; an
+    // asset that matches nothing in the scene must never win by default.
+    const selected = ranked.find((candidate) => candidate.relevance > 0);
     if (selected?.asset.mediaType === "video") previousVideoId = selected.asset.id;
     else previousVideoId = null;
     return {
@@ -85,10 +87,12 @@ function sceneFromGroup(group: ReturnType<typeof parseSrt>, index: number): Narr
   return { id: `scene-${String(index + 1).padStart(3, "0")}`, startSeconds: seconds(group[0].start), endSeconds: seconds(group.at(-1)!.end), narration, keywords: extractAssetKeywords(narration), intent };
 }
 
-function scoreAsset(scene: NarrationScene, asset: AssetRecord): number {
+function scoreAsset(scene: NarrationScene, asset: AssetRecord): { relevance: number; score: number } {
   const terms = assetTerms(asset);
   const overlap = scene.keywords.filter((keyword) => terms.has(keyword)).length;
-  return overlap * 4 + (scene.keywords.some((keyword) => asset.usagePurpose.toLowerCase().includes(keyword)) ? 5 : 0) + (asset.mediaType === "video" ? 3 : 2) + (asset.analysisStatus === "limited" ? -2 : 0);
+  const purposeMatch = scene.keywords.some((keyword) => asset.usagePurpose.toLowerCase().includes(keyword)) ? 5 : 0;
+  const relevance = overlap * 4 + purposeMatch;
+  return { relevance, score: relevance + (asset.mediaType === "video" ? 3 : 2) + (asset.analysisStatus === "limited" ? -2 : 0) };
 }
 
 function assetTerms(asset: AssetRecord): Set<string> { return new Set(extractAssetKeywords(`${asset.filename} ${asset.usagePurpose} ${asset.contextSummary ?? ""} ${(asset.keywords ?? []).join(" ")}`)); }

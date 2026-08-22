@@ -3,7 +3,7 @@ import test from "node:test";
 import { mkdtemp, readFile, rm, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { createStudioServer, startStudioServer } from "../src/server.ts";
+import { createStudioServer, resolveStaticFilePath, startStudioServer } from "../src/server.ts";
 
 async function withTempCwd<T>(fn: () => Promise<T>): Promise<T> {
   const previousCwd = process.cwd();
@@ -431,4 +431,27 @@ test("batch review API builds episode analysis and story arc", async () => {
     process.chdir(previousCwd);
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("static path resolution rejects sibling directories sharing the root prefix", () => {
+  assert.equal(resolveStaticFilePath("/srv/studio", "/../../../studio-evil/app.js"), null);
+  assert.match(String(resolveStaticFilePath("/srv/studio", "/app.js")), /src[\\/]web[\\/]app\.js$/);
+});
+
+test("mutating requests without an Origin header are refused", async () => {
+  await withTempCwd(async () => {
+    const running = await startStudioServer(createStudioServer(), { port: 0 });
+    try {
+      const response = await fetch(`${running.url}/api/projects/sample-project/captions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+
+      assert.equal(response.status, 403);
+      assert.equal((await response.json()).code, "same-origin-required");
+    } finally {
+      await running.close();
+    }
+  });
 });

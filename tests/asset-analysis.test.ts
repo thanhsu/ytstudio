@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildAssetAsrCommand, extractAssetKeywords, normalizeProbeResult, selectSubtitleStream } from "../src/asset-analysis.ts";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { buildAssetAsrCommand, extractAssetKeywords, normalizeProbeResult, recoverInterruptedAnalysis, selectSubtitleStream } from "../src/asset-analysis.ts";
 
 test("normalizes ffprobe video metadata", () => {
   const result = normalizeProbeResult({
@@ -39,4 +42,47 @@ test("builds a local whisper.cpp command for asset fallback transcription", () =
   }, "audio.wav", "context/asset-1");
   assert.equal(command.executable, "whisper-cli");
   assert.deepEqual(command.args, ["-m", "model.bin", "-f", "audio.wav", "-l", "zh", "-osrt", "-of", "context/asset-1"]);
+});
+
+async function withProjectManifest<T>(assets: unknown[], fn: () => Promise<T>): Promise<T> {
+  const previousCwd = process.cwd();
+  const root = await mkdtemp(join(tmpdir(), "yt-asset-analysis-"));
+  try {
+    process.chdir(root);
+    await mkdir(join("projects", "sample-project", "assets"), { recursive: true });
+    await writeFile(
+      join("projects", "sample-project", "assets", "asset-manifest.json"),
+      JSON.stringify({ version: 1, assets }),
+      "utf8",
+    );
+    return await fn();
+  } finally {
+    process.chdir(previousCwd);
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+function runningAsset(id: string) {
+  return {
+    id, filename: `${id}.mp4`, relativePath: `assets/clips/${id}.mp4`, mediaType: "video",
+    mimeType: "video/mp4", sizeBytes: 10, rightsConfirmed: true, usagePurpose: "review context",
+    createdAt: "2026-08-21T00:00:00.000Z", analysisStatus: "running",
+  };
+}
+
+test("analysis interrupted by a restart is reported as failed so it can be retried", async () => {
+  await withProjectManifest([runningAsset("asset-1")], async () => {
+    const manifest = await recoverInterruptedAnalysis("sample-project");
+
+    assert.equal(manifest.assets[0].analysisStatus, "failed");
+    assert.match(String(manifest.assets[0].analysisError), /interrupted/i);
+  });
+});
+
+test("analysis still owned by a running job is left untouched", async () => {
+  await withProjectManifest([runningAsset("asset-1")], async () => {
+    const manifest = await recoverInterruptedAnalysis("sample-project", ["asset-1"]);
+
+    assert.equal(manifest.assets[0].analysisStatus, "running");
+  });
 });
