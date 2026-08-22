@@ -180,8 +180,16 @@ async function loadProjects() {
     appState.selectedSeries = appState.series[0];
   }
   renderProjects();
+  if (location.hash === "#sources") {
+    await renderSources();
+    return;
+  }
   if (location.hash === "#series") {
     renderSeriesManager();
+    return;
+  }
+  if (location.hash === "#config") {
+    renderConfig();
     return;
   }
   if (appState.projects.length && !appState.selectedProject) {

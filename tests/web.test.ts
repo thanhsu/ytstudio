@@ -72,6 +72,8 @@ test("web app exposes UI controls for media, ASR, captions, and render actions",
   assert.match(script, /reviewProjectApiUrl/);
   assert.equal(script.includes("/api/series"), true);
   assert.match(script, /#series/);
+  assert.match(script, /#sources/);
+  assert.match(script, /#config/);
   assert.match(script, /Copyright Check/);
   assert.match(script, /Upload Asset/);
   assert.match(script, /Uploaded assets/);
