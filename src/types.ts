@@ -24,12 +24,23 @@ export type ScenePlan = {
   }>;
 };
 
+/**
+ * What actually produced the script on disk. Persisted so the studio can never
+ * describe an existing script by whatever provider happens to be configured now.
+ */
+export type ScriptGenerator = {
+  provider: string;
+  model: string;
+};
+
 export type Metadata = {
   projectId: string;
   titles: string[];
   description: string;
   hashtags: string[];
   pinnedComment: string;
+  // Absent on metadata.json written before provenance was recorded.
+  generator?: ScriptGenerator;
 };
 
 export type CopyrightCheckInput = {

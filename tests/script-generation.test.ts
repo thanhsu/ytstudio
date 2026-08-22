@@ -64,6 +64,7 @@ test("generation writes the script, metadata, and scene plan together", async ()
     assert.match(await readFile(join("projects", "sample-project", "script.md"), "utf8"), /Distinct commentary/);
     const metadata = JSON.parse(await readFile(join("projects", "sample-project", "metadata.json"), "utf8"));
     assert.deepEqual(metadata.titles, ["Stub title"]);
+    assert.deepEqual(metadata.generator, { provider: "stub", model: "stub-model" });
     const scenePlan = JSON.parse(await readFile(join("projects", "sample-project", "scene-plan.json"), "utf8"));
     assert.equal(scenePlan.scenes[0].durationSeconds, 8);
   });
@@ -80,5 +81,24 @@ test("a provider failure writes nothing and surfaces the reason", async () => {
 
     await assert.rejects(() => generateScript("sample-project", { provider: failing }), /11434/);
     await assert.rejects(() => stat(join("projects", "sample-project", "script.md")), /ENOENT/);
+  });
+});
+
+test("the metadata records which provider and model produced the script", async () => {
+  await withProject(async () => {
+    const result = await generateScript("sample-project", { provider: stubProvider() });
+
+    assert.deepEqual(result.metadata.generator, { provider: "stub", model: "stub-model" });
+
+    // Repointing the studio at a different model must not relabel the script
+    // that is already on disk.
+    await writeFile(
+      "studio.config.json",
+      JSON.stringify({ script: { provider: "openai-compatible", model: "qwen2.5:14b" } }),
+      "utf8",
+    );
+
+    const persisted = JSON.parse(await readFile(join("projects", "sample-project", "metadata.json"), "utf8"));
+    assert.deepEqual(persisted.generator, { provider: "stub", model: "stub-model" });
   });
 });

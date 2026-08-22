@@ -710,3 +710,48 @@ test("a paid script model is refused without confirmation", async () => {
     }
   });
 });
+
+test("the project snapshot reports the model that produced the current script, not the configured one", async () => {
+  await withTempCwd(async () => {
+    const running = await startStudioServer(createStudioServer(), { port: 0 });
+    try {
+      const events = await fetch(`${running.url}/api/projects/sample-project/events`);
+      const started = await postJson(running, "script");
+      const { job } = await started.json();
+      const finished = await readEventStreamUntil(
+        events,
+        (payload) => payload.id === job.id && payload.status !== "running",
+      );
+      assert.equal(finished.status, "succeeded");
+
+      const generated = await (await fetch(`${running.url}/api/projects/sample-project`)).json();
+      assert.deepEqual(generated.metadata.generator, { provider: "dry-run", model: "local-template" });
+
+      // Repointing the studio at a hosted model must not relabel the template
+      // output that is already on disk and awaiting approval.
+      await writeFile(
+        "studio.config.json",
+        JSON.stringify({ script: { provider: "openai-compatible", model: "qwen2.5:14b" } }),
+        "utf8",
+      );
+
+      const afterConfigChange = await (await fetch(`${running.url}/api/projects/sample-project`)).json();
+      assert.deepEqual(afterConfigChange.metadata.generator, { provider: "dry-run", model: "local-template" });
+    } finally {
+      await running.close();
+    }
+  });
+});
+
+test("the project snapshot carries no metadata before a script exists", async () => {
+  await withTempCwd(async () => {
+    const running = await startStudioServer(createStudioServer(), { port: 0 });
+    try {
+      const snapshot = await (await fetch(`${running.url}/api/projects/sample-project`)).json();
+
+      assert.equal(snapshot.metadata, null);
+    } finally {
+      await running.close();
+    }
+  });
+});

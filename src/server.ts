@@ -969,6 +969,7 @@ async function sendProject(response: ServerResponse, projectId: string): Promise
   sendJson(response, 200, {
     brief,
     state,
+    metadata: await loadProjectMetadata(projectId),
     assetManifest,
     visualMapping,
     pipeline: await projectPipelineStatus(projectId),
@@ -978,6 +979,19 @@ async function sendProject(response: ServerResponse, projectId: string): Promise
       steps: deriveWorkflowStepStates(template.type, state),
     },
   });
+}
+
+/**
+ * The generated metadata, including which provider and model actually wrote the
+ * current script. Absent until a script has been generated, which the client
+ * reports as such rather than falling back to the live configuration.
+ */
+async function loadProjectMetadata(projectId: string): Promise<unknown> {
+  try {
+    return JSON.parse(await readFile(resolveProjectPath(projectId, "metadata.json"), "utf8")) as unknown;
+  } catch {
+    return null;
+  }
 }
 
 async function sendProjectFile(response: ServerResponse, projectId: string, relativePath: string): Promise<void> {

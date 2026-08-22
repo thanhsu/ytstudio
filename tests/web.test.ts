@@ -137,7 +137,7 @@ test("the studio follows job progress over the project event stream", async () =
   assert.match(script, /running in the background/);
 });
 
-test("the script stage shows the configured model and gates paid generation", async () => {
+test("the script stage shows the model that produced the script and gates paid generation", async () => {
   const html = await readFile("src/web/index.html", "utf8");
   const script = await readFile("src/web/app.js", "utf8");
 
@@ -146,4 +146,9 @@ test("the script stage shows the configured model and gates paid generation", as
   assert.match(script, /paidScriptDialog/);
   assert.match(script, /requestScript/);
   assert.match(script, /Script model/);
+  assert.match(script, /scriptModelSummary/);
+  // The label reads the persisted provenance, never the live configuration.
+  assert.match(script, /snapshot\.metadata\?\.generator/);
+  assert.match(script, /No script generated yet/);
+  assert.doesNotMatch(script, /"Script model": `\$\{appState\.config/);
 });

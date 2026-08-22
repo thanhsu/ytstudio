@@ -1170,11 +1170,24 @@ function renderScript(snapshot) {
     actionButton("Approve Script", () => postProjectAction("script/approve", {}, "Script approved.")),
     summaryGrid({
       Topic: snapshot.brief.topic ?? "",
-      "Script model": `${appState.config?.script?.provider ?? "dry-run"} · ${appState.config?.script?.model ?? "local-template"}`,
+      "Script model": scriptModelSummary(snapshot),
       Approval: scriptStatus,
       Output: "script.md, metadata.json, scene-plan.json",
     }),
   );
+}
+
+// Reads what produced the script on disk, never the live configuration: pointing
+// Config at a hosted model must not relabel an existing template-generated script.
+function scriptModelSummary(snapshot) {
+  const generator = snapshot.metadata?.generator;
+  if (generator?.provider) {
+    return `${generator.provider} · ${generator.model}`;
+  }
+  if (snapshot.metadata) {
+    return "Unknown — this script predates provenance recording";
+  }
+  return "No script generated yet";
 }
 
 function renderMedia(snapshot) {

@@ -2,13 +2,10 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { loadStudioConfig, type StudioConfig } from "./config.ts";
 import { ensureProjectDir, projectDir, readJson, writeJson } from "./fs.ts";
-import { buildDryRunScript, createDryRunProvider, type ScriptGeneration } from "./llm/dry-run.ts";
+import { createDryRunProvider, type ScriptGeneration } from "./llm/dry-run.ts";
 import { createOpenAiCompatibleProvider } from "./llm/openai-compatible.ts";
 import type { LlmProvider } from "./llm/types.ts";
-import type { VideoBrief } from "./types.ts";
-
-export { buildDryRunScript };
-export type { ScriptGeneration };
+import type { Metadata, VideoBrief } from "./types.ts";
 
 export type GenerateScriptOptions = {
   provider?: LlmProvider;
@@ -30,12 +27,20 @@ export async function generateScript(
     options.signal,
   );
 
+  // Provenance is stamped onto the metadata that ships with the script, so the
+  // studio describes the script on disk rather than the configuration in force
+  // when someone happens to look at it.
+  const metadata: Metadata = {
+    ...result.metadata,
+    generator: { provider: result.provider, model: result.model },
+  };
+
   const dir = await ensureProjectDir(projectId);
   await writeFile(join(dir, "script.md"), result.script, "utf8");
-  await writeJson(join(dir, "metadata.json"), result.metadata);
+  await writeJson(join(dir, "metadata.json"), metadata);
   await writeJson(join(dir, "scene-plan.json"), result.scenePlan);
 
-  return { script: result.script, metadata: result.metadata, scenePlan: result.scenePlan };
+  return { script: result.script, metadata, scenePlan: result.scenePlan };
 }
 
 export async function generateDryRunScript(projectId: string): Promise<ScriptGeneration> {
