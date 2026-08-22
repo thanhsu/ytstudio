@@ -1345,7 +1345,9 @@ function renderCopyright(snapshot) {
   form.replaceChildren(
     field("Commentary percent", "commentaryPercent", "70", "number"),
     field("Footage percent", "footagePercent", "15", "number"),
-    field("Longest clip seconds", "longestClipSeconds", "5", "number"),
+    // The risk threshold sits at about 5 seconds, so 4.5 is a realistic entry and
+    // the default step="1" would have native validation block the submit.
+    field("Longest clip seconds", "longestClipSeconds", "5", "number", "", "any"),
     checkboxField("Uses full scene", "usesFullScene", false),
     checkboxField("Thumbnail from source frame", "thumbnailFromCopyrightFrame", false),
     checkboxField("Clips have commentary purpose", "clipsHaveCommentaryPurpose", true),
@@ -1593,6 +1595,20 @@ function renderExport(snapshot) {
   );
 }
 
+// A hand-edited studio.config.json can hold a provider the studio will refuse to
+// use. It is listed as it is rather than dropped, so the screen never shows a
+// provider that differs from the one Generate Script will complain about.
+function scriptProviderOptions(current) {
+  const options = [
+    ["dry-run", "Dry run (offline template)"],
+    ["openai-compatible", "OpenAI-compatible"],
+  ];
+  if (typeof current === "string" && current && !options.some(([value]) => value === current)) {
+    options.push([current, `${current} (unrecognized — pick a valid provider)`]);
+  }
+  return options;
+}
+
 function renderConfig() {
   const config = appState.config;
   if (!config) return;
@@ -1607,10 +1623,7 @@ function renderConfig() {
 
   form.replaceChildren(
     sectionTitle("Script"),
-    selectField("Script provider", "script.provider", config.script.provider, [
-      ["dry-run", "Dry run (offline template)"],
-      ["openai-compatible", "OpenAI-compatible"],
-    ]),
+    selectField("Script provider", "script.provider", config.script.provider, scriptProviderOptions(config.script.provider)),
     field("Script model", "script.model", config.script.model),
     field("Script base URL", "script.baseUrl", config.script.baseUrl),
     field("Script API key env", "script.apiKeyEnv", config.script.apiKeyEnv),

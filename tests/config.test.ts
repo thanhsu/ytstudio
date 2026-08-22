@@ -105,17 +105,32 @@ test("a zero temperature is preserved rather than replaced by the default", asyn
   });
 });
 
-test("an unrecognized script provider is rejected by name instead of reverting to the template", async () => {
+test("an unrecognized script provider survives the load so the studio can show and repair it", async () => {
   await withTempCwd(async () => {
     await writeFile("studio.config.json", JSON.stringify({ script: { provider: "openai_compatible" } }), "utf8");
 
-    await assert.rejects(() => loadStudioConfig(), (error: unknown) => {
+    // Loading must never fail: every unrelated stage reads this config, and the
+    // Config screen is the only in-studio repair path. The value is also kept as
+    // written rather than rewritten to "dry-run", which is what let a typo
+    // generate template output and report success.
+    const config = await loadStudioConfig();
+    assert.equal(config.script.provider, "openai_compatible");
+    assert.equal(config.asr.provider, "disabled");
+    assert.equal(config.render.shortsWidth, 1080);
+  });
+});
+
+test("saving an unrecognized script provider is refused by name and writes nothing", async () => {
+  await withTempCwd(async () => {
+    await assert.rejects(() => saveStudioConfig({ script: { provider: "openai_compatible" } }), (error: unknown) => {
       assert.ok(error instanceof Error);
       assert.match(error.message, /openai_compatible/);
       assert.match(error.message, /dry-run/);
       assert.match(error.message, /openai-compatible/);
       return true;
     });
+
+    await assert.rejects(() => readFile("studio.config.json", "utf8"), /ENOENT/);
   });
 });
 

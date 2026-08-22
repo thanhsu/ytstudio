@@ -75,6 +75,9 @@ test("a script with translated section headings is rejected before anything is w
     assert.match(error.message, /no narration/i);
     assert.match(error.message, /## Hook/);
     assert.match(error.message, /## Closing/);
+    // The message may not describe a rule the extractor does not apply: it also
+    // narrates "## Review".
+    assert.match(error.message, /## Review/);
     return true;
   });
 });

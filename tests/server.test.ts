@@ -756,16 +756,42 @@ test("the project snapshot carries no metadata before a script exists", async ()
   });
 });
 
-test("a typo in the script provider fails the request instead of generating template output", async () => {
+test("a typo in the script provider fails the job by name instead of generating template output", async () => {
   await withTempCwd(async () => {
     await writeFile("studio.config.json", JSON.stringify({ script: { provider: "openai_compatible" } }), "utf8");
     const running = await startStudioServer(createStudioServer(), { port: 0 });
     try {
-      const response = await postJson(running, "script");
+      // Config still loads, so the screen that repairs the value stays reachable.
+      const config = await (await fetch(`${running.url}/api/config`)).json();
+      assert.equal(config.config.script.provider, "openai_compatible");
 
-      assert.equal(response.status, 500);
-      assert.match((await response.json()).message, /openai_compatible/);
+      const events = await fetch(`${running.url}/api/projects/sample-project/events`);
+      const started = await postJson(running, "script");
+      const { job } = await started.json();
+      const finished = await readEventStreamUntil(
+        events,
+        (payload) => payload.id === job.id && payload.status !== "running",
+      );
+
+      assert.equal(finished.status, "failed");
+      assert.match(String(finished.error), /openai_compatible/);
       await assert.rejects(() => readFile(join("projects", "sample-project", "script.md"), "utf8"), /ENOENT/);
+    } finally {
+      await running.close();
+    }
+  });
+});
+
+test("a typo in a script setting does not break stages that never touch the script model", async () => {
+  await withTempCwd(async () => {
+    await writeFile("studio.config.json", JSON.stringify({ script: { provider: "openai_compatible" } }), "utf8");
+    const running = await startStudioServer(createStudioServer(), { port: 0 });
+    try {
+      const snapshot = await fetch(`${running.url}/api/projects/sample-project`);
+      const projects = await fetch(`${running.url}/api/projects`);
+
+      assert.equal(snapshot.status, 200);
+      assert.equal(projects.status, 200);
     } finally {
       await running.close();
     }

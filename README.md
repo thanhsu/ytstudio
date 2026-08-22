@@ -154,8 +154,9 @@ key, and mark it paid so the studio asks before every spend:
 The same settings reach any OpenAI-compatible endpoint, including LM Studio,
 llama.cpp, vLLM, DeepSeek, Groq, and OpenRouter.
 
-`provider` accepts only `dry-run` and `openai-compatible`. Any other value is
-rejected when the config loads, rather than falling back to the template and
+`provider` accepts only `dry-run` and `openai-compatible`. Any other value still
+loads — so the Config screen keeps working and can repair it — but script
+generation refuses it by name instead of falling back to the template and
 reporting success. With `paid: true`, the CLI needs the confirmation flag:
 
 ```powershell

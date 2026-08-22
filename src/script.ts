@@ -1,6 +1,6 @@
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { loadStudioConfig, type StudioConfig } from "./config.ts";
+import { loadStudioConfig, unknownScriptProviderError, type StudioConfig } from "./config.ts";
 import { ensureProjectDir, projectDir, readJson, writeJson } from "./fs.ts";
 import { createDryRunProvider, type ScriptGeneration } from "./llm/dry-run.ts";
 import { createOpenAiCompatibleProvider } from "./llm/openai-compatible.ts";
@@ -48,21 +48,28 @@ export async function generateDryRunScript(projectId: string): Promise<ScriptGen
 }
 
 /**
- * The single place where configuration decides whether a real model runs. It is
- * exported so a test can pin the branch: silently falling through to the template
- * is this feature's cardinal failure mode.
+ * The single place where configuration decides whether a real model runs. The
+ * switch is exhaustive with a throwing default: silently falling through to the
+ * template is this feature's cardinal failure mode, so an unrecognized value —
+ * a typo in a hand-edited config, or a provider added to the vocabulary later
+ * without a branch here — is refused by name rather than quietly served by the
+ * offline template.
  */
 export function createConfiguredProvider(config: StudioConfig): LlmProvider {
-  if (config.script.provider === "openai-compatible") {
-    return createOpenAiCompatibleProvider({
-      baseUrl: config.script.baseUrl,
-      model: config.script.model,
-      apiKey: config.script.apiKeyEnv ? process.env[config.script.apiKeyEnv] ?? "" : "",
-      apiKeyEnv: config.script.apiKeyEnv,
-      paid: config.script.paid,
-      temperature: config.script.temperature,
-      maxOutputTokens: config.script.maxOutputTokens,
-    });
+  switch (config.script.provider) {
+    case "openai-compatible":
+      return createOpenAiCompatibleProvider({
+        baseUrl: config.script.baseUrl,
+        model: config.script.model,
+        apiKey: config.script.apiKeyEnv ? process.env[config.script.apiKeyEnv] ?? "" : "",
+        apiKeyEnv: config.script.apiKeyEnv,
+        paid: config.script.paid,
+        temperature: config.script.temperature,
+        maxOutputTokens: config.script.maxOutputTokens,
+      });
+    case "dry-run":
+      return createDryRunProvider();
+    default:
+      throw unknownScriptProviderError(config.script.provider);
   }
-  return createDryRunProvider();
 }

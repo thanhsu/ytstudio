@@ -1,4 +1,4 @@
-import { extractNarration, SPOKEN_SECTION_HEADINGS } from "../narration.ts";
+import { extractNarration, NARRATED_SECTION_HEADINGS, SPOKEN_SECTION_HEADINGS } from "../narration.ts";
 import type { Metadata, ScenePlan } from "../types.ts";
 
 export type ParsedScript = {
@@ -47,8 +47,10 @@ export function parseScriptGeneration(raw: string, projectId: string): ParsedScr
 function requireNarratableScript(value: unknown): string {
   const script = requireText(value, "script");
   if (!extractNarration(script).text.trim()) {
+    const asked = SPOKEN_SECTION_HEADINGS.map((heading) => `## ${heading}`).join(", ");
+    const narrated = NARRATED_SECTION_HEADINGS.map((heading) => `## ${heading}`).join(", ");
     throw new Error(
-      `Model response field script contains no narration. The spoken body must sit under these markdown headings, written in English exactly as shown: ${SPOKEN_SECTION_HEADINGS.map((heading) => `## ${heading}`).join(", ")}.`,
+      `Model response field script contains no narration. A generated script must use ${asked}, written in English exactly as shown; narration is read from ${narrated} and from nothing else.`,
     );
   }
   return script;

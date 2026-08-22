@@ -172,4 +172,15 @@ test("number inputs holding machine-produced fractional values accept any step",
   assert.match(script, /"sourceDurationSeconds", String\(segment\.sourceDurationSeconds\), "number", "", "any"/);
   assert.match(script, /"watermarkOpacity",[^\n]*"number", "", "any"/);
   assert.match(script, /"script\.temperature",[^\n]*"number", "", "any"/);
+  // Operator-typed rather than machine-produced, but the copyright risk
+  // threshold sits at about 5 seconds, so 4.5 is a realistic entry.
+  assert.match(script, /"longestClipSeconds", "5", "number", "", "any"/);
+});
+
+test("the config screen lists an unrecognized script provider instead of hiding it", async () => {
+  const script = await readFile("src/web/app.js", "utf8");
+
+  assert.match(script, /function scriptProviderOptions/);
+  assert.match(script, /unrecognized — pick a valid provider/);
+  assert.match(script, /scriptProviderOptions\(config\.script\.provider\)/);
 });

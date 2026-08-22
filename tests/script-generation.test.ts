@@ -113,3 +113,24 @@ test("configuration selects the HTTP adapter or the template, and never silently
   assert.equal(openAiCompatible.name, "openai-compatible");
   assert.equal(dryRun.name, "dry-run");
 });
+
+test("an unrecognized provider is refused by name instead of falling through to the template", () => {
+  const config = normalizeStudioConfig({ script: { provider: "openai_compatible" } });
+
+  assert.throws(() => createConfiguredProvider(config), (error: unknown) => {
+    assert.ok(error instanceof Error);
+    assert.match(error.message, /openai_compatible/);
+    assert.match(error.message, /dry-run/);
+    assert.match(error.message, /openai-compatible/);
+    return true;
+  });
+});
+
+test("generation refuses an unrecognized provider and writes nothing", async () => {
+  await withProject(async () => {
+    await writeFile("studio.config.json", JSON.stringify({ script: { provider: "openai" } }), "utf8");
+
+    await assert.rejects(() => generateScript("sample-project"), /openai/);
+    await assert.rejects(() => stat(join("projects", "sample-project", "script.md")), /ENOENT/);
+  });
+});

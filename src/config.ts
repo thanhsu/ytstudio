@@ -1,8 +1,28 @@
 import { readFile, writeFile } from "node:fs/promises";
 
+export const SCRIPT_PROVIDERS = ["dry-run", "openai-compatible"] as const;
+
+export type ScriptProvider = (typeof SCRIPT_PROVIDERS)[number];
+
+export function isKnownScriptProvider(value: unknown): value is ScriptProvider {
+  return typeof value === "string" && (SCRIPT_PROVIDERS as readonly string[]).includes(value);
+}
+
+/**
+ * One wording for the two places that refuse an unknown provider: saving new
+ * operator input, and selecting the provider that will actually run.
+ */
+export function unknownScriptProviderError(value: unknown): Error {
+  return new Error(
+    `Unknown script.provider ${JSON.stringify(value)}. Valid values are ${SCRIPT_PROVIDERS.join(", ")}.`,
+  );
+}
+
 export type StudioConfig = {
   script: {
-    provider: "dry-run" | "openai-compatible";
+    // An unrecognized value survives a load so it can be shown and repaired; it
+    // is refused when a provider is selected, not when the file is read.
+    provider: ScriptProvider | (string & {});
     model: string;
     baseUrl: string;
     apiKeyEnv: string;
@@ -119,6 +139,12 @@ export async function loadStudioConfig(path = CONFIG_PATH): Promise<StudioConfig
 
 export async function saveStudioConfig(config: unknown, path = CONFIG_PATH): Promise<StudioConfig> {
   const normalized = normalizeStudioConfig(config);
+  // Operator input is validated at the boundary, before it reaches the file.
+  // Refusing to read a file that already holds a bad value would be a different
+  // thing entirely, and would lock the operator out of the screen that repairs it.
+  if (!isKnownScriptProvider(normalized.script.provider)) {
+    throw unknownScriptProviderError(normalized.script.provider);
+  }
   await writeFile(path, `${JSON.stringify(normalized, null, 2)}\n`, "utf8");
   return normalized;
 }
@@ -127,7 +153,7 @@ export function normalizeStudioConfig(value: unknown): StudioConfig {
   const candidate = value && typeof value === "object" ? (value as Partial<StudioConfig>) : {};
   return {
     script: {
-      provider: scriptProvider(candidate.script?.provider),
+      provider: scriptProviderValue(candidate.script?.provider),
       model: stringValue(candidate.script?.model, DEFAULT_STUDIO_CONFIG.script.model),
       baseUrl: stringValue(candidate.script?.baseUrl, DEFAULT_STUDIO_CONFIG.script.baseUrl),
       apiKeyEnv: stringValue(candidate.script?.apiKeyEnv, DEFAULT_STUDIO_CONFIG.script.apiKeyEnv),
@@ -210,24 +236,15 @@ function rangeValue(value: unknown, fallback: number, min: number, max: number):
   return Number.isFinite(number) && number >= min && number <= max ? number : fallback;
 }
 
-const SCRIPT_PROVIDERS = ["dry-run", "openai-compatible"] as const;
-
 /**
- * The one setting that decides whether a real model runs, so it is strict rather
- * than lenient: a typo such as "openai_compatible" pasted from the README would
- * otherwise normalize to "dry-run" and the studio would report success over
- * template output. Absent or empty still defaults, so existing configs load.
+ * Preserved exactly as written, even when unrecognized. Loading the config must
+ * never fail: every unrelated stage reads it, and the Config screen is the only
+ * in-studio repair path for a hand-edited value. Rewriting an unknown value to
+ * "dry-run" here is what let a typo generate template output and report success,
+ * so the value survives instead and createConfiguredProvider refuses it.
  */
-function scriptProvider(value: unknown): StudioConfig["script"]["provider"] {
-  if (value === undefined || value === null || value === "") {
-    return "dry-run";
-  }
-  if (typeof value === "string" && (SCRIPT_PROVIDERS as readonly string[]).includes(value)) {
-    return value as StudioConfig["script"]["provider"];
-  }
-  throw new Error(
-    `Unknown script.provider ${JSON.stringify(value)} in studio config. Valid values are ${SCRIPT_PROVIDERS.join(", ")}.`,
-  );
+function scriptProviderValue(value: unknown): StudioConfig["script"]["provider"] {
+  return typeof value === "string" && value.trim() ? value.trim() : DEFAULT_STUDIO_CONFIG.script.provider;
 }
 
 function enumValue<const T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
