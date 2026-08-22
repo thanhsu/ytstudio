@@ -277,6 +277,10 @@ Subtitle conversion to SRT uses the FFmpeg you already configured; without it th
 download still succeeds and whatever subtitle format arrived is kept as-is.
 Search is currently explicit for YouTube and Bilibili, with prefixes configurable
 from the Config screen because extractor syntax can change as yt-dlp evolves.
+The Sources screen can locally filter search results by include/exclude words,
+maximum view count, and "hide likely official" before you choose a result to
+track. The triage badge is metadata-only and intentionally conservative; scoring
+after tracking is still the deeper review-worth check.
 
 Downloads and scoring run as background jobs against
 `GET /api/sources/<id>/events`. Sources live in `./sources`, a sibling of

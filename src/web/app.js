@@ -53,6 +53,7 @@ const appState = {
   eventStreamProject: null,
   activeJob: null,
   sourceSearchResults: [],
+  sourceSearchFilters: {},
 };
 
 const JOB_LABELS = { voice: "Voice", render: "Render", asr: "ASR", captions: "Captions", asset: "Asset analysis", script: "Script" };
@@ -2435,6 +2436,10 @@ function lines(value) {
     .filter(Boolean);
 }
 
+function lower(value) {
+  return String(value ?? "").toLowerCase();
+}
+
 function targetOptions() {
   return (appState.translationPresets?.presets ?? []).map((preset) => [preset.language ?? preset.target, preset.label]);
 }
@@ -2505,7 +2510,7 @@ async function renderSources() {
   searchForm.className = "form-grid";
   searchForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    await searchSources(formValues(searchForm));
+    await searchSources(boolFormValues(searchForm));
   });
   searchForm.replaceChildren(
     field("Keyword", "query", "", "text", "牧神记 episode 1"),
@@ -2514,6 +2519,10 @@ async function renderSources() {
       ["bilibili", "Bilibili"],
     ]),
     field("Limit", "limit", String(appState.config?.sources?.searchLimit ?? 8), "number"),
+    field("Include keywords", "includeKeywords", appState.sourceSearchFilters.includeKeywords ?? "", "text", "episode, recap"),
+    field("Exclude keywords", "excludeKeywords", appState.sourceSearchFilters.excludeKeywords ?? "", "text", "official, trailer"),
+    field("Max views", "maxViews", String(appState.sourceSearchFilters.maxViews ?? ""), "number"),
+    checkboxField("Hide likely official", "hideLikelyOfficial", appState.sourceSearchFilters.hideLikelyOfficial === true),
     actionButton("Search Sources", null, "submit", "primary"),
   );
 
@@ -2536,7 +2545,7 @@ async function renderSources() {
       "Search by keyword",
       paragraph("Find possible review sources first. Search results are not downloaded or tracked until you choose one."),
       searchForm,
-      renderSourceSearchResults(appState.sourceSearchResults),
+      renderSourceSearchResults(filterSourceSearchResults(appState.sourceSearchResults, appState.sourceSearchFilters)),
     ),
     wrapSection(
       "Add a source",
@@ -2569,6 +2578,11 @@ function renderSourceSearchResults(results) {
       formatSourceDuration(result.durationSeconds),
       result.viewCount ? `${result.viewCount.toLocaleString()} views` : "views unknown",
     ].join(" · ");
+    const triage = triageSourceSearchResult(result);
+    const badge = document.createElement("span");
+    badge.className = `source-triage source-triage-${triage.risk}`;
+    badge.textContent = triage.label;
+    badge.title = triage.reason;
     const link = document.createElement("a");
     link.href = result.url;
     link.target = "_blank";
@@ -2577,7 +2591,7 @@ function renderSourceSearchResults(results) {
     const actions = document.createElement("div");
     actions.className = "source-actions";
     actions.append(actionButton("Track Source", () => trackSource(result.url), "button", "primary"));
-    card.append(title, meta, link, actions);
+    card.append(title, meta, badge, link, actions);
     wrapper.append(card);
   }
   return wrapper;
@@ -2585,13 +2599,52 @@ function renderSourceSearchResults(results) {
 
 async function searchSources(values) {
   try {
-    const data = await postJson("/api/sources/search", values);
+    appState.sourceSearchFilters = {
+      includeKeywords: values.includeKeywords,
+      excludeKeywords: values.excludeKeywords,
+      maxViews: values.maxViews,
+      hideLikelyOfficial: values.hideLikelyOfficial === true,
+    };
+    const data = await postJson("/api/sources/search", {
+      query: values.query,
+      platform: values.platform,
+      limit: values.limit,
+    });
     appState.sourceSearchResults = data.results ?? [];
-    setStatus(`${appState.sourceSearchResults.length} source search result(s).`);
+    const visible = filterSourceSearchResults(appState.sourceSearchResults, appState.sourceSearchFilters).length;
+    setStatus(`${visible}/${appState.sourceSearchResults.length} source search result(s) visible after filters.`);
     await renderSources();
   } catch (error) {
     setStatus(error.message);
   }
+}
+
+function filterSourceSearchResults(results, filters) {
+  const include = lines(filters.includeKeywords).map(lower);
+  const exclude = lines(filters.excludeKeywords).map(lower);
+  const maxViews = Number(filters.maxViews);
+  return results.filter((result) => {
+    const haystack = lower(`${result.title} ${result.uploader} ${result.url}`);
+    if (include.length && !include.some((term) => haystack.includes(term))) return false;
+    if (exclude.some((term) => haystack.includes(term))) return false;
+    if (Number.isFinite(maxViews) && maxViews > 0 && Number(result.viewCount) > maxViews) return false;
+    if (filters.hideLikelyOfficial === true && triageSourceSearchResult(result).label === "likely official") return false;
+    return true;
+  });
+}
+
+function triageSourceSearchResult(result) {
+  const haystack = lower(`${result.title} ${result.uploader}`);
+  if (/(official|官方|bilibili|腾讯|youku|iqiyi|trailer|pv|预告)/.test(haystack)) {
+    return { label: "likely official", risk: "risk", reason: "Official-looking channel/title; review use needs extra caution." };
+  }
+  if (Number(result.viewCount) > 500000) {
+    return { label: "too hot", risk: "risk", reason: "High views suggest stronger rights enforcement and competition." };
+  }
+  if (Number(result.durationSeconds) > 0 && Number(result.durationSeconds) < 180) {
+    return { label: "short clip", risk: "warn", reason: "Short clips often lack enough story context for a batch review." };
+  }
+  return { label: "review-friendly", risk: "ok", reason: "Metadata looks usable for human review triage." };
 }
 
 async function trackSource(url) {

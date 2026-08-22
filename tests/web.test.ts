@@ -261,6 +261,23 @@ test("the sources screen exposes keyword search before tracking a source", async
   assert.match(styles, /\.source-result-card/);
 });
 
+test("the sources screen can filter and triage keyword search results", async () => {
+  const script = await readFile("src/web/app.js", "utf8");
+  const styles = await readFile("src/web/styles.css", "utf8");
+
+  assert.match(script, /Include keywords/);
+  assert.match(script, /Exclude keywords/);
+  assert.match(script, /Max views/);
+  assert.match(script, /Hide likely official/);
+  assert.match(script, /filterSourceSearchResults/);
+  assert.match(script, /triageSourceSearchResult/);
+  assert.match(script, /review-friendly/);
+  assert.match(script, /likely official/);
+  assert.match(styles, /\.source-triage/);
+  assert.match(styles, /\.source-triage-risk/);
+}
+);
+
 test("the sources screen refuses to imply that declaring rights clears a project gate", async () => {
   const script = await readFile("src/web/app.js", "utf8");
 
