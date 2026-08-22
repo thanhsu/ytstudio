@@ -2,7 +2,7 @@ import { createBrief } from "./brief.ts";
 import { saveCopyrightCheck } from "./copyright.ts";
 import { generateSourceSrtFromAsr } from "./asr.ts";
 import { extractAudioForAsr, importMedia } from "./media-ingest.ts";
-import { generateDryRunScript } from "./script.ts";
+import { generateDryRunScript, generateScript } from "./script.ts";
 import { createStudioServer, startStudioServer } from "./server.ts";
 import {
   buildTranslationDraft,
@@ -174,7 +174,7 @@ async function run(): Promise<void> {
       throw new Error("--project is required.");
     }
 
-    await generateDryRunScript(projectId);
+    await generateScript(projectId);
     console.log(`Generated script files for ${projectId}.`);
     return;
   }

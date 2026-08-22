@@ -83,3 +83,24 @@ test("studio config carries long-form output dimensions", async () => {
     assert.equal(config.render.longformHeight, 1080);
   });
 });
+
+test("studio config carries script model settings", async () => {
+  await withTempCwd(async () => {
+    const config = await loadStudioConfig();
+
+    assert.equal(config.script.provider, "dry-run");
+    assert.equal(config.script.baseUrl, "http://127.0.0.1:11434/v1");
+    assert.equal(config.script.paid, false);
+    assert.equal(config.script.temperature, 0.8);
+    assert.equal(config.script.maxOutputTokens, 4000);
+  });
+});
+
+test("a zero temperature is preserved rather than replaced by the default", async () => {
+  await withTempCwd(async () => {
+    const saved = await saveStudioConfig({ script: { provider: "openai-compatible", temperature: 0 } });
+
+    assert.equal(saved.script.provider, "openai-compatible");
+    assert.equal(saved.script.temperature, 0);
+  });
+});

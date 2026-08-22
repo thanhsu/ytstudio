@@ -2,8 +2,13 @@ import { readFile, writeFile } from "node:fs/promises";
 
 export type StudioConfig = {
   script: {
-    provider: "dry-run";
+    provider: "dry-run" | "openai-compatible";
     model: string;
+    baseUrl: string;
+    apiKeyEnv: string;
+    paid: boolean;
+    temperature: number;
+    maxOutputTokens: number;
   };
   translation: {
     provider: "prompt-only" | "openai" | "gemini";
@@ -52,6 +57,11 @@ export const DEFAULT_STUDIO_CONFIG: StudioConfig = {
   script: {
     provider: "dry-run",
     model: "local-template",
+    baseUrl: "http://127.0.0.1:11434/v1",
+    apiKeyEnv: "",
+    paid: false,
+    temperature: 0.8,
+    maxOutputTokens: 4000,
   },
   translation: {
     provider: "prompt-only",
@@ -117,8 +127,13 @@ export function normalizeStudioConfig(value: unknown): StudioConfig {
   const candidate = value && typeof value === "object" ? (value as Partial<StudioConfig>) : {};
   return {
     script: {
-      provider: "dry-run",
+      provider: enumValue(candidate.script?.provider, ["dry-run", "openai-compatible"], "dry-run"),
       model: stringValue(candidate.script?.model, DEFAULT_STUDIO_CONFIG.script.model),
+      baseUrl: stringValue(candidate.script?.baseUrl, DEFAULT_STUDIO_CONFIG.script.baseUrl),
+      apiKeyEnv: stringValue(candidate.script?.apiKeyEnv, DEFAULT_STUDIO_CONFIG.script.apiKeyEnv),
+      paid: booleanValue(candidate.script?.paid, DEFAULT_STUDIO_CONFIG.script.paid),
+      temperature: rangeValue(candidate.script?.temperature, DEFAULT_STUDIO_CONFIG.script.temperature, 0, 2),
+      maxOutputTokens: numberValue(candidate.script?.maxOutputTokens, DEFAULT_STUDIO_CONFIG.script.maxOutputTokens),
     },
     translation: {
       provider: enumValue(candidate.translation?.provider, ["prompt-only", "openai", "gemini"], "prompt-only"),
@@ -184,6 +199,15 @@ function stringValue(value: unknown, fallback: string): string {
 function numberValue(value: unknown, fallback: number): number {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? number : fallback;
+}
+
+function booleanValue(value: unknown, fallback: boolean): boolean {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function rangeValue(value: unknown, fallback: number, min: number, max: number): number {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= min && number <= max ? number : fallback;
 }
 
 function enumValue<const T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {

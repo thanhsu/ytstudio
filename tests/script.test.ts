@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildDryRunScript } from "../src/script.ts";
+import { buildDryRunScript } from "../src/llm/dry-run.ts";
 import type { VideoBrief } from "../src/types.ts";
 
 const brief: VideoBrief = {
