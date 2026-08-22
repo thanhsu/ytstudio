@@ -510,14 +510,15 @@ test("script approval is an explicit action rather than a side effect of voice",
   await withTempCwd(async () => {
     const running = await startStudioServer(createStudioServer(), { port: 0 });
     try {
+      const scriptEvents = await fetch(`${running.url}/api/projects/sample-project/events`);
       const script = await postJson(running, "script");
       assert.equal(script.status, 202);
       const scriptJob = (await script.json()).job;
-      const scriptEvents = await fetch(`${running.url}/api/projects/sample-project/events`);
-      await readEventStreamUntil(
+      const scriptFinished = await readEventStreamUntil(
         scriptEvents,
         (payload) => payload.id === scriptJob.id && payload.status !== "running",
       );
+      assert.equal(scriptFinished.status, "succeeded");
 
       const voice = await postJson(running, "voice", { provider: "piper" });
       assert.equal(voice.status, 409);
@@ -539,13 +540,14 @@ test("render refuses a stale copyright approval without re-approving it", async 
   await withTempCwd(async () => {
     const running = await startStudioServer(createStudioServer(), { port: 0 });
     try {
+      const scriptEvents = await fetch(`${running.url}/api/projects/sample-project/events`);
       const scriptStarted = await postJson(running, "script");
       const scriptJob = (await scriptStarted.json()).job;
-      const scriptEvents = await fetch(`${running.url}/api/projects/sample-project/events`);
-      await readEventStreamUntil(
+      const scriptFinished = await readEventStreamUntil(
         scriptEvents,
         (payload) => payload.id === scriptJob.id && payload.status !== "running",
       );
+      assert.equal(scriptFinished.status, "succeeded");
       await postJson(running, "script/approve");
       await postJson(running, "copyright-check", copyrightCheckBody(75));
       await postJson(running, "copyright/approve");
@@ -638,13 +640,14 @@ test("a second job is refused while one is still running for the project", async
   await withTempCwd(async () => {
     const running = await startStudioServer(createStudioServer(), { port: 0 });
     try {
+      const scriptEvents = await fetch(`${running.url}/api/projects/sample-project/events`);
       const scriptStarted = await postJson(running, "script");
       const scriptJob = (await scriptStarted.json()).job;
-      const scriptEvents = await fetch(`${running.url}/api/projects/sample-project/events`);
-      await readEventStreamUntil(
+      const scriptFinished = await readEventStreamUntil(
         scriptEvents,
         (payload) => payload.id === scriptJob.id && payload.status !== "running",
       );
+      assert.equal(scriptFinished.status, "succeeded");
       await postJson(running, "script/approve");
       const events = await fetch(`${running.url}/api/projects/sample-project/events`);
 
