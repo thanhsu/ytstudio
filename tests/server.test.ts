@@ -82,6 +82,24 @@ test("render route reports unmet approval gates", async () => {
   });
 });
 
+test("project snapshot carries the cut gate beside the draft gate", async () => {
+  await withTempCwd(async () => {
+    const running = await startStudioServer(createStudioServer(), { port: 0 });
+    try {
+      const snapshot = await (await fetch(`${running.url}/api/projects/sample-project`)).json();
+
+      assert.equal(snapshot.editRenderGate.allowed, false);
+      assert.deepEqual(snapshot.editRenderGate.reasons, [
+        "copyright-approval-missing",
+        "source-media-missing",
+        "edit-manifest-missing",
+      ]);
+    } finally {
+      await running.close();
+    }
+  });
+});
+
 test("cut render route reports its own gates, not the narrated draft gates", async () => {
   await withTempCwd(async () => {
     const running = await startStudioServer(createStudioServer(), { port: 0 });

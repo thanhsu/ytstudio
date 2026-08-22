@@ -1068,6 +1068,7 @@ async function sendProject(response: ServerResponse, projectId: string): Promise
     visualMapping,
     pipeline: await projectPipelineStatus(projectId),
     renderGate: await evaluateProjectRenderGate(projectId),
+    editRenderGate: await evaluateEditRenderGate(projectId),
     workflow: {
       ...template,
       steps: deriveWorkflowStepStates(template.type, state),
