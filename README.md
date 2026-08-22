@@ -111,6 +111,54 @@ The UI saves these settings to `studio.config.json`, which is ignored by Git
 because it contains machine-specific paths. API keys are not stored there; keep
 real secrets in environment variables such as `OPENAI_API_KEY`.
 
+## Script Model
+
+Script, metadata, and scene plan generation runs through a configurable model.
+The default is `dry-run`, the built-in template, which produces the same
+structure for every project and exists for offline testing rather than for
+publishing.
+
+For a free local model, install [Ollama](https://ollama.com), pull a model, and
+point the studio at it:
+
+```powershell
+ollama pull qwen2.5:14b
+```
+
+```jsonc
+"script": {
+  "provider": "openai-compatible",
+  "model": "qwen2.5:14b",
+  "baseUrl": "http://127.0.0.1:11434/v1",
+  "apiKeyEnv": "",
+  "paid": false,
+  "temperature": 0.8,
+  "maxOutputTokens": 4000
+}
+```
+
+For a hosted API, change `baseUrl`, name the environment variable holding the
+key, and mark it paid so the studio asks before every spend:
+
+```jsonc
+"script": {
+  "provider": "openai-compatible",
+  "model": "gpt-4o-mini",
+  "baseUrl": "https://api.openai.com/v1",
+  "apiKeyEnv": "OPENAI_API_KEY",
+  "paid": true
+}
+```
+
+The same settings reach any OpenAI-compatible endpoint, including LM Studio,
+llama.cpp, vLLM, DeepSeek, Groq, and OpenRouter.
+
+A failed model call fails the job and reports why. The studio never falls back
+to the template, because template output presented as model output is exactly
+the sameness this setting exists to remove. Generating a script also makes any
+existing script approval stale, so voice and render stay blocked until you read
+and approve the new text.
+
 ## Free Draft Workflow
 
 Prerequisites for local rendering:
@@ -204,7 +252,7 @@ human approves the new version. Nothing in the pipeline approves on your behalf.
 
 ## Background Jobs
 
-Voice, render, and ASR run as background jobs. Those routes answer `202` with a
+Voice, render, ASR, and script generation run as background jobs. Those routes answer `202` with a
 job record and report progress over `GET /api/projects/<id>/events`, which the
 studio follows through `EventSource`. One job runs per project at a time; a
 second request while one is running is refused with `409 job-already-running`.

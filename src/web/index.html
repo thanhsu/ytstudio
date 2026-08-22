@@ -81,6 +81,17 @@
       </form>
     </dialog>
 
+    <dialog id="paid-script-dialog">
+      <form method="dialog">
+        <h2>Confirm Paid Script Model</h2>
+        <p>The configured script model is a paid API and each generation costs money. Confirm only if you intend to spend on this request.</p>
+        <menu>
+          <button value="cancel">Cancel</button>
+          <button id="confirm-paid-script" value="confirm">Confirm</button>
+        </menu>
+      </form>
+    </dialog>
+
     <script src="/app.js" type="module"></script>
   </body>
 </html>

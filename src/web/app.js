@@ -52,7 +52,7 @@ const appState = {
   activeJob: null,
 };
 
-const JOB_LABELS = { voice: "Voice", render: "Render", asr: "ASR", captions: "Captions", asset: "Asset analysis" };
+const JOB_LABELS = { voice: "Voice", render: "Render", asr: "ASR", captions: "Captions", asset: "Asset analysis", script: "Script" };
 
 /**
  * Slow routes answer with a job instead of a finished artifact, so the studio
@@ -115,6 +115,8 @@ const stageContent = document.querySelector("#stage-content");
 const status = document.querySelector("#status");
 const paidVoiceDialog = document.querySelector("#paid-voice-dialog");
 const confirmPaidVoice = document.querySelector("#confirm-paid-voice");
+const paidScriptDialog = document.querySelector("#paid-script-dialog");
+const confirmPaidScript = document.querySelector("#confirm-paid-script");
 const audioPreview = document.querySelector("#audio-preview");
 const videoPreview = document.querySelector("#video-preview");
 
@@ -124,6 +126,7 @@ document.querySelector("#new-project").addEventListener("click", () => renderCre
 document.querySelector("#open-config").addEventListener("click", () => renderConfig());
 document.querySelector("#run-ready-tasks").addEventListener("click", () => runAvailableTasks());
 confirmPaidVoice.addEventListener("click", () => requestVoice(true));
+confirmPaidScript.addEventListener("click", () => requestScript(true));
 
 bindStageRail();
 
@@ -1163,11 +1166,11 @@ function renderScript(snapshot) {
         ? "This script is approved. Editing script.md makes the approval stale and blocks voice and render until you approve again."
         : "Read the script before approving. Voice and render stay blocked until the current narration is approved.",
     ),
-    actionButton("Generate Script", () => postProjectAction("script", {}, "Script generated."), "button", "primary"),
+    actionButton("Generate Script", () => requestScript(false), "button", "primary"),
     actionButton("Approve Script", () => postProjectAction("script/approve", {}, "Script approved.")),
     summaryGrid({
       Topic: snapshot.brief.topic ?? "",
-      Model: appState.config?.script?.model ?? "local-template",
+      "Script model": `${appState.config?.script?.provider ?? "dry-run"} · ${appState.config?.script?.model ?? "local-template"}`,
       Approval: scriptStatus,
       Output: "script.md, metadata.json, scene-plan.json",
     }),
@@ -1589,7 +1592,16 @@ function renderConfig() {
 
   form.replaceChildren(
     sectionTitle("Script"),
+    selectField("Script provider", "script.provider", config.script.provider, [
+      ["dry-run", "Dry run (offline template)"],
+      ["openai-compatible", "OpenAI-compatible"],
+    ]),
     field("Script model", "script.model", config.script.model),
+    field("Script base URL", "script.baseUrl", config.script.baseUrl),
+    field("Script API key env", "script.apiKeyEnv", config.script.apiKeyEnv),
+    checkboxField("Script provider is paid", "script.paid", config.script.paid),
+    field("Script temperature", "script.temperature", String(config.script.temperature), "number"),
+    field("Script max output tokens", "script.maxOutputTokens", String(config.script.maxOutputTokens), "number"),
     sectionTitle("Translation"),
     selectField("Translation provider", "translation.provider", config.translation.provider, [
       ["prompt-only", "Prompt only"],
@@ -1745,7 +1757,11 @@ async function saveConfig(form) {
   const nextConfig = structuredClone(appState.config);
   for (const input of Array.from(form.elements)) {
     if (!input.name) continue;
-    setPathValue(nextConfig, input.name, input.type === "number" ? Number(input.value) : input.value);
+    setPathValue(
+      nextConfig,
+      input.name,
+      input.type === "number" ? Number(input.value) : input.type === "checkbox" ? input.checked : input.value,
+    );
   }
 
   const response = await fetch("/api/config", {
@@ -1777,6 +1793,28 @@ async function requestVoice(confirmedPaidRequest) {
     return;
   }
   setStatus(`Voice ready: ${data.artifact.relativePath}`);
+  await selectProject(appState.selectedProject);
+}
+
+async function requestScript(confirmedPaidRequest) {
+  const response = await fetch(projectApiUrl("script"), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ confirmedPaidRequest }),
+  });
+  const data = await response.json();
+  if (response.status === 409 && data.code === "paid-confirmation-required") {
+    paidScriptDialog.showModal();
+    return;
+  }
+  if (!response.ok) {
+    setStatus(`${data.code}: ${data.message}`);
+    return;
+  }
+  if (reportedAsJob(response, data)) {
+    return;
+  }
+  setStatus("Script generated.");
   await selectProject(appState.selectedProject);
 }
 

@@ -136,3 +136,14 @@ test("the studio follows job progress over the project event stream", async () =
   // The batch runner must not report background work as finished.
   assert.match(script, /running in the background/);
 });
+
+test("the script stage shows the configured model and gates paid generation", async () => {
+  const html = await readFile("src/web/index.html", "utf8");
+  const script = await readFile("src/web/app.js", "utf8");
+
+  assert.match(html, /id="paid-script-dialog"/);
+  assert.match(html, /id="confirm-paid-script"/);
+  assert.match(script, /paidScriptDialog/);
+  assert.match(script, /requestScript/);
+  assert.match(script, /Script model/);
+});
