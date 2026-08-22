@@ -256,11 +256,14 @@ test("the sources screen exposes keyword search before tracking a source", async
   assert.match(script, /Search Sources/);
   assert.match(script, /\/api\/sources\/search/);
   assert.match(script, /Track Source/);
+  assert.match(script, /thumbnailUrl/);
+  assert.match(script, /source-thumbnail/);
   assert.match(script, /sourceSearchResults/);
   assert.match(script, /source-search-results/);
   assert.match(script, /bilibili/);
   assert.match(styles, /\.source-search-results/);
   assert.match(styles, /\.source-result-card/);
+  assert.match(styles, /\.source-thumbnail/);
 });
 
 test("the sources screen can filter and triage keyword search results", async () => {

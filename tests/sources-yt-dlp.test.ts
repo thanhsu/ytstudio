@@ -115,7 +115,11 @@ console.log(JSON.stringify({
   url: "https://www.youtube.com/watch?v=def456",
   title: "Episode 2 recap",
   channel: "Review Channel",
-  duration: 900
+  duration: 900,
+  thumbnails: [
+    { url: "https://img.example/small.jpg", width: 120, height: 90 },
+    { url: "https://img.example/large.jpg", width: 720, height: 404 }
+  ]
 }));
 `);
   const seen: string[] = [];
@@ -138,6 +142,7 @@ console.log(JSON.stringify({
   assert.equal(results[0].durationSeconds, 1320);
   assert.equal(results[0].viewCount, 42000);
   assert.equal(results[0].thumbnailUrl, "https://img.example/thumb.jpg");
+  assert.equal(results[1].thumbnailUrl, "https://img.example/large.jpg");
   assert.ok(seen.includes("--dump-json"));
   assert.ok(seen.includes("--flat-playlist"));
   assert.ok(seen.includes("--skip-download"));

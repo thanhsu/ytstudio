@@ -54,6 +54,7 @@ type YtDlpPayload = {
   duration?: unknown;
   view_count?: unknown;
   thumbnail?: unknown;
+  thumbnails?: unknown;
   description?: unknown;
   entries?: unknown;
 };
@@ -185,8 +186,29 @@ function searchResultFromPayload(payload: YtDlpPayload, platform: SourceSearchPl
     uploader: text(payload.uploader) || text(payload.channel),
     durationSeconds: Math.max(0, Math.floor(Number(payload.duration) || 0)),
     viewCount: Math.max(0, Math.floor(Number(payload.view_count) || 0)),
-    thumbnailUrl: text(payload.thumbnail),
+    thumbnailUrl: thumbnailUrl(payload),
   };
+}
+
+function thumbnailUrl(payload: YtDlpPayload): string {
+  const direct = text(payload.thumbnail);
+  if (direct) return direct;
+  if (!Array.isArray(payload.thumbnails)) return "";
+  const candidates = payload.thumbnails
+    .map((thumbnail) => {
+      if (!thumbnail || typeof thumbnail !== "object") return null;
+      const record = thumbnail as { url?: unknown; width?: unknown; height?: unknown };
+      const url = text(record.url);
+      if (!url) return null;
+      return {
+        url,
+        width: Number(record.width) || 0,
+        height: Number(record.height) || 0,
+      };
+    })
+    .filter((thumbnail): thumbnail is { url: string; width: number; height: number } => thumbnail !== null);
+  candidates.sort((left, right) => right.width * right.height - left.width * left.height);
+  return candidates[0]?.url ?? "";
 }
 
 function resultUrl(payload: YtDlpPayload, platform: SourceSearchPlatform, id: string): string {

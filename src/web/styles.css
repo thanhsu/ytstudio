@@ -965,6 +965,17 @@ video {
   gap: 0.5rem;
 }
 
+.source-thumbnail {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  display: block;
+  border-radius: 6px;
+  border: 1px solid #d7dde5;
+  background: #eef2f7;
+  margin-bottom: 0.25rem;
+}
+
 .source-result-card h4 {
   margin: 0;
 }

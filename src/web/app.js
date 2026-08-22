@@ -2576,6 +2576,16 @@ function renderSourceSearchResults(results) {
   for (const result of results) {
     const card = document.createElement("article");
     card.className = "source-result-card";
+    const children = [];
+    if (result.thumbnailUrl) {
+      const thumbnail = document.createElement("img");
+      thumbnail.className = "source-thumbnail";
+      thumbnail.src = result.thumbnailUrl;
+      thumbnail.alt = "";
+      thumbnail.loading = "lazy";
+      thumbnail.referrerPolicy = "no-referrer";
+      children.push(thumbnail);
+    }
     const title = document.createElement("h4");
     title.textContent = result.title;
     const meta = document.createElement("p");
@@ -2599,7 +2609,7 @@ function renderSourceSearchResults(results) {
     const actions = document.createElement("div");
     actions.className = "source-actions";
     actions.append(actionButton("Track Source", () => trackSource(result.url), "button", "primary"));
-    card.append(title, meta, badge, link, actions);
+    card.append(...children, title, meta, badge, link, actions);
     wrapper.append(card);
   }
   return wrapper;
