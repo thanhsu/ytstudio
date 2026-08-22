@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -68,6 +68,56 @@ test("the help text documents the paid confirmation flag for generate-script", a
 
     assert.equal(result.code, 0);
     assert.match(result.stdout, /generate-script --project <id> \[--confirm-paid true\]/);
+    assert.match(result.stdout, /create-edit-manifest --project <id> --source <project-relative-srt> \[--replace true\]/);
+    assert.match(result.stdout, /apply-remove-list --project <id> --remove <cue-selection>/);
+    assert.match(result.stdout, /export-edit-manifest --project <id>/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("edit manifest commands create decisions and export clean subtitles", async () => {
+  const root = await mkdtemp(join(tmpdir(), "yt-cli-edit-"));
+  try {
+    const subtitleDir = join(root, "projects", "sample-project", "workspace", "subtitles");
+    await mkdir(subtitleDir, { recursive: true });
+    await writeFile(
+      join(subtitleDir, "source.srt"),
+      "1\n00:00:00,000 --> 00:00:01,000\nKeep\n\n2\n00:00:01,100 --> 00:00:02,000\nRemove\n",
+      "utf8",
+    );
+
+    const created = await runCli(
+      ["create-edit-manifest", "--project", "sample-project", "--source", "workspace/subtitles/source.srt"],
+      root,
+    );
+    assert.equal(created.code, 0);
+    assert.match(created.stdout, /Created edit manifest.*2 cues/);
+
+    const updated = await runCli(
+      ["apply-remove-list", "--project", "sample-project", "--remove", "2"],
+      root,
+    );
+    assert.equal(updated.code, 0);
+    assert.match(updated.stdout, /1 removed cue/);
+
+    const exported = await runCli(["export-edit-manifest", "--project", "sample-project"], root);
+    assert.equal(exported.code, 0);
+    assert.match(exported.stdout, /workspace\/edit\/clean\.srt/);
+    assert.match(await readFile(join(root, "projects", "sample-project", "workspace", "edit", "clean.srt"), "utf8"), /Keep/);
+
+    const refused = await runCli(
+      ["create-edit-manifest", "--project", "sample-project", "--source", "workspace/subtitles/source.srt"],
+      root,
+    );
+    assert.equal(refused.code, 1);
+    assert.match(refused.stderr, /already exists/i);
+
+    const replaced = await runCli(
+      ["create-edit-manifest", "--project", "sample-project", "--source", "workspace/subtitles/source.srt", "--replace", "true"],
+      root,
+    );
+    assert.equal(replaced.code, 0);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

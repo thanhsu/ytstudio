@@ -1,226 +1,240 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { readJson, writeJson } from "./fs.ts";
 import { resolveProjectPath } from "./project-paths.ts";
 import { parseSrt, stringifySrt } from "./srt.ts";
 
-export type CutMode = "reencode" | "stream-copy";
+export type EditDecision = "keep" | "remove";
 
-export type EditManifestSegment = {
-  id: string;
-  /** Always source-video time, so dropping one segment never moves another. */
-  sourceStartSeconds: number;
-  sourceEndSeconds: number;
-  keep: boolean;
+export type EditSegment = {
+  cueIndex: number;
+  start: string;
+  end: string;
   text: string;
+  decision: EditDecision;
 };
 
 export type EditManifest = {
   version: 1;
-  projectId: string;
-  sourceVideoPath: string;
-  sourceSubtitlePath: string;
+  sourceRelativePath: string;
   sourceHash: string;
-  cutMode: CutMode;
-  generatedAt: string;
-  /** Dropped segments stay listed, because this file is also the editor save file. */
-  segments: EditManifestSegment[];
+  createdAt: string;
+  updatedAt: string;
+  segments: EditSegment[];
 };
 
-export type OutputSegment = EditManifestSegment & {
-  outputStartSeconds: number;
-  outputEndSeconds: number;
+export type EditExportResult = {
+  manifest: EditManifest;
+  cleanSrtRelativePath: string;
+  csvRelativePath: string;
+  keptCueCount: number;
+  removedCueCount: number;
 };
 
-export type EditManifestValidation = { valid: boolean; errors: string[] };
-
-export type BuildEditManifestInput = {
-  projectId: string;
-  sourceVideoPath: string;
-  sourceSubtitlePath: string;
-  sourceHash: string;
-  srt: string;
-  cutMode?: CutMode;
-};
-
-export function buildEditManifest(input: BuildEditManifestInput): EditManifest {
-  return {
-    version: 1,
-    projectId: input.projectId,
-    sourceVideoPath: input.sourceVideoPath,
-    sourceSubtitlePath: input.sourceSubtitlePath,
-    sourceHash: input.sourceHash,
-    // Subtitle boundaries almost never land on a keyframe, so an accurate cut is
-    // the default and a stream copy stays an explicit, recorded choice.
-    cutMode: input.cutMode ?? "reencode",
-    generatedAt: new Date().toISOString(),
-    segments: parseSrt(input.srt).map((cue, index) => ({
-      id: `cue-${String(index + 1).padStart(3, "0")}`,
-      sourceStartSeconds: secondsFromTimestamp(cue.start),
-      sourceEndSeconds: secondsFromTimestamp(cue.end),
-      keep: true,
-      text: cue.text,
-    })),
-  };
+export class EditManifestConflictError extends Error {
+  constructor() {
+    super("An edit manifest already exists. Explicit replacement is required to reset human decisions.");
+    this.name = "EditManifestConflictError";
+  }
 }
 
-export function keptSegments(manifest: EditManifest): EditManifestSegment[] {
-  return manifest.segments.filter((segment) => segment.keep);
+export class EditManifestInputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "EditManifestInputError";
+  }
 }
 
-/**
- * Derived on demand and never stored: a second copy of the same timeline would
- * disagree with the first the moment someone toggles a segment.
- */
-export function outputTimeline(manifest: EditManifest): OutputSegment[] {
-  let cursorMs = 0;
-  return keptSegments(manifest).map((segment) => {
-    const startMs = cursorMs;
-    cursorMs += millis(segment.sourceEndSeconds) - millis(segment.sourceStartSeconds);
-    return { ...segment, outputStartSeconds: startMs / 1000, outputEndSeconds: cursorMs / 1000 };
-  });
+export class EditSelectionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "EditSelectionError";
+  }
 }
 
-export function buildCleanSrt(manifest: EditManifest): string {
-  return stringifySrt(
-    outputTimeline(manifest).map((segment, index) => ({
-      index: index + 1,
-      start: timestampFromSeconds(segment.outputStartSeconds),
-      end: timestampFromSeconds(segment.outputEndSeconds),
-      text: segment.text,
-    })),
-  );
-}
+const MANIFEST_RELATIVE_PATH = "workspace/edit/segments.json";
+const CLEAN_SRT_RELATIVE_PATH = "workspace/edit/clean.srt";
+const CSV_RELATIVE_PATH = "workspace/edit/segments.csv";
 
-export function validateEditManifest(manifest: EditManifest): EditManifestValidation {
-  const errors: string[] = [];
-  let previous: EditManifestSegment | undefined;
+export function parseCueSelection(input: string, maxCueIndex: number): number[] {
+  if (!Number.isInteger(maxCueIndex) || maxCueIndex < 0) {
+    throw new EditSelectionError("Maximum cue index must be a non-negative integer.");
+  }
 
-  for (const segment of manifest.segments) {
-    if (segment.sourceEndSeconds <= segment.sourceStartSeconds) {
-      errors.push(`${segment.id} ends before it starts.`);
+  const selection = new Set<number>();
+  const normalized = input.trim();
+  if (!normalized) {
+    return [];
+  }
+
+  for (const rawToken of normalized.split(",")) {
+    const token = rawToken.trim();
+    const match = /^(\d+)(?:\s*-\s*(\d+))?$/.exec(token);
+    if (!match) {
+      throw new EditSelectionError(`Invalid cue selection token: ${token || "(empty)"}.`);
     }
-    if (previous && segment.sourceStartSeconds < previous.sourceEndSeconds) {
-      errors.push(`${segment.id} starts before ${previous.id} ends.`);
+
+    const start = Number(match[1]);
+    const end = match[2] === undefined ? start : Number(match[2]);
+    if (start <= 0 || end <= 0) {
+      throw new EditSelectionError("Cue numbers must be positive integers.");
     }
-    previous = segment;
+    if (end < start) {
+      throw new EditSelectionError(`Cue range ${token} must not be reversed.`);
+    }
+    if (end > maxCueIndex) {
+      throw new EditSelectionError(`Cue ${end} is outside the available range 1-${maxCueIndex}.`);
+    }
+    for (let cueIndex = start; cueIndex <= end; cueIndex += 1) {
+      selection.add(cueIndex);
+    }
   }
 
-  if (!keptSegments(manifest).length) {
-    errors.push("Manifest keeps no segments.");
-  }
-
-  return { valid: errors.length === 0, errors };
+  return [...selection].sort((left, right) => left - right);
 }
 
-export function parseEditManifest(value: unknown): EditManifest {
-  const record = asRecord(value, "Edit manifest");
-  if (record.version !== 1) {
-    throw new Error(`Edit manifest version must be 1, received ${JSON.stringify(record.version)}.`);
+export async function createEditManifest(
+  projectId: string,
+  sourceRelativePath: string,
+  options: { replace?: boolean } = {},
+): Promise<EditManifest> {
+  if (!options.replace && await manifestExists(projectId)) {
+    throw new EditManifestConflictError();
   }
-  const cutMode = record.cutMode;
-  if (cutMode !== "reencode" && cutMode !== "stream-copy") {
-    throw new Error(`Edit manifest cutMode must be "reencode" or "stream-copy", received ${JSON.stringify(cutMode)}.`);
+  const normalizedSourcePath = normalizeRelativePath(sourceRelativePath);
+  let sourcePath: string;
+  try {
+    sourcePath = resolveProjectPath(projectId, ...normalizedSourcePath.split("/"));
+  } catch (error: unknown) {
+    throw new EditManifestInputError(error instanceof Error ? error.message : String(error));
+  }
+  const source = await readFile(sourcePath, "utf8");
+  let cues;
+  try {
+    cues = parseSrt(source);
+  } catch (error: unknown) {
+    throw new EditManifestInputError(error instanceof Error ? error.message : String(error));
+  }
+  if (cues.length === 0) {
+    throw new EditManifestInputError("Source SRT must contain at least one cue.");
   }
 
+  const now = new Date().toISOString();
   const manifest: EditManifest = {
     version: 1,
-    projectId: requireString(record, "projectId"),
-    sourceVideoPath: requireString(record, "sourceVideoPath"),
-    sourceSubtitlePath: requireString(record, "sourceSubtitlePath"),
-    sourceHash: requireString(record, "sourceHash"),
-    cutMode,
-    generatedAt: requireString(record, "generatedAt"),
-    segments: requireArray(record, "segments").map(parseSegment),
+    sourceRelativePath: normalizedSourcePath,
+    sourceHash: createHash("sha256").update(source).digest("hex"),
+    createdAt: now,
+    updatedAt: now,
+    segments: cues.map((cue) => ({
+      cueIndex: cue.index,
+      start: cue.start,
+      end: cue.end,
+      text: cue.text,
+      decision: "keep",
+    })),
   };
 
-  const validation = validateEditManifest(manifest);
-  if (!validation.valid) {
-    throw new Error(`Edit manifest is not renderable: ${validation.errors.join(" ")}`);
-  }
+  await saveEditManifest(projectId, manifest);
   return manifest;
 }
 
-export async function saveEditManifest(projectId: string, manifest: EditManifest): Promise<void> {
-  const path = manifestPath(projectId);
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
-}
-
-export async function loadEditManifest(projectId: string): Promise<EditManifest | null> {
+async function manifestExists(projectId: string): Promise<boolean> {
   try {
-    return parseEditManifest(JSON.parse(await readFile(manifestPath(projectId), "utf8")));
+    await access(resolveProjectPath(projectId, ...MANIFEST_RELATIVE_PATH.split("/")));
+    return true;
   } catch (error: unknown) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return false;
+    }
     throw error;
   }
 }
 
-function manifestPath(projectId: string): string {
-  return resolveProjectPath(projectId, "workspace/editing/edit-manifest.json");
+export async function loadEditManifest(projectId: string): Promise<EditManifest> {
+  const manifest = await readJson<EditManifest>(resolveProjectPath(projectId, ...MANIFEST_RELATIVE_PATH.split("/")));
+  if (manifest.version !== 1 || !Array.isArray(manifest.segments)) {
+    throw new Error("Unsupported or invalid edit manifest.");
+  }
+  return manifest;
 }
 
-function parseSegment(value: unknown, index: number): EditManifestSegment {
-  const record = asRecord(value, `Edit manifest segment ${index + 1}`);
-  if (typeof record.keep !== "boolean") {
-    throw new Error(`Edit manifest segment ${index + 1} needs a boolean keep.`);
+export async function applyRemoveSelection(projectId: string, selection: string): Promise<EditManifest> {
+  const manifest = await loadEditManifest(projectId);
+  const maxCueIndex = manifest.segments.reduce((maximum, segment) => Math.max(maximum, segment.cueIndex), 0);
+  const removed = new Set(parseCueSelection(selection, maxCueIndex));
+  const available = new Set(manifest.segments.map((segment) => segment.cueIndex));
+  for (const cueIndex of removed) {
+    if (!available.has(cueIndex)) {
+      throw new EditSelectionError(`Cue ${cueIndex} does not exist in the edit manifest.`);
+    }
   }
+
+  const updated: EditManifest = {
+    ...manifest,
+    updatedAt: new Date().toISOString(),
+    segments: manifest.segments.map((segment) => ({
+      ...segment,
+      decision: removed.has(segment.cueIndex) ? "remove" : "keep",
+    })),
+  };
+  await saveEditManifest(projectId, updated);
+  return updated;
+}
+
+export async function exportEditManifest(projectId: string): Promise<EditExportResult> {
+  const manifest = await loadEditManifest(projectId);
+  const kept = manifest.segments.filter((segment) => segment.decision === "keep");
+  const cleanSrt = stringifySrt(
+    kept.map((segment, index) => ({
+      index: index + 1,
+      start: segment.start,
+      end: segment.end,
+      text: segment.text,
+    })),
+  );
+  const csv = [
+    "cueIndex,start,end,decision,text",
+    ...manifest.segments.map((segment) =>
+      [segment.cueIndex, segment.start, segment.end, segment.decision, segment.text]
+        .map((value) => csvCell(String(value)))
+        .join(","),
+    ),
+  ].join("\n") + "\n";
+
+  await writeText(projectId, CLEAN_SRT_RELATIVE_PATH, cleanSrt);
+  await writeText(projectId, CSV_RELATIVE_PATH, csv);
+
   return {
-    id: requireString(record, "id"),
-    sourceStartSeconds: requireNumber(record, "sourceStartSeconds"),
-    sourceEndSeconds: requireNumber(record, "sourceEndSeconds"),
-    keep: record.keep,
-    text: requireString(record, "text"),
+    manifest,
+    cleanSrtRelativePath: CLEAN_SRT_RELATIVE_PATH,
+    csvRelativePath: CSV_RELATIVE_PATH,
+    keptCueCount: kept.length,
+    removedCueCount: manifest.segments.length - kept.length,
   };
 }
 
-function asRecord(value: unknown, label: string): Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(`${label} must be an object.`);
+async function saveEditManifest(projectId: string, manifest: EditManifest): Promise<void> {
+  const path = resolveProjectPath(projectId, ...MANIFEST_RELATIVE_PATH.split("/"));
+  await mkdir(dirname(path), { recursive: true });
+  await writeJson(path, manifest);
+}
+
+async function writeText(projectId: string, relativePath: string, content: string): Promise<void> {
+  const path = resolveProjectPath(projectId, ...relativePath.split("/"));
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, content, "utf8");
+}
+
+function normalizeRelativePath(value: string): string {
+  const normalized = value.trim().replace(/\\/g, "/").replace(/^\.\//, "");
+  if (!normalized || normalized.startsWith("/") || /^[a-z]:\//i.test(normalized)) {
+    throw new EditManifestInputError("Source SRT path must be relative to the project directory.");
   }
-  return value as Record<string, unknown>;
+  return normalized;
 }
 
-function requireString(record: Record<string, unknown>, field: string): string {
-  const value = record[field];
-  if (typeof value !== "string" || !value.trim()) {
-    throw new Error(`Edit manifest needs a non-empty ${field}.`);
-  }
-  return value;
-}
-
-function requireNumber(record: Record<string, unknown>, field: string): number {
-  const value = record[field];
-  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
-    throw new Error(`Edit manifest needs a non-negative ${field}.`);
-  }
-  return value;
-}
-
-function requireArray(record: Record<string, unknown>, field: string): unknown[] {
-  const value = record[field];
-  if (!Array.isArray(value) || !value.length) {
-    throw new Error(`Edit manifest needs a non-empty ${field}.`);
-  }
-  return value;
-}
-
-function millis(seconds: number): number {
-  return Math.round(seconds * 1000);
-}
-
-function secondsFromTimestamp(timestamp: string): number {
-  const match = /^(\d{2}):(\d{2}):(\d{2}),(\d{3})$/.exec(timestamp);
-  if (!match) {
-    throw new Error(`Invalid subtitle timestamp ${timestamp}.`);
-  }
-  const [, hours, minutes, seconds, fraction] = match.map(Number) as [number, number, number, number, number];
-  return (((hours * 60 + minutes) * 60 + seconds) * 1000 + fraction) / 1000;
-}
-
-function timestampFromSeconds(value: number): string {
-  const totalMs = millis(value);
-  const fraction = totalMs % 1000;
-  const totalSeconds = (totalMs - fraction) / 1000;
-  const pad = (input: number, length = 2) => String(input).padStart(length, "0");
-  return `${pad(Math.floor(totalSeconds / 3600))}:${pad(Math.floor(totalSeconds / 60) % 60)}:${pad(totalSeconds % 60)},${pad(fraction, 3)}`;
+function csvCell(value: string): string {
+  return /[",\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
 }

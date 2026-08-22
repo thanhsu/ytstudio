@@ -143,6 +143,122 @@ test("subtitle upload route imports source SRT through the API", async () => {
   });
 });
 
+test("edit manifest API creates, updates, loads, and exports subtitle decisions", async () => {
+  await withTempCwd(async () => {
+    const subtitleDir = join("projects", "sample-project", "workspace", "subtitles");
+    await mkdir(subtitleDir, { recursive: true });
+    await writeFile(
+      join(subtitleDir, "source.srt"),
+      "1\n00:00:00,000 --> 00:00:01,000\nKeep\n\n2\n00:00:01,100 --> 00:00:02,000\nRemove\n",
+      "utf8",
+    );
+    const running = await startStudioServer(createStudioServer(), { port: 0 });
+    const jsonHeaders = { "content-type": "application/json", origin: running.url };
+    try {
+      const missingResponse = await fetch(`${running.url}/api/projects/sample-project/edit-manifest`);
+      assert.equal(missingResponse.status, 404);
+      assert.equal((await missingResponse.json()).code, "edit-manifest-missing");
+
+      const missingUpdateResponse = await fetch(`${running.url}/api/projects/sample-project/edit-manifest/remove-list`, {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ remove: "1" }),
+      });
+      assert.equal(missingUpdateResponse.status, 404);
+      assert.equal((await missingUpdateResponse.json()).code, "edit-manifest-missing");
+
+      const missingExportResponse = await fetch(`${running.url}/api/projects/sample-project/edit-manifest/export`, {
+        method: "POST",
+        headers: jsonHeaders,
+        body: "{}",
+      });
+      assert.equal(missingExportResponse.status, 404);
+      assert.equal((await missingExportResponse.json()).code, "edit-manifest-missing");
+
+      const missingSourceResponse = await fetch(`${running.url}/api/projects/sample-project/edit-manifest`, {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ source: "workspace/subtitles/missing.srt" }),
+      });
+      assert.equal(missingSourceResponse.status, 404);
+      assert.equal((await missingSourceResponse.json()).code, "edit-source-missing");
+
+      const traversalResponse = await fetch(`${running.url}/api/projects/sample-project/edit-manifest`, {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ source: "../outside.srt" }),
+      });
+      assert.equal(traversalResponse.status, 400);
+      assert.equal((await traversalResponse.json()).code, "edit-source-invalid");
+
+      await writeFile(join(subtitleDir, "invalid.srt"), "not an srt", "utf8");
+      const invalidSrtResponse = await fetch(`${running.url}/api/projects/sample-project/edit-manifest`, {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ source: "workspace/subtitles/invalid.srt" }),
+      });
+      assert.equal(invalidSrtResponse.status, 400);
+      assert.equal((await invalidSrtResponse.json()).code, "edit-source-invalid");
+
+      const createResponse = await fetch(`${running.url}/api/projects/sample-project/edit-manifest`, {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ source: "workspace/subtitles/source.srt" }),
+      });
+      assert.equal(createResponse.status, 200);
+      assert.equal((await createResponse.json()).manifest.segments.length, 2);
+
+      const invalidResponse = await fetch(`${running.url}/api/projects/sample-project/edit-manifest/remove-list`, {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ remove: "3" }),
+      });
+      assert.equal(invalidResponse.status, 400);
+      assert.match((await invalidResponse.json()).message, /outside the available range/);
+
+      const updateResponse = await fetch(`${running.url}/api/projects/sample-project/edit-manifest/remove-list`, {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ remove: "2" }),
+      });
+      assert.equal(updateResponse.status, 200);
+      assert.equal((await updateResponse.json()).manifest.segments[1].decision, "remove");
+
+      const conflictResponse = await fetch(`${running.url}/api/projects/sample-project/edit-manifest`, {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ source: "workspace/subtitles/source.srt" }),
+      });
+      assert.equal(conflictResponse.status, 409);
+      assert.equal((await conflictResponse.json()).code, "edit-manifest-exists");
+
+      const loadResponse = await fetch(`${running.url}/api/projects/sample-project/edit-manifest`);
+      assert.equal(loadResponse.status, 200);
+      assert.equal((await loadResponse.json()).manifest.segments[1].decision, "remove");
+
+      const exportResponse = await fetch(`${running.url}/api/projects/sample-project/edit-manifest/export`, {
+        method: "POST",
+        headers: jsonHeaders,
+        body: "{}",
+      });
+      assert.equal(exportResponse.status, 200);
+      const exported = (await exportResponse.json()).exported;
+      assert.equal(exported.keptCueCount, 1);
+      assert.match(await readFile(join("projects", "sample-project", exported.cleanSrtRelativePath), "utf8"), /Keep/);
+
+      const replaceResponse = await fetch(`${running.url}/api/projects/sample-project/edit-manifest`, {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ source: "workspace/subtitles/source.srt", replace: true }),
+      });
+      assert.equal(replaceResponse.status, 200);
+      assert.equal((await replaceResponse.json()).manifest.segments[1].decision, "keep");
+    } finally {
+      await running.close();
+    }
+  });
+});
+
 test("project brief can be created from the studio API", async () => {
   const previousCwd = process.cwd();
   const root = await mkdtemp(join(tmpdir(), "yt-server-create-"));

@@ -1,124 +1,108 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import test from "node:test";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import {
-  buildCleanSrt,
-  buildEditManifest,
-  keptSegments,
-  loadEditManifest,
-  outputTimeline,
-  parseEditManifest,
-  saveEditManifest,
-  validateEditManifest,
+  applyRemoveSelection,
+  createEditManifest,
+  exportEditManifest,
+  parseCueSelection,
 } from "../src/edit-manifest.ts";
 
-const srt =
-  "1\n00:00:00,000 --> 00:00:03,000\nHe enters the village.\n\n" +
-  "2\n00:00:03,000 --> 00:00:07,000\nA filler line nobody needs.\n\n" +
-  "3\n00:00:07,000 --> 00:00:12,500\nThe training changes him.\n";
+const SAMPLE_SRT = `1
+00:00:00,000 --> 00:00:01,200
+First line
 
-function sampleManifest() {
-  return buildEditManifest({
-    projectId: "sample-project",
-    sourceVideoPath: "workspace/source/video.mp4",
-    sourceSubtitlePath: "workspace/source/source.srt",
-    sourceHash: "abc123",
-    srt,
-  });
-}
+2
+00:00:01,300 --> 00:00:03,000
+Second, "quoted" line
 
-test("builds one segment per cue, keeping everything, timed against the source", () => {
-  const manifest = sampleManifest();
-  assert.equal(manifest.version, 1);
-  assert.equal(manifest.cutMode, "reencode");
-  assert.deepEqual(manifest.segments.map((segment) => segment.id), ["cue-001", "cue-002", "cue-003"]);
-  assert.ok(manifest.segments.every((segment) => segment.keep));
-  assert.deepEqual(
-    manifest.segments.map((segment) => [segment.sourceStartSeconds, segment.sourceEndSeconds]),
-    [[0, 3], [3, 7], [7, 12.5]],
-  );
-  assert.equal(manifest.segments[1].text, "A filler line nobody needs.");
+3
+00:00:03,100 --> 00:00:04,000
+Third line
+`;
+
+test("parses cue numbers and inclusive ranges into a sorted unique selection", () => {
+  assert.deepEqual(parseCueSelection("5, 1, 3-4, 3", 5), [1, 3, 4, 5]);
+  assert.deepEqual(parseCueSelection("", 5), []);
 });
 
-test("output timeline closes the gap left by a dropped segment", () => {
-  const manifest = sampleManifest();
-  manifest.segments[1].keep = false;
-  assert.deepEqual(
-    outputTimeline(manifest).map((segment) => [segment.id, segment.outputStartSeconds, segment.outputEndSeconds]),
-    [["cue-001", 0, 3], ["cue-003", 3, 8.5]],
-  );
-  assert.deepEqual(keptSegments(manifest).map((segment) => segment.id), ["cue-001", "cue-003"]);
+test("rejects malformed, reversed, non-positive, and out-of-range selections", () => {
+  assert.throws(() => parseCueSelection("1,x", 5), /Invalid cue selection token/);
+  assert.throws(() => parseCueSelection("4-2", 5), /must not be reversed/);
+  assert.throws(() => parseCueSelection("0", 5), /positive/);
+  assert.throws(() => parseCueSelection("6", 5), /outside the available range/);
 });
 
-test("clean srt renumbers from one and shifts onto the output timeline", () => {
-  const manifest = sampleManifest();
-  manifest.segments[1].keep = false;
-  assert.equal(
-    buildCleanSrt(manifest),
-    "1\n00:00:00,000 --> 00:00:03,000\nHe enters the village.\n\n" +
-      "2\n00:00:03,000 --> 00:00:08,500\nThe training changes him.\n",
-  );
-});
-
-test("rejects segments whose source ranges overlap", () => {
-  const manifest = sampleManifest();
-  manifest.segments[1].sourceStartSeconds = 2;
-  const result = validateEditManifest(manifest);
-  assert.equal(result.valid, false);
-  assert.ok(result.errors.includes("cue-002 starts before cue-001 ends."));
-});
-
-test("rejects a segment that ends before it starts", () => {
-  const manifest = sampleManifest();
-  manifest.segments[0].sourceEndSeconds = 0;
-  assert.ok(validateEditManifest(manifest).errors.includes("cue-001 ends before it starts."));
-});
-
-test("rejects a manifest that keeps nothing", () => {
-  const manifest = sampleManifest();
-  for (const segment of manifest.segments) segment.keep = false;
-  assert.ok(validateEditManifest(manifest).errors.includes("Manifest keeps no segments."));
-});
-
-test("parse names the field that is missing", () => {
-  const { sourceVideoPath, ...withoutVideo } = sampleManifest();
-  assert.throws(() => parseEditManifest(withoutVideo), /sourceVideoPath/);
-});
-
-test("parse refuses a version it was not written for", () => {
-  assert.throws(() => parseEditManifest({ ...sampleManifest(), version: 2 }), /version/);
-});
-
-test("parse refuses an unknown cut mode instead of silently defaulting", () => {
-  assert.throws(() => parseEditManifest({ ...sampleManifest(), cutMode: "fast" }), /cutMode/);
-});
-
-test("parse refuses a manifest that would not survive validation", () => {
-  const manifest = sampleManifest();
-  for (const segment of manifest.segments) segment.keep = false;
-  assert.throws(() => parseEditManifest(manifest), /keeps no segments/);
-});
-
-test("parse accepts a manifest that round-trips through JSON", () => {
-  const manifest = sampleManifest();
-  const parsed = parseEditManifest(JSON.parse(JSON.stringify(manifest)));
-  assert.deepEqual(parsed, manifest);
-});
-
-test("saved manifests reload from the project workspace", async () => {
-  const previous = process.env.YT_STUDIO_PROJECTS_DIR;
-  const root = await mkdtemp(join(tmpdir(), "yt-studio-manifest-"));
+test("creates, updates, and exports a project edit manifest", async () => {
+  const root = await mkdtemp(join(tmpdir(), "yt-edit-manifest-"));
+  const previousRoot = process.env.YT_STUDIO_PROJECTS_DIR;
   process.env.YT_STUDIO_PROJECTS_DIR = root;
+
   try {
-    assert.equal(await loadEditManifest("sample-project"), null);
-    const manifest = sampleManifest();
-    await saveEditManifest("sample-project", manifest);
-    assert.deepEqual(await loadEditManifest("sample-project"), manifest);
+    const subtitleDir = join(root, "sample-project", "workspace", "subtitles");
+    await mkdir(subtitleDir, { recursive: true });
+    await writeFile(join(subtitleDir, "source.srt"), SAMPLE_SRT, "utf8");
+
+    const created = await createEditManifest("sample-project", "workspace/subtitles/source.srt");
+    assert.equal(created.version, 1);
+    assert.equal(created.sourceRelativePath, "workspace/subtitles/source.srt");
+    assert.match(created.sourceHash, /^[a-f0-9]{64}$/);
+    assert.deepEqual(created.segments.map((segment) => segment.decision), ["keep", "keep", "keep"]);
+
+    const updated = await applyRemoveSelection("sample-project", "2");
+    assert.deepEqual(updated.segments.map((segment) => segment.decision), ["keep", "remove", "keep"]);
+
+    const exported = await exportEditManifest("sample-project");
+    assert.equal(exported.keptCueCount, 2);
+    assert.equal(exported.removedCueCount, 1);
+    assert.equal(exported.cleanSrtRelativePath, "workspace/edit/clean.srt");
+    assert.equal(exported.csvRelativePath, "workspace/edit/segments.csv");
+
+    const cleanSrt = await readFile(join(root, "sample-project", exported.cleanSrtRelativePath), "utf8");
+    assert.equal(
+      cleanSrt,
+      `1
+00:00:00,000 --> 00:00:01,200
+First line
+
+2
+00:00:03,100 --> 00:00:04,000
+Third line
+`,
+    );
+
+    const csv = await readFile(join(root, "sample-project", exported.csvRelativePath), "utf8");
+    assert.match(csv, /^cueIndex,start,end,decision,text\r?\n/);
+    assert.match(csv, /2,"00:00:01,300","00:00:03,000",remove,"Second, ""quoted"" line"/);
+
+    const persisted = JSON.parse(
+      await readFile(join(root, "sample-project", "workspace", "edit", "segments.json"), "utf8"),
+    );
+    assert.equal(persisted.segments[1].decision, "remove");
+
+    await assert.rejects(
+      createEditManifest("sample-project", "workspace/subtitles/source.srt"),
+      /already exists/i,
+    );
+    const preserved = JSON.parse(
+      await readFile(join(root, "sample-project", "workspace", "edit", "segments.json"), "utf8"),
+    );
+    assert.equal(preserved.segments[1].decision, "remove");
+
+    const replaced = await createEditManifest(
+      "sample-project",
+      "workspace/subtitles/source.srt",
+      { replace: true },
+    );
+    assert.deepEqual(replaced.segments.map((segment) => segment.decision), ["keep", "keep", "keep"]);
   } finally {
-    if (previous === undefined) delete process.env.YT_STUDIO_PROJECTS_DIR;
-    else process.env.YT_STUDIO_PROJECTS_DIR = previous;
+    if (previousRoot === undefined) {
+      delete process.env.YT_STUDIO_PROJECTS_DIR;
+    } else {
+      process.env.YT_STUDIO_PROJECTS_DIR = previousRoot;
+    }
     await rm(root, { recursive: true, force: true });
   }
 });
