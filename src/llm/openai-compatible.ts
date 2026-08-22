@@ -1,3 +1,4 @@
+import { redact } from "../redact.ts";
 import { buildScriptPrompt } from "../script-prompt.ts";
 import { parseScriptGeneration } from "./parse.ts";
 import type { LlmProvider, ScriptGenerationRequest, ScriptGenerationResult } from "./types.ts";
@@ -53,6 +54,11 @@ export function createOpenAiCompatibleProvider(config: OpenAiCompatibleConfig): 
           }),
         });
       } catch (error: unknown) {
+        // A cancelled request must stay identifiable as a cancellation, not be
+        // relabeled as "server unreachable" — the two have different remedies.
+        if (signal?.aborted || isAbortError(error)) {
+          throw error;
+        }
         throw new Error(`Could not reach the model server at ${endpoint}: ${messageOf(error)}`);
       }
 
@@ -61,7 +67,13 @@ export function createOpenAiCompatibleProvider(config: OpenAiCompatibleConfig): 
         throw new Error(`Model request failed with status ${response.status}: ${redact(body)}`);
       }
 
-      const payload = (await response.json()) as ChatCompletionResponse;
+      let payload: ChatCompletionResponse;
+      try {
+        payload = (await response.json()) as ChatCompletionResponse;
+      } catch (error: unknown) {
+        throw new Error(`Model response from ${endpoint} was not valid JSON: ${messageOf(error)}`);
+      }
+
       const content = payload.choices?.[0]?.message?.content;
       if (typeof content !== "string" || !content.trim()) {
         throw new Error("Model returned an empty response.");
@@ -80,6 +92,6 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function redact(value: string): string {
-  return value.replace(/(authorization|api[_-]?key|token)(["']?\s*[:=]\s*["']?)[^"'\s]+/gi, "$1$2[redacted]");
+function isAbortError(error: unknown): boolean {
+  return typeof error === "object" && error !== null && (error as { name?: unknown }).name === "AbortError";
 }

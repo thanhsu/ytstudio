@@ -2,6 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { probeDuration } from "../media.ts";
 import { resolveProjectPath } from "../project-paths.ts";
+import { redact } from "../redact.ts";
 import { saveTtsArtifact, ttsCacheKey } from "./cache.ts";
 import type { TtsArtifact, TtsProvider, TtsRequest } from "./types.ts";
 
@@ -101,8 +102,4 @@ export function createOpenAiProvider(config: OpenAiConfig): TtsProvider {
       return artifact;
     },
   };
-}
-
-function redact(value: string): string {
-  return value.replace(/(authorization|api[_-]?key|token)(["']?\s*[:=]\s*["']?)[^"'\s]+/gi, "$1$2[redacted]");
 }
