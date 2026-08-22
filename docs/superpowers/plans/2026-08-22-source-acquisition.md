@@ -55,7 +55,26 @@ import {
   type SourceCandidate,
 } from "../src/sources/store.ts";
 
-function sampleCandidate(id: string): SourceCandidate {
+import { sampleCandidate, withSourcesRoot } from "./helpers.ts";
+```
+
+Both helpers are new and shared — Tasks 3, 4, 6, and 7 import them rather than redefining them. Add them to `tests/helpers.ts`:
+
+```ts
+export async function withSourcesRoot(run: (root: string) => Promise<void>): Promise<void> {
+  const previous = process.env.YT_STUDIO_SOURCES_DIR;
+  const root = await mkdtemp(join(tmpdir(), "yt-sources-"));
+  process.env.YT_STUDIO_SOURCES_DIR = root;
+  try {
+    await run(root);
+  } finally {
+    if (previous === undefined) delete process.env.YT_STUDIO_SOURCES_DIR;
+    else process.env.YT_STUDIO_SOURCES_DIR = previous;
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+export function sampleCandidate(id: string): SourceCandidate {
   return {
     version: 1,
     id,
@@ -71,19 +90,6 @@ function sampleCandidate(id: string): SourceCandidate {
     rights: "unknown",
     rightsNote: "",
   };
-}
-
-async function withSourcesRoot(run: (root: string) => Promise<void>): Promise<void> {
-  const previous = process.env.YT_STUDIO_SOURCES_DIR;
-  const root = await mkdtemp(join(tmpdir(), "yt-sources-"));
-  process.env.YT_STUDIO_SOURCES_DIR = root;
-  try {
-    await run(root);
-  } finally {
-    if (previous === undefined) delete process.env.YT_STUDIO_SOURCES_DIR;
-    else process.env.YT_STUDIO_SOURCES_DIR = previous;
-    await rm(root, { recursive: true, force: true });
-  }
 }
 
 test("the sources root is a sibling of the projects root, never inside it", () => {
@@ -327,23 +333,99 @@ git commit -m "feat: read source metadata without downloading anything"
 `tests/sources-candidates.test.ts` covers the duplicate policy — the part most likely to be got wrong:
 
 ```ts
+import assert from "node:assert/strict";
+import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
+import test from "node:test";
+import { addCandidate } from "../src/sources/candidates.ts";
+import { listCandidates, saveCandidate } from "../src/sources/store.ts";
+import { makeFakeExecutable, sampleCandidate, withSourcesRoot } from "./helpers.ts";
+
+const PAYLOAD = {
+  extractor_key: "Youtube",
+  id: "dQw4w9WgXcQ",
+  webpage_url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+  title: "Episode 1",
+  uploader: "Studio",
+  duration: 1440,
+  description: "First episode.",
+};
+
+async function ytDlpOptions(payload: unknown = PAYLOAD) {
+  return {
+    ytDlpPath: process.execPath,
+    prefixArgs: [await makeFakeExecutable(`console.log(${JSON.stringify(JSON.stringify(payload))});`)],
+  };
+}
+
 test("pasting the same video twice returns the first candidate", async () => {
-  // addCandidate twice with the same payload -> created true, then false, one directory
+  await withSourcesRoot(async () => {
+    const first = await addCandidate("https://youtu.be/dQw4w9WgXcQ", await ytDlpOptions());
+    const second = await addCandidate("https://www.youtube.com/watch?v=dQw4w9WgXcQ", await ytDlpOptions());
+
+    assert.equal(first.created, true);
+    assert.equal(second.created, false);
+    assert.equal(second.candidate.id, first.candidate.id);
+    assert.equal(second.candidate.addedAt, first.candidate.addedAt);
+    assert.equal((await listCandidates()).length, 1);
+  });
 });
 
 test("a different video colliding on one id is refused, naming both", async () => {
-  // save a candidate, then addCandidate whose derived id matches but whose
-  // platformVideoId differs -> rejects with both identities in the message
+  await withSourcesRoot(async () => {
+    await saveCandidate({ ...sampleCandidate("youtube-dqw4w9wgxcq"), platformVideoId: "OTHERVIDEO" });
+
+    await assert.rejects(
+      () => addCandidate("https://youtu.be/dQw4w9WgXcQ", await ytDlpOptions()),
+      (error: unknown) => /OTHERVIDEO/.test(String(error)) && /dQw4w9WgXcQ/.test(String(error)),
+    );
+  });
 });
 
 test("a directory with no candidate file cannot be created over", async () => {
-  // mkdir sources/<id>, then addCandidate deriving that id -> rejects naming the path
+  await withSourcesRoot(async (root) => {
+    await mkdir(join(root, "youtube-dqw4w9wgxcq"), { recursive: true });
+
+    await assert.rejects(
+      () => addCandidate("https://youtu.be/dQw4w9WgXcQ", await ytDlpOptions()),
+      /youtube-dqw4w9wgxcq/,
+    );
+  });
+});
+
+test("a candidate starts with unknown rights and no score", async () => {
+  await withSourcesRoot(async () => {
+    const { candidate } = await addCandidate("https://youtu.be/dQw4w9WgXcQ", await ytDlpOptions());
+    assert.equal(candidate.rights, "unknown");
+    assert.equal(candidate.status, "metadata");
+    assert.equal(candidate.score, undefined);
+  });
 });
 ```
 
-Write each body out in full against the real modules, following the `withSourcesRoot` helper from Task 1.
+In `tests/server.test.ts`, add:
 
-In `tests/server.test.ts`, add: `POST /api/sources` with no `url` returns 400 `source-url-required`; `GET /api/sources` on an empty store returns `{ sources: [] }`.
+```ts
+test("the sources routes reject a missing url and list an empty store", async () => {
+  await withTempCwd(async () => {
+    const running = await startStudioServer(createStudioServer(), { port: 0 });
+    try {
+      const listed = await fetch(`${running.url}/api/sources`);
+      assert.deepEqual(await listed.json(), { sources: [] });
+
+      const created = await fetch(`${running.url}/api/sources`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: running.url },
+        body: "{}",
+      });
+      assert.equal(created.status, 400);
+      assert.equal((await created.json()).code, "source-url-required");
+    } finally {
+      await running.close();
+    }
+  });
+});
+```
 
 - [ ] **Step 2: Run and watch fail**
 
@@ -375,22 +457,60 @@ git commit -m "feat: add source candidates from a pasted url"
 
 - [ ] **Step 1: Write the failing test**
 
+Append to `tests/sources-candidates.test.ts`:
+
 ```ts
-test("rights start unknown and downloads are refused until declared", () => {
-  // assertDownloadable on a fresh candidate throws naming the candidate id
+test("a download is refused while rights are unknown, naming the candidate", async () => {
+  await withSourcesRoot(async () => {
+    const candidate = sampleCandidate("youtube-abc");
+    assert.throws(() => assertDownloadable(candidate), /youtube-abc/);
+  });
 });
 
-test("declaring rights records the note and permits the download", () => {
-  // setCandidateRights(..., "third-party-fair-use", "review commentary")
-  // assertDownloadable no longer throws
+test("declaring rights records the note and permits the download", async () => {
+  await withSourcesRoot(async () => {
+    await saveCandidate(sampleCandidate("youtube-abc"));
+    const updated = await setCandidateRights("youtube-abc", "third-party-fair-use", "Review commentary only.");
+
+    assert.equal(updated.rights, "third-party-fair-use");
+    assert.equal(updated.rightsNote, "Review commentary only.");
+    assert.doesNotThrow(() => assertDownloadable(updated));
+    assert.equal((await loadCandidate("youtube-abc"))?.rights, "third-party-fair-use");
+  });
 });
 
-test("an unrecognised rights value is refused rather than coerced", () => {
-  // setCandidateRights(..., "whatever") rejects naming the field
+test("an unrecognised rights value is refused rather than coerced", async () => {
+  await withSourcesRoot(async () => {
+    await saveCandidate(sampleCandidate("youtube-abc"));
+    await assert.rejects(
+      () => setCandidateRights("youtube-abc", "whatever" as never, ""),
+      /rights/,
+    );
+    assert.equal((await loadCandidate("youtube-abc"))?.rights, "unknown");
+  });
 });
 ```
 
-In `tests/server.test.ts`: `PATCH /api/sources/:id` with a bad rights value returns 400 `source-rights-invalid`.
+In `tests/server.test.ts`:
+
+```ts
+test("the rights route refuses a value it does not recognise", async () => {
+  await withTempCwd(async () => {
+    const running = await startStudioServer(createStudioServer(), { port: 0 });
+    try {
+      const response = await fetch(`${running.url}/api/sources/youtube-abc`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", origin: running.url },
+        body: JSON.stringify({ rights: "whatever" }),
+      });
+      assert.equal(response.status, 400);
+      assert.equal((await response.json()).code, "source-rights-invalid");
+    } finally {
+      await running.close();
+    }
+  });
+});
+```
 
 - [ ] **Step 2-4: Run, implement, verify**
 
@@ -481,10 +601,71 @@ git commit -m "refactor: extract the chat transport from script generation"
 - [ ] **Step 1: Write the failing test**
 
 ```ts
-test("a score records the provider and model that produced it", () => { /* ... */ });
-test("a value outside 0-100 is refused, naming the field", () => { /* ... */ });
-test("a malformed response leaves the previous score intact", () => { /* ... */ });
-test("the dry-run scorer is obviously synthetic and needs no model", () => { /* ... */ });
+import assert from "node:assert/strict";
+import test from "node:test";
+import { parseSourceScore } from "../src/sources/score-parse.ts";
+import { buildScorePrompt } from "../src/sources/score-prompt.ts";
+import { scoreCandidate } from "../src/sources/score.ts";
+import { loadCandidate, saveCandidate } from "../src/sources/store.ts";
+import { sampleCandidate, withSourcesRoot } from "./helpers.ts";
+
+const GOOD = JSON.stringify({
+  value: 72,
+  angle: "How the training arc breaks the usual pattern",
+  hooks: ["The mentor lies in episode one"],
+  risks: ["Heavy spoilers past the midpoint"],
+  reason: "Clear arc with a contrarian read available.",
+});
+
+function scorerReturning(raw: string) {
+  return { generate: async () => raw, name: "stub", model: "stub-model" };
+}
+
+test("the prompt carries metadata only, since nothing is downloaded yet", () => {
+  const prompt = buildScorePrompt(sampleCandidate("youtube-abc"));
+  const text = JSON.stringify(prompt);
+  assert.match(text, /Episode 1/);
+  assert.match(text, /Studio/);
+  assert.ok(!/video\.mp4/.test(text));
+});
+
+test("a score records the provider and model that produced it", async () => {
+  await withSourcesRoot(async () => {
+    await saveCandidate(sampleCandidate("youtube-abc"));
+    const updated = await scoreCandidate("youtube-abc", { scorer: scorerReturning(GOOD) });
+
+    assert.equal(updated.score?.value, 72);
+    assert.equal(updated.score?.provider, "stub");
+    assert.equal(updated.score?.model, "stub-model");
+    assert.ok(updated.score?.scoredAt);
+    assert.equal((await loadCandidate("youtube-abc"))?.score?.value, 72);
+  });
+});
+
+test("a value outside 0-100 is refused, naming the field", () => {
+  assert.throws(() => parseSourceScore(JSON.stringify({ ...JSON.parse(GOOD), value: 140 })), /value/);
+  assert.throws(() => parseSourceScore(JSON.stringify({ ...JSON.parse(GOOD), value: "high" })), /value/);
+});
+
+test("a malformed response leaves the previous score intact", async () => {
+  await withSourcesRoot(async () => {
+    await saveCandidate(sampleCandidate("youtube-abc"));
+    await scoreCandidate("youtube-abc", { scorer: scorerReturning(GOOD) });
+
+    await assert.rejects(() => scoreCandidate("youtube-abc", { scorer: scorerReturning("not json") }));
+    assert.equal((await loadCandidate("youtube-abc"))?.score?.value, 72);
+  });
+});
+
+test("the dry-run scorer needs no model and says what it is", async () => {
+  await withSourcesRoot(async () => {
+    await saveCandidate(sampleCandidate("youtube-abc"));
+    const updated = await scoreCandidate("youtube-abc", {});
+
+    assert.equal(updated.score?.provider, "dry-run");
+    assert.match(updated.score?.reason ?? "", /template|dry-run|not a model/i);
+  });
+});
 ```
 
 - [ ] **Step 2-4: Run, implement, verify**
@@ -518,13 +699,80 @@ test("progress comes off the download lines", () => {
   assert.equal(parseDownloadProgress("[info] writing subtitles"), null);
 });
 
-test("author subtitles beat auto-generated ones, then configured language order", () => { /* ... */ });
-test("no subtitle at all is not a failure", () => { /* ... */ });
-test("a download is refused while rights are unknown", () => { /* ... */ });
-test("a failed download leaves status failed, an error, and no partial file", () => { /* ... */ });
-test("an aborted download returns the candidate to metadata and removes partials", () => { /* ... */ });
-test("a retry clears the previous error and media before starting", () => { /* ... */ });
-test("delete is refused while a job runs", () => { /* ... */ });
+test("author subtitles beat auto-generated ones, then configured language order", () => {
+  const files = ["video.vi.srt", "video.en.srt", "video.en.auto.srt"];
+  assert.deepEqual(selectSubtitle(files, ["en", "vi"]), { path: "video.en.srt", language: "en" });
+  assert.deepEqual(selectSubtitle(["video.vi.srt", "video.en.auto.srt"], ["en", "vi"]), {
+    path: "video.vi.srt",
+    language: "vi",
+  });
+});
+
+test("no subtitle at all is not a failure", () => {
+  assert.equal(selectSubtitle(["video.mp4"], ["en"]), null);
+});
+
+test("a download is refused while rights are unknown", async () => {
+  await withSourcesRoot(async () => {
+    await saveCandidate(sampleCandidate("youtube-abc"));
+    await assert.rejects(() => downloadCandidate("youtube-abc", await downloadOptions()), /rights/);
+  });
+});
+
+test("a failed download leaves status failed, an error, and no partial file", async () => {
+  await withSourcesRoot(async () => {
+    await saveDeclaredCandidate("youtube-abc");
+    const options = await downloadOptions({ partial: true, exitCode: 1 });
+
+    await assert.rejects(() => downloadCandidate("youtube-abc", options));
+
+    const candidate = await loadCandidate("youtube-abc");
+    assert.equal(candidate?.status, "failed");
+    assert.ok(candidate?.error);
+    assert.equal(candidate?.media, undefined);
+    assert.deepEqual(await readdir(resolveSourcePath("youtube-abc")), ["candidate.json"]);
+  });
+});
+
+test("an aborted download returns the candidate to metadata and removes partials", async () => {
+  await withSourcesRoot(async () => {
+    await saveDeclaredCandidate("youtube-abc");
+    const controller = new AbortController();
+    const options = await downloadOptions({ partial: true, hang: true, signal: controller.signal });
+
+    const running = downloadCandidate("youtube-abc", options);
+    controller.abort();
+    await assert.rejects(() => running);
+
+    const candidate = await loadCandidate("youtube-abc");
+    assert.equal(candidate?.status, "metadata");
+    assert.deepEqual(await readdir(resolveSourcePath("youtube-abc")), ["candidate.json"]);
+  });
+});
+
+test("a retry clears the previous error and media before starting", async () => {
+  await withSourcesRoot(async () => {
+    await saveDeclaredCandidate("youtube-abc");
+    await assert.rejects(() => downloadCandidate("youtube-abc", await downloadOptions({ exitCode: 1 })));
+
+    const candidate = await downloadCandidate("youtube-abc", await downloadOptions());
+
+    assert.equal(candidate.status, "downloaded");
+    assert.equal(candidate.error, undefined);
+    assert.ok(candidate.media?.videoRelativePath);
+  });
+});
+```
+
+`downloadOptions` builds a fake yt-dlp that optionally writes a partial file, optionally hangs until aborted, and exits with the given code; `saveDeclaredCandidate` saves a candidate with rights already declared. Write both in this file beside the tests.
+
+In `tests/server.test.ts`:
+
+```ts
+test("deleting a source is refused while one of its jobs is running", async () => {
+  // start a download job against a fake yt-dlp that hangs, then DELETE the
+  // candidate and assert 409 with code source-job-running, then cancel the job
+});
 ```
 
 - [ ] **Step 2-4: Run, implement, verify**
