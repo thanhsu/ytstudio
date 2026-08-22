@@ -459,7 +459,7 @@ function renderBrandKitForm(series, kit) {
       ["audio-cover", "Audio cover"],
       ["clean-news", "Clean news"],
     ]),
-    field("Watermark opacity", "watermarkOpacity", String(kit.watermarkOpacity ?? 0.2), "number"),
+    field("Watermark opacity", "watermarkOpacity", String(kit.watermarkOpacity ?? 0.2), "number", "", "any"),
     textareaField("Title style", "titleStyle", kit.titleStyle ?? "Clear curiosity with consistent channel language."),
     textareaField("Thumbnail style", "thumbnailStyle", kit.thumbnailStyle ?? "Large readable text, high contrast."),
     textareaField("Safe text rules", "safeTextRules", (kit.safeTextRules ?? ["Use three to five words max"]).join("\n")),
@@ -1600,7 +1600,7 @@ function renderConfig() {
     field("Script base URL", "script.baseUrl", config.script.baseUrl),
     field("Script API key env", "script.apiKeyEnv", config.script.apiKeyEnv),
     checkboxField("Script provider is paid", "script.paid", config.script.paid),
-    field("Script temperature", "script.temperature", String(config.script.temperature), "number"),
+    field("Script temperature", "script.temperature", String(config.script.temperature), "number", "", "any"),
     field("Script max output tokens", "script.maxOutputTokens", String(config.script.maxOutputTokens), "number"),
     sectionTitle("Translation"),
     selectField("Translation provider", "translation.provider", config.translation.provider, [
@@ -1713,6 +1713,9 @@ async function runStepTask(step) {
   if (step.id === "voice" && appState.config?.tts?.defaultProvider === "openai") {
     throw new Error("OpenAI voice needs paid confirmation. Run Voice step manually.");
   }
+  if (step.id === "script" && appState.config?.script?.paid) {
+    throw new Error("Paid script model needs confirmation. Run Generate Script manually.");
+  }
   if (step.id === "copyright" || step.id === "source-risk") {
     await runProjectRoute("copyright-check", {
       commentaryPercent: 70,
@@ -1797,6 +1800,10 @@ async function requestVoice(confirmedPaidRequest) {
 }
 
 async function requestScript(confirmedPaidRequest) {
+  if (!confirmedPaidRequest && appState.config?.script?.paid) {
+    paidScriptDialog.showModal();
+    return;
+  }
   const response = await fetch(projectApiUrl("script"), {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -2062,7 +2069,7 @@ function sectionTitle(text) {
   return element;
 }
 
-function field(label, name, value, type = "text", placeholder = "") {
+function field(label, name, value, type = "text", placeholder = "", step = "1") {
   const wrapper = document.createElement("label");
   wrapper.className = "field";
   const caption = document.createElement("span");
@@ -2074,7 +2081,7 @@ function field(label, name, value, type = "text", placeholder = "") {
   input.placeholder = placeholder;
   if (type === "number") {
     input.min = "0";
-    input.step = "1";
+    input.step = step;
   }
   wrapper.append(caption, input);
   return wrapper;

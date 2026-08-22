@@ -101,7 +101,8 @@ The CLI remains as a debug and automation fallback, not the main operator path.
 
 Use the `Config` button in the local studio to edit model and tool settings:
 
-- script template/model label
+- script provider, model, base URL, API key env, paid flag, temperature, and
+  max output tokens
 - translation provider/model/default market
 - local ASR provider/model/language
 - default voice provider and voice model
