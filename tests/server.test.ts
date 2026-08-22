@@ -1033,6 +1033,34 @@ test("a pasted url becomes a candidate, and pasting it again does not duplicate 
   });
 });
 
+test("source search returns discoverable results without adding candidates", async () => {
+  await withSourcesServer(
+    async (running) => {
+      const response = await fetch(`${running.url}/api/sources/search`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: running.url },
+        body: JSON.stringify({ query: "牧神记", platform: "bilibili", limit: 3 }),
+      });
+
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.results[0].title, "牧神记 EP01");
+      assert.equal(body.results[0].url, "https://www.bilibili.com/video/BV1abc");
+      assert.equal(body.results[0].viewCount, 12000);
+      assert.deepEqual((await (await fetch(`${running.url}/api/sources`)).json()).sources, []);
+    },
+    {
+      extractor_key: "BiliBili",
+      id: "BV1abc",
+      webpage_url: "https://www.bilibili.com/video/BV1abc",
+      title: "牧神记 EP01",
+      uploader: "Donghua Channel",
+      duration: 1440,
+      view_count: 12000,
+    },
+  );
+});
+
 test("reading a candidate that does not exist is a 404, not an empty object", async () => {
   await withSourcesServer(async (running) => {
     const response = await fetch(`${running.url}/api/sources/youtube-missing`);

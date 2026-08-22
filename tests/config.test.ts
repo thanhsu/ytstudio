@@ -163,16 +163,33 @@ test("the sources block defaults, and rejects entries that are not usable string
     assert.deepEqual(defaults.sources.ytDlpArgs, []);
     assert.equal(defaults.sources.format, "bv*+ba/b");
     assert.deepEqual(defaults.sources.subtitleLanguages, ["en"]);
+    assert.equal(defaults.sources.defaultSearchPlatform, "youtube");
+    assert.equal(defaults.sources.searchLimit, 8);
+    assert.equal(defaults.sources.searchPrefixes.youtube, "ytsearch");
+    assert.equal(defaults.sources.searchPrefixes.bilibili, "bilisearch");
 
     await writeFile(
       "studio.config.json",
-      JSON.stringify({ sources: { ytDlpPath: "tools/yt-dlp.exe", subtitleLanguages: ["vi", "", 7], ytDlpArgs: "nope" } }),
+      JSON.stringify({
+        sources: {
+          ytDlpPath: "tools/yt-dlp.exe",
+          subtitleLanguages: ["vi", "", 7],
+          ytDlpArgs: "nope",
+          defaultSearchPlatform: "bilibili",
+          searchLimit: 12,
+          searchPrefixes: { bilibili: "custombili", youtube: "" },
+        },
+      }),
       "utf8",
     );
     const loaded = await loadStudioConfig();
     assert.equal(loaded.sources.ytDlpPath, "tools/yt-dlp.exe");
     assert.deepEqual(loaded.sources.subtitleLanguages, ["vi"]);
     assert.deepEqual(loaded.sources.ytDlpArgs, []);
+    assert.equal(loaded.sources.defaultSearchPlatform, "bilibili");
+    assert.equal(loaded.sources.searchLimit, 12);
+    assert.equal(loaded.sources.searchPrefixes.youtube, "ytsearch");
+    assert.equal(loaded.sources.searchPrefixes.bilibili, "custombili");
   } finally {
     process.chdir(previousCwd);
     await rm(root, { recursive: true, force: true });

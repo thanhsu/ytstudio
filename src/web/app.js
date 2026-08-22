@@ -52,6 +52,7 @@ const appState = {
   eventStream: null,
   eventStreamProject: null,
   activeJob: null,
+  sourceSearchResults: [],
 };
 
 const JOB_LABELS = { voice: "Voice", render: "Render", asr: "ASR", captions: "Captions", asset: "Asset analysis", script: "Script" };
@@ -1844,6 +1845,18 @@ function renderConfig() {
     field("FFprobe path", "render.ffprobePath", config.render.ffprobePath),
     field("Shorts width", "render.shortsWidth", String(config.render.shortsWidth), "number"),
     field("Shorts height", "render.shortsHeight", String(config.render.shortsHeight), "number"),
+    sectionTitle("Sources"),
+    field("yt-dlp path", "sources.ytDlpPath", config.sources.ytDlpPath),
+    textareaField("yt-dlp args", "sources.ytDlpArgs", (config.sources.ytDlpArgs ?? []).join("\n")),
+    field("Download format", "sources.format", config.sources.format),
+    textareaField("Subtitle languages", "sources.subtitleLanguages", (config.sources.subtitleLanguages ?? []).join("\n")),
+    selectField("Default source search", "sources.defaultSearchPlatform", config.sources.defaultSearchPlatform, [
+      ["youtube", "YouTube"],
+      ["bilibili", "Bilibili"],
+    ]),
+    field("Source search limit", "sources.searchLimit", String(config.sources.searchLimit), "number"),
+    field("YouTube search prefix", "sources.searchPrefixes.youtube", config.sources.searchPrefixes.youtube),
+    field("Bilibili search prefix", "sources.searchPrefixes.bilibili", config.sources.searchPrefixes.bilibili),
     actionButton("Save Config", null, "submit", "primary"),
   );
   stageContent.replaceChildren(form);
@@ -1959,11 +1972,7 @@ async function saveConfig(form) {
   const nextConfig = structuredClone(appState.config);
   for (const input of Array.from(form.elements)) {
     if (!input.name) continue;
-    setPathValue(
-      nextConfig,
-      input.name,
-      input.type === "number" ? Number(input.value) : input.type === "checkbox" ? input.checked : input.value,
-    );
+    setPathValue(nextConfig, input.name, configInputValue(input));
   }
 
   const response = await fetch("/api/config", {
@@ -1976,6 +1985,13 @@ async function saveConfig(form) {
   appState.config = data.config;
   renderConfig();
   setStatus("Config saved to studio.config.json.");
+}
+
+function configInputValue(input) {
+  if (input.type === "number") return Number(input.value);
+  if (input.type === "checkbox") return input.checked;
+  if (input.name === "sources.ytDlpArgs" || input.name === "sources.subtitleLanguages") return lines(input.value);
+  return input.value;
 }
 
 async function requestVoice(confirmedPaidRequest) {
@@ -2484,6 +2500,23 @@ async function renderSources() {
       setStatus(error.message);
     }
   });
+
+  const searchForm = document.createElement("form");
+  searchForm.className = "form-grid";
+  searchForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await searchSources(formValues(searchForm));
+  });
+  searchForm.replaceChildren(
+    field("Keyword", "query", "", "text", "牧神记 episode 1"),
+    selectField("Platform", "platform", appState.config?.sources?.defaultSearchPlatform ?? "youtube", [
+      ["youtube", "YouTube"],
+      ["bilibili", "Bilibili"],
+    ]),
+    field("Limit", "limit", String(appState.config?.sources?.searchLimit ?? 8), "number"),
+    actionButton("Search Sources", null, "submit", "primary"),
+  );
+
   addForm.replaceChildren(
     field("Video URL", "url", "", "text", "https://www.youtube.com/watch?v=..."),
     actionButton("Add Source", null, "submit", "primary"),
@@ -2500,6 +2533,12 @@ async function renderSources() {
 
   stageContent.replaceChildren(
     wrapSection(
+      "Search by keyword",
+      paragraph("Find possible review sources first. Search results are not downloaded or tracked until you choose one."),
+      searchForm,
+      renderSourceSearchResults(appState.sourceSearchResults),
+    ),
+    wrapSection(
       "Add a source",
       paragraph("Paste a video URL. Metadata is read first; nothing is downloaded until you declare rights."),
       addForm,
@@ -2507,6 +2546,63 @@ async function renderSources() {
     wrapSection("Candidates", boundary, renderSourceList(sources)),
   );
   setStatus(`${sources.length} source${sources.length === 1 ? "" : "s"} tracked.`);
+}
+
+function renderSourceSearchResults(results) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "source-search-results";
+  if (!results.length) {
+    wrapper.append(paragraph("No keyword search results yet."));
+    return wrapper;
+  }
+
+  for (const result of results) {
+    const card = document.createElement("article");
+    card.className = "source-result-card";
+    const title = document.createElement("h4");
+    title.textContent = result.title;
+    const meta = document.createElement("p");
+    meta.className = "source-meta";
+    meta.textContent = [
+      result.platform,
+      result.uploader || "unknown channel",
+      formatSourceDuration(result.durationSeconds),
+      result.viewCount ? `${result.viewCount.toLocaleString()} views` : "views unknown",
+    ].join(" · ");
+    const link = document.createElement("a");
+    link.href = result.url;
+    link.target = "_blank";
+    link.rel = "noreferrer";
+    link.textContent = result.url;
+    const actions = document.createElement("div");
+    actions.className = "source-actions";
+    actions.append(actionButton("Track Source", () => trackSource(result.url), "button", "primary"));
+    card.append(title, meta, link, actions);
+    wrapper.append(card);
+  }
+  return wrapper;
+}
+
+async function searchSources(values) {
+  try {
+    const data = await postJson("/api/sources/search", values);
+    appState.sourceSearchResults = data.results ?? [];
+    setStatus(`${appState.sourceSearchResults.length} source search result(s).`);
+    await renderSources();
+  } catch (error) {
+    setStatus(error.message);
+  }
+}
+
+async function trackSource(url) {
+  try {
+    const data = await postJson("/api/sources", { url });
+    appState.sourceSearchResults = appState.sourceSearchResults.filter((result) => result.url !== url);
+    setStatus(data.created ? `Tracking ${data.candidate.title}.` : `Already tracked: ${data.candidate.title}.`);
+    await renderSources();
+  } catch (error) {
+    setStatus(error.message);
+  }
 }
 
 function renderSourceList(sources) {

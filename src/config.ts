@@ -77,6 +77,12 @@ export type StudioConfig = {
     ytDlpArgs: string[];
     format: string;
     subtitleLanguages: string[];
+    defaultSearchPlatform: "youtube" | "bilibili";
+    searchLimit: number;
+    searchPrefixes: {
+      youtube: string;
+      bilibili: string;
+    };
   };
 };
 
@@ -136,6 +142,12 @@ export const DEFAULT_STUDIO_CONFIG: StudioConfig = {
     ytDlpArgs: [],
     format: "bv*+ba/b",
     subtitleLanguages: ["en"],
+    defaultSearchPlatform: "youtube",
+    searchLimit: 8,
+    searchPrefixes: {
+      youtube: "ytsearch",
+      bilibili: "bilisearch",
+    },
   },
 };
 
@@ -227,6 +239,22 @@ export function normalizeStudioConfig(value: unknown): StudioConfig {
         candidate.sources?.subtitleLanguages,
         DEFAULT_STUDIO_CONFIG.sources.subtitleLanguages,
       ),
+      defaultSearchPlatform: enumValue(
+        candidate.sources?.defaultSearchPlatform,
+        ["youtube", "bilibili"],
+        DEFAULT_STUDIO_CONFIG.sources.defaultSearchPlatform,
+      ),
+      searchLimit: rangeValue(candidate.sources?.searchLimit, DEFAULT_STUDIO_CONFIG.sources.searchLimit, 1, 25),
+      searchPrefixes: {
+        youtube: stringValue(
+          candidate.sources?.searchPrefixes?.youtube,
+          DEFAULT_STUDIO_CONFIG.sources.searchPrefixes.youtube,
+        ) || DEFAULT_STUDIO_CONFIG.sources.searchPrefixes.youtube,
+        bilibili: stringValue(
+          candidate.sources?.searchPrefixes?.bilibili,
+          DEFAULT_STUDIO_CONFIG.sources.searchPrefixes.bilibili,
+        ) || DEFAULT_STUDIO_CONFIG.sources.searchPrefixes.bilibili,
+      },
     },
   };
 }

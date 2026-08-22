@@ -40,7 +40,7 @@ import { addCandidate, assertDownloadable, requireCandidate, setCandidateRights 
 import { downloadCandidate } from "./sources/download.ts";
 import { scoreCandidate } from "./sources/score.ts";
 import { listCandidates, resolveSourcePath, type SourceRights } from "./sources/store.ts";
-import type { YtDlpOptions } from "./sources/yt-dlp.ts";
+import { searchSourceMetadata, type SourceSearchPlatform, type YtDlpOptions } from "./sources/yt-dlp.ts";
 import { exportReviewPackage } from "./export-package.ts";
 import { ProjectJobManager, type JobKind, type JobOperation } from "./jobs.ts";
 import { extractAudioForAsr, importMedia } from "./media-ingest.ts";
@@ -1096,6 +1096,24 @@ async function routeSourceRequest(
     return;
   }
 
+  if (method === "POST" && url.pathname === "/api/sources/search") {
+    const body = await readJsonBody(request);
+    const config = await loadStudioConfig();
+    try {
+      const results = await searchSourceMetadata(requiredString(body.query, "query"), {
+        platform: sourceSearchPlatformBody(body.platform, config.sources.defaultSearchPlatform),
+        limit: numberBody(body.limit, config.sources.searchLimit),
+        ytDlpPath: config.sources.ytDlpPath || undefined,
+        ytDlpArgs: config.sources.ytDlpArgs,
+        searchPrefixes: config.sources.searchPrefixes,
+      });
+      sendJson(response, 200, { ok: true, results });
+    } catch (error: unknown) {
+      sendSourceError(response, error);
+    }
+    return;
+  }
+
   if (method === "POST" && url.pathname === "/api/sources") {
     const body = await readJsonBody(request);
     if (typeof body.url !== "string" || !body.url.trim()) {
@@ -1223,6 +1241,10 @@ async function routeSourceRequest(
 
 function sendSourceError(response: ServerResponse, error: unknown): void {
   const message = error instanceof Error ? error.message : String(error);
+  if (/source search query|required/.test(message) || /^Unsupported source search platform/.test(message)) {
+    sendError(response, 400, { code: "source-search-invalid", message });
+    return;
+  }
   if (/^No source candidate /.test(message) || /^Invalid source id/.test(message)) {
     sendError(response, 404, { code: "source-missing", message });
     return;
@@ -1468,6 +1490,12 @@ function recordStringBody(value: unknown): Record<string, string> | undefined {
       .filter(([, item]) => typeof item === "string")
       .map(([key, item]) => [key, String(item)]),
   );
+}
+
+function sourceSearchPlatformBody(value: unknown, fallback: SourceSearchPlatform): SourceSearchPlatform {
+  if (value === "youtube" || value === "bilibili") return value;
+  if (value === undefined || value === null || value === "") return fallback;
+  throw new Error(`Unsupported source search platform ${JSON.stringify(value)}.`);
 }
 
 function episodeStatusBody(value: unknown): EpisodeStatus | undefined {

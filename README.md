@@ -245,10 +245,13 @@ next module.
 
 ## Source Acquisition
 
-Paste a video URL on the **Sources** screen. The studio reads its metadata
-without downloading anything, so adding a candidate is cheap and commits to
-nothing. You then declare what you may do with the material, and only after that
-can it be downloaded.
+Search by keyword or paste a video URL on the **Sources** screen. Keyword search
+is a discovery step only: it returns possible videos from a configured platform,
+but it does not track or download anything until you choose **Track Source**.
+When a URL is tracked, the studio reads its metadata without downloading
+anything, so adding a candidate is cheap and commits to nothing. You then
+declare what you may do with the material, and only after that can it be
+downloaded.
 
 `yt-dlp` is an external tool, not bundled. Point the studio at it the same way
 you point it at FFmpeg:
@@ -257,6 +260,12 @@ you point it at FFmpeg:
 {
   "sources": {
     "ytDlpPath": "D:/tools/yt-dlp/yt-dlp.exe",
+    "defaultSearchPlatform": "bilibili",
+    "searchLimit": 8,
+    "searchPrefixes": {
+      "youtube": "ytsearch",
+      "bilibili": "bilisearch"
+    },
     "format": "bv*+ba/b",
     "subtitleLanguages": ["en", "vi"]
   }
@@ -266,17 +275,19 @@ you point it at FFmpeg:
 One binary covers YouTube, Bilibili, Facebook, and X, because yt-dlp does.
 Subtitle conversion to SRT uses the FFmpeg you already configured; without it the
 download still succeeds and whatever subtitle format arrived is kept as-is.
+Search is currently explicit for YouTube and Bilibili, with prefixes configurable
+from the Config screen because extractor syntax can change as yt-dlp evolves.
 
 Downloads and scoring run as background jobs against
 `GET /api/sources/<id>/events`. Sources live in `./sources`, a sibling of
 `./projects`, so one download can serve several projects. Set
 `YT_STUDIO_SOURCES_DIR` to move the store.
 
-**What this is for, and what it is not.** One URL at a time, pasted by you, to
-serve original review commentary. There is no channel crawler, no bulk queue, no
-scheduled polling, no watermark removal, and no content-matching evasion — the
-difference between fetching a source to review and harvesting a library to
-republish.
+**What this is for, and what it is not.** Human-directed source discovery and
+one selected URL at a time, to serve original review commentary. There is no
+channel crawler, no bulk queue, no scheduled polling, no watermark removal, and
+no content-matching evasion — the difference between fetching a source to review
+and harvesting a library to republish.
 
 **Declaring rights permits the download and nothing else.** A project still needs
 its own approved copyright checklist before it renders; the candidate rights

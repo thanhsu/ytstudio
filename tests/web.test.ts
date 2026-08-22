@@ -216,6 +216,19 @@ test("the config screen lists an unrecognized script provider instead of hiding 
   assert.match(script, /scriptProviderOptions\(config\.script\.provider\)/);
 });
 
+test("the config screen exposes source search settings", async () => {
+  const script = await readFile("src/web/app.js", "utf8");
+
+  assert.match(script, /Default source search/);
+  assert.match(script, /sources\.defaultSearchPlatform/);
+  assert.match(script, /Source search limit/);
+  assert.match(script, /sources\.searchLimit/);
+  assert.match(script, /YouTube search prefix/);
+  assert.match(script, /sources\.searchPrefixes\.youtube/);
+  assert.match(script, /Bilibili search prefix/);
+  assert.match(script, /sources\.searchPrefixes\.bilibili/);
+});
+
 test("the sources screen exposes paste, rights, score, download, and delete", async () => {
   const html = await readFile("src/web/index.html", "utf8");
   const script = await readFile("src/web/app.js", "utf8");
@@ -232,6 +245,20 @@ test("the sources screen exposes paste, rights, score, download, and delete", as
   assert.match(script, /deleteSource\(candidate\.id/);
   assert.match(script, /Declare rights before downloading/);
   assert.match(styles, /\.source-list/);
+});
+
+test("the sources screen exposes keyword search before tracking a source", async () => {
+  const script = await readFile("src/web/app.js", "utf8");
+  const styles = await readFile("src/web/styles.css", "utf8");
+
+  assert.match(script, /Search Sources/);
+  assert.match(script, /\/api\/sources\/search/);
+  assert.match(script, /Track Source/);
+  assert.match(script, /sourceSearchResults/);
+  assert.match(script, /source-search-results/);
+  assert.match(script, /bilibili/);
+  assert.match(styles, /\.source-search-results/);
+  assert.match(styles, /\.source-result-card/);
 });
 
 test("the sources screen refuses to imply that declaring rights clears a project gate", async () => {
