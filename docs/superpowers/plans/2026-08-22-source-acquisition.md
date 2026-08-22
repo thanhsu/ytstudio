@@ -58,7 +58,7 @@ import {
 import { sampleCandidate, withSourcesRoot } from "./helpers.ts";
 ```
 
-Both helpers are new and shared — Tasks 3, 4, 6, and 7 import them rather than redefining them. Add them to `tests/helpers.ts`:
+Both helpers are new and shared — Tasks 3, 4, 6, and 7 import them rather than redefining them. Add them to `tests/helpers.ts`, which currently imports `chmod, mkdtemp, writeFile` and needs `rm` added. `SourceCandidate` must be a **type-only** import (`import type { SourceCandidate } from "../src/sources/store.ts"`): a value import would pull the source store into every suite that touches helpers and risks an import cycle.
 
 ```ts
 export async function withSourcesRoot(run: (root: string) => Promise<void>): Promise<void> {
@@ -376,7 +376,7 @@ test("a different video colliding on one id is refused, naming both", async () =
     await saveCandidate({ ...sampleCandidate("youtube-dqw4w9wgxcq"), platformVideoId: "OTHERVIDEO" });
 
     await assert.rejects(
-      () => addCandidate("https://youtu.be/dQw4w9WgXcQ", await ytDlpOptions()),
+      async () => addCandidate("https://youtu.be/dQw4w9WgXcQ", await ytDlpOptions()),
       (error: unknown) => /OTHERVIDEO/.test(String(error)) && /dQw4w9WgXcQ/.test(String(error)),
     );
   });
@@ -387,7 +387,7 @@ test("a directory with no candidate file cannot be created over", async () => {
     await mkdir(join(root, "youtube-dqw4w9wgxcq"), { recursive: true });
 
     await assert.rejects(
-      () => addCandidate("https://youtu.be/dQw4w9WgXcQ", await ytDlpOptions()),
+      async () => addCandidate("https://youtu.be/dQw4w9WgXcQ", await ytDlpOptions()),
       /youtube-dqw4w9wgxcq/,
     );
   });
@@ -551,11 +551,69 @@ test("a paid model without confirmation is refused before any request", async ()
   assert.equal(called, false);
 });
 
-test("a missing key names the environment variable it should come from", async () => { /* ... */ });
-test("an abort is rethrown as an abort, not wrapped", async () => { /* ... */ });
-test("a non-ok body is redacted and truncated", async () => { /* ... */ });
-test("the returned string is the message content", async () => { /* ... */ });
+test("a missing key names the environment variable it should come from", async () => {
+  await assert.rejects(
+    () => chatJson(
+      { ...paidConfig, apiKey: "", apiKeyEnv: "OPENAI_API_KEY", fetch: async () => new Response("{}") },
+      [{ role: "user", content: "hi" }],
+      { confirmedPaidRequest: true },
+    ),
+    /OPENAI_API_KEY/,
+  );
+});
+
+test("an abort is rethrown as an abort, not wrapped", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(
+    () => chatJson(
+      { ...localConfig, fetch: async () => { throw Object.assign(new Error("aborted"), { name: "AbortError" }); } },
+      [{ role: "user", content: "hi" }],
+      { confirmedPaidRequest: false, signal: controller.signal },
+    ),
+    (error: unknown) => (error as Error).name === "AbortError",
+  );
+});
+
+test("a non-ok body is redacted and truncated", async () => {
+  await assert.rejects(
+    () => chatJson(
+      {
+        ...localConfig,
+        fetch: async () => new Response(`{"error":"Authorization: Bearer sk-live-ABC123DEF ${"x".repeat(600)}"}`, { status: 500 }),
+      },
+      [{ role: "user", content: "hi" }],
+      { confirmedPaidRequest: false },
+    ),
+    (error: unknown) => {
+      const message = String(error);
+      return /\[redacted\]/.test(message) && !/sk-live-ABC123DEF/.test(message) && message.length < 800;
+    },
+  );
+});
+
+test("the returned string is the message content", async () => {
+  let sent: unknown;
+  const raw = await chatJson(
+    {
+      ...localConfig,
+      fetch: async (_url: string, init: RequestInit) => {
+        sent = JSON.parse(String(init.body));
+        return new Response(JSON.stringify({ choices: [{ message: { content: '{"ok":true}' } }] }));
+      },
+    },
+    [{ role: "user", content: "hi" }],
+    { confirmedPaidRequest: false },
+  );
+
+  assert.equal(raw, '{"ok":true}');
+  assert.deepEqual((sent as { messages: unknown }).messages, [{ role: "user", content: "hi" }]);
+});
 ```
+
+`paidConfig` and `localConfig` are the two `OpenAiCompatibleConfig` fixtures already used by `tests/llm-openai-compatible.test.ts`; copy their shape rather than inventing new ones.
+
+**Codex verified the no-edit claim is achievable, with one condition.** `tests/llm-openai-compatible.test.ts` asserts that the request body's `messages` equals `buildScriptPrompt(request.brief)`. So `buildScriptPrompt` and `parseScriptGeneration` must stay in the **provider**, and only the transport moves. Pulling prompt construction into `chatJson` would break that test and prove the extraction went too far.
 
 Write each body in full, mirroring the assertions already in `tests/llm-openai-compatible.test.ts`.
 
@@ -596,7 +654,17 @@ git commit -m "refactor: extract the chat transport from script generation"
 
 **Interfaces:**
 - Consumes: `chatJson` from Task 5, the store from Task 1.
-- Produces: `scoreCandidate(id, options): Promise<SourceCandidate>`, route `POST /api/sources/:id/score`.
+- Produces: `scoreCandidate(id, options: { scorer?: SourceScorer }): Promise<SourceCandidate>`, route `POST /api/sources/:id/score`, and:
+
+```ts
+export type SourceScorer = {
+  readonly name: string;    // stamped into score.provider
+  readonly model: string;   // stamped into score.model
+  generate(candidate: SourceCandidate, signal?: AbortSignal): Promise<string>;  // raw model JSON
+};
+```
+
+**This is deliberately not `LlmProvider`.** That interface returns a `ScriptGenerationResult`; a scorer returns raw JSON for `parseSourceScore` to validate. Typing the scorer as `LlmProvider` will not compile — Codex caught this in review. `createConfiguredScorer(config)` builds the OpenAI-compatible scorer over `chatJson`, and `createDryRunScorer()` is the default when no model is configured.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -689,7 +757,38 @@ The riskiest task: a long-running external process writing files that must not s
 - Test: `tests/sources-download.test.ts`, `tests/server.test.ts`
 
 **Interfaces:**
-- Produces: `downloadCandidate(id, options): Promise<SourceCandidate>`, `parseDownloadProgress(line): number | null`, `selectSubtitle(files, languages): { path: string; language: string } | null`; routes `POST /api/sources/:id/download`, `DELETE /api/sources/:id`, `GET /api/sources/:id/events`.
+- Produces: `parseDownloadProgress(line: string): number | null`, `selectSubtitle(files: string[], languages: string[]): { path: string; language: string } | null`, and:
+
+```ts
+export type DownloadOptions = {
+  ytDlpPath?: string;          // falls back to config.sources.ytDlpPath
+  prefixArgs?: string[];       // tests only, as ffmpegPrefixArgs is used elsewhere
+  format?: string;             // falls back to config.sources.format
+  subtitleLanguages?: string[];
+  ffmpegPath?: string;         // absent means subtitles are not converted, not that the download fails
+  signal?: AbortSignal;
+  update?: (progress: number, message: string) => Promise<void>;
+};
+
+export function downloadCandidate(id: string, options: DownloadOptions): Promise<SourceCandidate>;
+```
+
+Routes: `POST /api/sources/:id/download`, `POST /api/sources/:id/cancel`, `DELETE /api/sources/:id`, `GET /api/sources/:id/events`.
+
+**The cancel route is new to this plan.** The spec requires `DELETE` to be refused while a job runs, but with no way to cancel a source job that state would be a dead end — and the delete test could not be written. `POST /api/sources/:id/cancel` calls `sourceJobs.cancel`, mirroring what the project side already does internally.
+
+**The download command**, assembled from config:
+
+```
+[...prefixArgs, "-f", format, "--write-subs", "--write-auto-subs", "--convert-subs", "srt",
+ "--newline", "-o", "<candidateDir>/video.%(ext)s", canonicalUrl]
+```
+
+`--newline` is what makes progress parseable line by line. When no ffmpeg path is configured, `--convert-subs srt` is dropped and whatever subtitle format arrives is recorded as-is; a missing converter must not fail a download that otherwise succeeded.
+
+**Abort classification.** `runProcess` passes `options.signal` straight to `spawn`, so Node rejects with an `AbortError` on the child's `error` event — **not** a `ProcessError`. `downloadCandidate` distinguishes them: an `AbortError` returns the candidate to `metadata`, anything else sets `failed` with the message. Codex confirmed this against `src/process.ts`; treating an abort as a failure would leave a cancelled download looking broken.
+
+**Cleanup ownership.** The `finally` block removes partial media and fragments, wrapped in its own try/catch, and the status write happens after it regardless. A full disk that also defeats cleanup must still leave `failed` on record rather than an empty catch and a candidate frozen in `downloading`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -715,7 +814,8 @@ test("no subtitle at all is not a failure", () => {
 test("a download is refused while rights are unknown", async () => {
   await withSourcesRoot(async () => {
     await saveCandidate(sampleCandidate("youtube-abc"));
-    await assert.rejects(() => downloadCandidate("youtube-abc", await downloadOptions()), /rights/);
+    const options = await downloadOptions();
+    await assert.rejects(() => downloadCandidate("youtube-abc", options), /rights/);
   });
 });
 
@@ -753,7 +853,8 @@ test("an aborted download returns the candidate to metadata and removes partials
 test("a retry clears the previous error and media before starting", async () => {
   await withSourcesRoot(async () => {
     await saveDeclaredCandidate("youtube-abc");
-    await assert.rejects(() => downloadCandidate("youtube-abc", await downloadOptions({ exitCode: 1 })));
+    const failing = await downloadOptions({ exitCode: 1 });
+    await assert.rejects(() => downloadCandidate("youtube-abc", failing));
 
     const candidate = await downloadCandidate("youtube-abc", await downloadOptions());
 
@@ -770,10 +871,43 @@ In `tests/server.test.ts`:
 
 ```ts
 test("deleting a source is refused while one of its jobs is running", async () => {
-  // start a download job against a fake yt-dlp that hangs, then DELETE the
-  // candidate and assert 409 with code source-job-running, then cancel the job
+  await withTempCwd(async () => {
+    const running = await startStudioServer(createStudioServer(), { port: 0 });
+    try {
+      await seedDeclaredCandidate("youtube-abc");                 // writes candidate.json under sources/
+      const hanging = await makeFakeExecutable("setInterval(() => {}, 1000);");
+      await writeStudioConfig({ sources: { ytDlpPath: process.execPath, ytDlpArgs: [hanging] } });
+
+      const started = await fetch(`${running.url}/api/sources/youtube-abc/download`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: running.url },
+        body: "{}",
+      });
+      assert.equal(started.status, 202);
+
+      const deleted = await fetch(`${running.url}/api/sources/youtube-abc`, {
+        method: "DELETE",
+        headers: { origin: running.url },
+      });
+      assert.equal(deleted.status, 409);
+      assert.equal((await deleted.json()).code, "source-job-running");
+
+      const cancelled = await fetch(`${running.url}/api/sources/youtube-abc/cancel`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: running.url },
+        body: JSON.stringify({ jobId: (await started.json()).job.id }),
+      });
+      assert.equal(cancelled.status, 200);
+    } finally {
+      await running.close();
+    }
+  });
 });
 ```
+
+**No route may ever take an executable path or process arguments from the request body.** Doing so would turn a same-origin POST into arbitrary command execution. No existing route in this repo does it — verified — and this plan does not start. Tests reach a fake binary through `studio.config.json`, which the operator owns and no page can write: the `sources` config block therefore carries `ytDlpArgs: string[]` alongside `ytDlpPath`, prepended to every invocation, exactly as `prefixArgs` works in the module-level API. `writeStudioConfig` writes that file into the temp cwd; `seedDeclaredCandidate` writes a candidate with rights declared into the sources root `withTempCwd` establishes.
+
+Add `ytDlpArgs` to the Task 2 config block and its defaults test (`[]`).
 
 - [ ] **Step 2-4: Run, implement, verify**
 
