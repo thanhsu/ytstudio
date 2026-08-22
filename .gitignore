@@ -11,5 +11,6 @@ projects/
 projects/*/workspace/
 renders/
 tmp/
+tools/ffmpeg/
 .superpowers/
 *.log

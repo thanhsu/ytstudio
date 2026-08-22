@@ -67,6 +67,13 @@ export async function approveStage(
   return state;
 }
 
+export async function invalidateApproval(projectId: string, stage: ApprovalStage): Promise<ProjectState> {
+  const state = await loadProjectState(projectId);
+  delete state.approvals[stage];
+  await saveProjectState(projectId, state);
+  return state;
+}
+
 export async function setArtifact(projectId: string, artifact: ArtifactRecord): Promise<ProjectState> {
   const state = await loadProjectState(projectId);
   state.artifacts[artifact.kind] = artifact;

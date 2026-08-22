@@ -211,9 +211,98 @@ test("copyright and asset actions run from the studio API", async () => {
       const body = await asset.json();
       assert.equal(body.asset.rightsConfirmed, true);
       assert.match(body.asset.relativePath, /assets\/images\//);
+
+      const snapshot = await (await fetch(`${running.url}/api/projects/sample-project`)).json();
+      assert.equal(snapshot.assetManifest.assets.length, 1);
+
+      const update = await fetch(
+        `${running.url}/api/projects/sample-project/assets/${encodeURIComponent(body.asset.id)}`,
+        {
+          method: "PATCH",
+          headers: { "content-type": "application/json", origin: running.url },
+          body: JSON.stringify({
+            usagePurpose: "Background behind original review commentary",
+            rightsConfirmed: true,
+          }),
+        },
+      );
+      assert.equal(update.status, 200);
+      assert.equal((await update.json()).asset.usagePurpose, "Background behind original review commentary");
     } finally {
       await running.close();
     }
+  });
+});
+
+test("asset approval returns a validation error instead of internal error", async () => {
+  await withTempCwd(async () => {
+    await mkdir(join("projects", "sample-project", "assets"), { recursive: true });
+    await writeFile(
+      join("projects", "sample-project", "assets", "asset-manifest.json"),
+      JSON.stringify({
+        version: 1,
+        assets: [
+          {
+            id: "asset-1",
+            filename: "visual.jpg",
+            relativePath: "assets/images/visual.jpg",
+            mediaType: "image",
+            mimeType: "image/jpeg",
+            sizeBytes: 10,
+            rightsConfirmed: true,
+            usagePurpose: "",
+            createdAt: "2026-08-21T00:00:00.000Z",
+          },
+        ],
+      }),
+      "utf8",
+    );
+    const running = await startStudioServer(createStudioServer(), { port: 0 });
+    try {
+      const response = await fetch(`${running.url}/api/projects/sample-project/assets/approve`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: running.url },
+        body: "{}",
+      });
+      const body = await response.json();
+      assert.equal(response.status, 409);
+      assert.equal(body.code, "asset-manifest-invalid");
+      assert.match(body.message, /usage purpose/i);
+    } finally {
+      await running.close();
+    }
+  });
+});
+
+test("visual mapping API generates, edits, and approves caption-aligned scenes", async () => {
+  await withTempCwd(async () => {
+    await mkdir(join("projects", "sample-project", "workspace", "captions"), { recursive: true });
+    await mkdir(join("projects", "sample-project", "assets"), { recursive: true });
+    await writeFile(join("projects", "sample-project", "workspace", "captions", "draft.srt"), "1\n00:00:00,000 --> 00:00:05,000\nQin Mu trains in the village.\n", "utf8");
+    await writeFile(join("projects", "sample-project", "project-state.json"), JSON.stringify({
+      version: 1, approvals: {}, artifacts: { captions: { kind: "captions", relativePath: "workspace/captions/draft.srt", sourceHash: "x", createdAt: "2026-08-21T00:00:00.000Z" } },
+    }), "utf8");
+    await writeFile(join("projects", "sample-project", "assets", "asset-manifest.json"), JSON.stringify({ version: 1, assets: [{
+      id: "image-1", filename: "village.jpg", relativePath: "assets/images/village.jpg", mediaType: "image", mimeType: "image/jpeg", sizeBytes: 10,
+      rightsConfirmed: true, usagePurpose: "Qin Mu village context", createdAt: "2026-08-21T00:00:00.000Z", analysisStatus: "limited", keywords: ["qin", "mu", "village"],
+    }] }), "utf8");
+
+    const running = await startStudioServer(createStudioServer(), { port: 0 });
+    try {
+      const generated = await fetch(`${running.url}/api/projects/sample-project/visual-mapping/generate`, { method: "POST", headers: { origin: running.url } });
+      assert.equal(generated.status, 200);
+      assert.equal((await generated.json()).mapping.segments[0].assetId, "image-1");
+
+      const edited = await fetch(`${running.url}/api/projects/sample-project/visual-mapping/segments/scene-001`, {
+        method: "PATCH", headers: { "content-type": "application/json", origin: running.url }, body: JSON.stringify({ fitMode: "contain" }),
+      });
+      assert.equal(edited.status, 200);
+      assert.equal((await edited.json()).segment.selectionMode, "manual");
+
+      const approved = await fetch(`${running.url}/api/projects/sample-project/visual-mapping/approve`, { method: "POST", headers: { origin: running.url } });
+      assert.equal(approved.status, 200);
+      assert.equal((await approved.json()).mapping.status, "approved");
+    } finally { await running.close(); }
   });
 });
 

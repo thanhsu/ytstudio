@@ -46,6 +46,7 @@ const appState = {
   translationPresets: null,
   workflowTemplates: null,
   config: null,
+  selectedMappingSceneId: null,
 };
 
 const projectList = document.querySelector("#project-list");
@@ -1195,6 +1196,7 @@ function renderCaptions(snapshot) {
 }
 
 function renderAssets(snapshot) {
+  const assets = snapshot.assetManifest?.assets ?? [];
   const form = document.createElement("form");
   form.className = "form-grid";
   form.addEventListener("submit", (event) => {
@@ -1214,9 +1216,41 @@ function renderAssets(snapshot) {
   stageContent.replaceChildren(
     paragraph("Upload only assets you created, licensed, or can clearly use for review context."),
     form,
+    sectionTitle("Uploaded assets"),
+    assets.length > 0 ? uploadedAssetList(assets) : paragraph("No assets uploaded yet."),
     actionButton("Approve Assets", () => postProjectAction("assets/approve", {}, "Assets approved.")),
     artifactList(snapshot.state?.artifacts ?? {}, ["media", "render"]),
   );
+}
+
+function uploadedAssetList(assets) {
+  const list = document.createElement("div");
+  list.className = "asset-list";
+
+  for (const asset of assets) {
+    const form = document.createElement("form");
+    form.className = "subpanel form-grid";
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      saveAssetMetadata(asset.id, form).catch((error) => setStatus(error.message));
+    });
+
+    const link = document.createElement("a");
+    link.href = projectFileUrl(asset.relativePath);
+    link.target = "_blank";
+    link.textContent = asset.filename;
+
+    form.append(
+      link,
+      paragraph(`${asset.mediaType} · ${formatBytes(asset.sizeBytes)}`),
+      field("Usage purpose", "usagePurpose", asset.usagePurpose, "text", "Explain how this asset supports commentary"),
+      checkboxField("Rights confirmed", "rightsConfirmed", asset.rightsConfirmed),
+      actionButton("Save asset details", null, "submit", "primary"),
+    );
+    list.append(form);
+  }
+
+  return list;
 }
 
 function renderCopyright(snapshot) {
@@ -1245,11 +1279,187 @@ function renderCopyright(snapshot) {
 }
 
 function renderRender(snapshot) {
-  stageContent.replaceChildren(
-    paragraph("Render the current draft after script, asset, copyright, voice, and caption gates are ready."),
+  const mapping = snapshot.visualMapping;
+  const toolbar = document.createElement("div");
+  toolbar.className = "render-toolbar";
+  const statusBadge = document.createElement("span");
+  statusBadge.className = `mapping-status mapping-status-${mapping?.status ?? "missing"}`;
+  statusBadge.textContent = mapping ? `${mapping.status} · ${mapping.segments.length} scenes` : "mapping missing";
+  toolbar.append(
+    statusBadge,
+    actionButton(mapping ? "Regenerate mapping" : "Generate mapping", () => requestVisualMapping()),
+    actionButton("Approve mapping", () => approveVisualMapping()),
     actionButton("Render Draft", () => requestRender(), "button", "primary"),
-    artifactList(snapshot.state?.artifacts ?? {}, ["voice", "captions", "render"]),
   );
+
+  if (!mapping?.segments?.length) {
+    stageContent.replaceChildren(toolbar, paragraph("Generate a visual mapping to open the timeline editor."));
+    return;
+  }
+
+  const selected = mapping.segments.find((segment) => segment.id === appState.selectedMappingSceneId) ?? mapping.segments[0];
+  appState.selectedMappingSceneId = selected.id;
+  const assets = snapshot.assetManifest?.assets ?? [];
+  const editor = document.createElement("div");
+  editor.className = "render-editor";
+  editor.append(renderMonitor(selected, assets), renderInspector(selected, assets), renderTimeline(mapping, assets));
+  stageContent.replaceChildren(toolbar, editor, artifactList(snapshot.state?.artifacts ?? {}, ["voice", "captions", "render"]));
+}
+
+function renderMonitor(segment, assets) {
+  const monitor = document.createElement("section");
+  monitor.className = "render-monitor";
+  const viewport = document.createElement("div");
+  viewport.className = "monitor-viewport";
+  const asset = assets.find((candidate) => candidate.id === segment.assetId);
+  if (asset?.mediaType === "image") {
+    const image = document.createElement("img");
+    image.src = projectFileUrl(asset.relativePath);
+    image.alt = `${asset.filename} preview`;
+    viewport.append(image);
+  } else if (asset?.mediaType === "video") {
+    const video = document.createElement("video");
+    video.src = projectFileUrl(asset.relativePath);
+    video.muted = true;
+    video.controls = true;
+    video.preload = "metadata";
+    video.addEventListener("loadedmetadata", () => { video.currentTime = Math.min(segment.sourceStartSeconds, video.duration || 0); }, { once: true });
+    viewport.append(video);
+  } else {
+    const fallback = document.createElement("div");
+    fallback.className = "monitor-fallback";
+    fallback.textContent = "Generated background";
+    viewport.append(fallback);
+  }
+  const overlay = document.createElement("div");
+  overlay.className = "monitor-overlay";
+  overlay.textContent = segment.narration;
+  viewport.append(overlay);
+  const meta = document.createElement("div");
+  meta.className = "monitor-meta";
+  meta.append(strongText(segment.id), document.createTextNode(`${formatTimecode(segment.startSeconds)} → ${formatTimecode(segment.endSeconds)}`));
+  monitor.append(viewport, meta);
+  return monitor;
+}
+
+function renderInspector(segment, assets) {
+  const form = document.createElement("form");
+  form.className = "render-inspector";
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    saveVisualMappingSegment(segment.id, form).catch((error) => setStatus(error.message));
+  });
+  form.replaceChildren(
+    sectionTitle("Clip Inspector"),
+    paragraph(`${segment.id} · ${formatTimecode(segment.startSeconds)}-${formatTimecode(segment.endSeconds)}`),
+    confidenceMeter(segment.confidence),
+    paragraph(segment.reason),
+    selectField("Asset", "assetId", segment.assetId ?? "", [["", "Generated background"], ...assets.map((asset) => [asset.id, asset.filename])]),
+    selectField("Fit", "fitMode", segment.fitMode, [["cover", "Cover"], ["contain", "Contain"]]),
+    field("Source start (seconds)", "sourceStartSeconds", String(segment.sourceStartSeconds), "number"),
+    field("Source duration (max 5s for video)", "sourceDurationSeconds", String(segment.sourceDurationSeconds), "number"),
+    checkboxField("Mute source audio", "muteSourceAudio", segment.muteSourceAudio),
+    actionButton("Save mapping", null, "submit", "primary"),
+  );
+  return form;
+}
+
+function renderTimeline(mapping, assets) {
+  const timeline = document.createElement("section");
+  timeline.className = "render-timeline";
+  const duration = Math.max(...mapping.segments.map((segment) => segment.endSeconds), 1);
+  const ruler = document.createElement("div");
+  ruler.className = "timeline-ruler";
+  const tickStep = duration > 90 ? 15 : duration > 45 ? 10 : 5;
+  for (let second = 0; second <= duration; second += tickStep) {
+    const tick = document.createElement("span");
+    tick.style.left = `${(second / duration) * 100}%`;
+    tick.textContent = formatTimecode(second);
+    ruler.append(tick);
+  }
+  const tracks = document.createElement("div");
+  tracks.className = "timeline-tracks";
+  tracks.append(timelineTrackLabel("V1", "Visual"), timelineClipTrack(mapping, assets, duration), timelineTrackLabel("A1", "Narration"), narrationTrack(mapping, duration));
+  const selected = mapping.segments.find((segment) => segment.id === appState.selectedMappingSceneId) ?? mapping.segments[0];
+  const playhead = document.createElement("div");
+  playhead.className = "timeline-playhead";
+  playhead.style.left = `calc(92px + (100% - 92px) * ${selected.startSeconds / duration})`;
+  timeline.append(ruler, tracks, playhead);
+  return timeline;
+}
+
+function timelineClipTrack(mapping, assets, duration) {
+  const track = document.createElement("div");
+  track.className = "timeline-track timeline-visual-track";
+  for (const segment of mapping.segments) {
+    const asset = assets.find((candidate) => candidate.id === segment.assetId);
+    const clip = document.createElement("button");
+    clip.type = "button";
+    clip.className = `timeline-clip timeline-${asset?.mediaType ?? "fallback"}${segment.id === appState.selectedMappingSceneId ? " selected" : ""}${segment.confidence < 0.35 ? " low-confidence" : ""}`;
+    clip.style.left = `${(segment.startSeconds / duration) * 100}%`;
+    clip.style.width = `${Math.max(2.5, ((segment.endSeconds - segment.startSeconds) / duration) * 100)}%`;
+    clip.title = `${segment.id}: ${asset?.filename ?? "Generated background"}`;
+    if (asset?.mediaType === "image") clip.style.backgroundImage = `linear-gradient(90deg, rgba(10,15,25,.25), rgba(10,15,25,.55)), url("${projectFileUrl(asset.relativePath)}")`;
+    const name = document.createElement("strong");
+    name.textContent = asset?.filename ?? "Background";
+    const time = document.createElement("small");
+    time.textContent = `${formatSeconds(segment.endSeconds - segment.startSeconds)} · ${Math.round(segment.confidence * 100)}%`;
+    clip.append(name, time);
+    clip.addEventListener("click", () => selectMappingScene(segment.id));
+    track.append(clip);
+  }
+  return track;
+}
+
+function narrationTrack(mapping, duration) {
+  const track = document.createElement("div");
+  track.className = "timeline-track timeline-audio-track";
+  for (const segment of mapping.segments) {
+    const block = document.createElement("button");
+    block.type = "button";
+    block.className = "timeline-narration";
+    block.style.left = `${(segment.startSeconds / duration) * 100}%`;
+    block.style.width = `${Math.max(2.5, ((segment.endSeconds - segment.startSeconds) / duration) * 100)}%`;
+    block.textContent = segment.narration;
+    block.addEventListener("click", () => selectMappingScene(segment.id));
+    track.append(block);
+  }
+  return track;
+}
+
+function timelineTrackLabel(code, label) {
+  const element = document.createElement("div");
+  element.className = "timeline-track-label";
+  element.innerHTML = `<strong>${code}</strong><span>${label}</span>`;
+  return element;
+}
+
+function selectMappingScene(sceneId) {
+  appState.selectedMappingSceneId = sceneId;
+  renderRender(appState.projectSnapshot);
+}
+
+function confidenceMeter(value) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "confidence-meter";
+  const bar = document.createElement("span");
+  bar.style.width = `${Math.round(value * 100)}%`;
+  wrapper.append(bar, document.createTextNode(`${Math.round(value * 100)}% match`));
+  return wrapper;
+}
+
+function strongText(value) {
+  const element = document.createElement("strong");
+  element.textContent = value;
+  return element;
+}
+
+function formatTimecode(value) {
+  const total = Math.max(0, Number(value));
+  const minutes = Math.floor(total / 60);
+  const seconds = Math.floor(total % 60);
+  const frames = Math.floor((total % 1) * 30);
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}:${String(frames).padStart(2, "0")}`;
 }
 
 function renderExport(snapshot) {
@@ -1469,6 +1679,35 @@ async function requestRender() {
   await selectProject(appState.selectedProject);
 }
 
+async function requestVisualMapping() {
+  const response = await fetch(projectApiUrl("visual-mapping/generate"), { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+  const data = await response.json();
+  if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
+  setStatus(`Generated mapping for ${data.mapping.segments.length} scenes.`);
+  await selectProject(appState.selectedProject);
+}
+
+async function approveVisualMapping() {
+  const response = await fetch(projectApiUrl("visual-mapping/approve"), { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+  const data = await response.json();
+  if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
+  setStatus("Visual mapping approved.");
+  await selectProject(appState.selectedProject);
+}
+
+async function saveVisualMappingSegment(sceneId, form) {
+  const values = boolFormValues(form);
+  const response = await fetch(projectApiUrl(`visual-mapping/segments/${encodeURIComponent(sceneId)}`), {
+    method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(values),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
+  setStatus(`Saved ${sceneId}. Mapping approval is now required again.`);
+  await selectProject(appState.selectedProject);
+}
+
+function formatSeconds(value) { return `${Number(value).toFixed(1)}s`; }
+
 async function uploadProjectFile(inputId, route) {
   const input = document.querySelector(`#${inputId}`);
   const file = input?.files?.[0];
@@ -1505,6 +1744,26 @@ async function uploadAsset(form) {
   await selectProject(appState.selectedProject);
 }
 
+async function saveAssetMetadata(assetId, form) {
+  const values = boolFormValues(form);
+  if (!String(values.usagePurpose ?? "").trim()) {
+    throw new Error("Usage purpose is required before saving an asset.");
+  }
+
+  const response = await fetch(projectApiUrl(`assets/${encodeURIComponent(assetId)}`), {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      usagePurpose: values.usagePurpose,
+      rightsConfirmed: values.rightsConfirmed,
+    }),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
+  setStatus(`Saved asset details for ${data.asset.filename}. Approve Assets again when ready.`);
+  await selectProject(appState.selectedProject);
+}
+
 async function postProjectAction(route, body, successMessage) {
   const response = await fetch(projectApiUrl(route), {
     method: "POST",
@@ -1538,6 +1797,12 @@ function summaryGrid(items) {
     dl.append(dt, dd);
   }
   return dl;
+}
+
+function formatBytes(sizeBytes) {
+  if (sizeBytes < 1024) return `${sizeBytes} B`;
+  if (sizeBytes < 1024 * 1024) return `${(sizeBytes / 1024).toFixed(1)} KB`;
+  return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function artifactList(artifacts, kinds = Object.keys(artifacts)) {

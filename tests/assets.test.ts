@@ -4,7 +4,15 @@ import { Readable } from "node:stream";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { saveAsset, validateAssetManifest, type AssetManifest, type AssetRecord } from "../src/assets.ts";
+import {
+  loadAssetManifest,
+  saveAsset,
+  updateAssetMetadata,
+  validateAssetManifest,
+  type AssetManifest,
+  type AssetRecord,
+} from "../src/assets.ts";
+import { approveStage, loadProjectState, sha256 } from "../src/project-state.ts";
 
 export const sampleAsset: AssetRecord = {
   id: "asset-1",
@@ -62,6 +70,36 @@ test("saves asset and manifest for confirmed local media", async () => {
 
     assert.match(asset.relativePath, /^assets\/images\/.+\.png$/);
     assert.equal(validateAssetManifest(manifest).valid, true);
+  } finally {
+    process.chdir(previousCwd);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("updates uploaded asset metadata and invalidates the previous asset approval", async () => {
+  const previousCwd = process.cwd();
+  const root = await mkdtemp(join(tmpdir(), "yt-review-studio-"));
+
+  try {
+    process.chdir(root);
+    const asset = await saveAsset("sample-project", {
+      filename: "background.png",
+      stream: Readable.from(["image"]),
+      mediaType: "image",
+      rightsConfirmed: true,
+      usagePurpose: "Initial purpose.",
+    });
+    const manifest = await loadAssetManifest("sample-project");
+    await approveStage("sample-project", "assets", sha256(JSON.stringify(manifest)));
+
+    const updated = await updateAssetMetadata("sample-project", asset.id, {
+      usagePurpose: "Background behind original analysis captions.",
+      rightsConfirmed: true,
+    });
+
+    assert.equal(updated.usagePurpose, "Background behind original analysis captions.");
+    assert.equal((await loadAssetManifest("sample-project")).assets[0].usagePurpose, updated.usagePurpose);
+    assert.equal((await loadProjectState("sample-project")).approvals.assets, undefined);
   } finally {
     process.chdir(previousCwd);
     await rm(root, { recursive: true, force: true });

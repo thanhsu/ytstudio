@@ -8,6 +8,7 @@ import { resolveProjectPath } from "./project-paths.ts";
 import { extractNarration } from "./narration.ts";
 import { probeDuration } from "./media.ts";
 import { renderDraft, type RenderArtifact } from "./render.ts";
+import { loadVisualMapping } from "./visual-mapping.ts";
 import { createPiperProvider } from "./tts/piper.ts";
 import { createOpenAiProvider } from "./tts/openai.ts";
 import { createVietnameseLocalProvider } from "./tts/vietnamese-local.ts";
@@ -166,7 +167,24 @@ export async function renderDraftProject(projectId: string, options: RenderDraft
   const state = await loadProjectState(projectId);
   const voice = requireArtifact(state.artifacts.voice, "voice");
   const captions = requireArtifact(state.artifacts.captions, "captions");
-  const outputPath = join("projects", projectId, "workspace", "renders", "draft.mp4");
+  const outputPath = draftRenderOutputPath(projectId);
+  const mapping = await loadVisualMapping(projectId);
+  const manifest = await loadAssetManifest(projectId);
+  const assetsById = new Map(manifest.assets.map((asset) => [asset.id, asset]));
+  const visualSegments = mapping?.segments.map((segment) => {
+    const asset = segment.assetId ? assetsById.get(segment.assetId) : undefined;
+    return {
+      sceneId: segment.id,
+      startSeconds: segment.startSeconds,
+      endSeconds: segment.endSeconds,
+      assetPath: asset ? join("projects", projectId, asset.relativePath) : undefined,
+      mediaType: asset?.mediaType,
+      fitMode: segment.fitMode,
+      sourceStartSeconds: segment.sourceStartSeconds,
+      sourceDurationSeconds: segment.sourceDurationSeconds,
+      muteSourceAudio: segment.muteSourceAudio,
+    };
+  });
 
   return renderDraft({
     projectId,
@@ -175,12 +193,19 @@ export async function renderDraftProject(projectId: string, options: RenderDraft
     voicePath: join("projects", projectId, voice.relativePath),
     captionsPath: join("projects", projectId, captions.relativePath),
     outputPath,
-    assetPaths: [],
+    assetPaths: visualSegments?.flatMap((segment) => segment.assetPath ? [segment.assetPath] : []) ?? [],
+    visualSegments,
     ffmpegPath: options.ffmpegPath ?? (config.render.ffmpegPath || undefined),
     ffmpegPrefixArgs: options.ffmpegPrefixArgs,
     width: config.render.shortsWidth,
     height: config.render.shortsHeight,
   });
+}
+
+export function draftRenderOutputPath(projectId: string, now = new Date()): string {
+  const timestamp = now.toISOString().replace(/[-:TZ.]/g, "").slice(0, 17);
+  const version = `${timestamp.slice(0, 8)}-${timestamp.slice(8, 14)}-${timestamp.slice(14)}`;
+  return join("projects", projectId, "workspace", "renders", `draft-${version}.mp4`);
 }
 
 async function readProjectNarration(projectId: string) {

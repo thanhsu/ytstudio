@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  renderArtifactRelativePath,
   buildShortsRenderArgs,
   evaluateRenderGate,
   type RenderGateInput,
   type RenderInput,
 } from "../src/render.ts";
+import { draftRenderOutputPath } from "../src/workflow.ts";
 
 function readyRenderInput(): RenderGateInput {
   return {
@@ -53,6 +55,8 @@ test("shorts render targets vertical H264 MP4", () => {
 
   assert.ok(args.includes("1080x1920"));
   assert.ok(args.includes("libx264"));
+  assert.equal(args[args.indexOf("-threads") + 1], "2");
+  assert.equal(args[args.indexOf("-filter_complex_threads") + 1], "1");
   assert.ok(args.includes("aac"));
   assert.equal(args.at(-1), input.outputPath);
 });
@@ -61,4 +65,71 @@ test("shorts render accepts configured output dimensions", () => {
   const args = buildShortsRenderArgs({ ...sampleRenderInput(), width: 720, height: 1280 });
 
   assert.ok(args.includes("720x1280"));
+});
+
+test("shorts render uses explicit font paths for portable FFmpeg", () => {
+  const args = buildShortsRenderArgs({
+    ...sampleRenderInput(),
+    fontFilePath: "C:/Windows/Fonts/arial.ttf",
+    fontDirectory: "C:/Windows/Fonts",
+  });
+  const filter = args[args.indexOf("-filter_complex") + 1];
+
+  assert.match(filter, /fontfile='C\\:\/Windows\/Fonts\/arial\.ttf'/);
+  assert.match(filter, /fontsdir='C\\:\/Windows\/Fonts'/);
+  assert.match(filter, /FontName=Arial/);
+  assert.match(filter, /fps=30/);
+});
+
+test("shorts render consumes mapped video safely and fills remaining scene time", () => {
+  const args = buildShortsRenderArgs({
+    ...sampleRenderInput(),
+    visualSegments: [{
+      sceneId: "scene-001", startSeconds: 0, endSeconds: 8, assetPath: "projects/sample-project/assets/clips/training.mp4",
+      mediaType: "video", fitMode: "cover", sourceStartSeconds: 3, sourceDurationSeconds: 5, muteSourceAudio: true,
+    }],
+  });
+  const filter = args[args.indexOf("-filter_complex") + 1];
+  assert.ok(args.includes("projects/sample-project/assets/clips/training.mp4"));
+  assert.ok(args.includes("-an"));
+  assert.match(filter, /trim=duration=5/);
+  assert.match(filter, /color=c=#111827:s=1080x1920:d=3/);
+  assert.match(filter, /concat=n=2:v=1:a=0/);
+});
+
+test("shorts render bounds each reused asset input to its scene excerpt", () => {
+  const assetPath = "projects/sample-project/assets/clips/training.mp4";
+  const args = buildShortsRenderArgs({
+    ...sampleRenderInput(),
+    visualSegments: [
+      { sceneId: "scene-001", startSeconds: 0, endSeconds: 5, assetPath, mediaType: "video", fitMode: "cover", sourceStartSeconds: 0, sourceDurationSeconds: 5, muteSourceAudio: true },
+      { sceneId: "scene-003", startSeconds: 10, endSeconds: 15, assetPath, mediaType: "video", fitMode: "cover", sourceStartSeconds: 5, sourceDurationSeconds: 5, muteSourceAudio: true },
+    ],
+  });
+  assert.equal(args.filter((argument) => argument === assetPath).length, 2);
+  assert.equal(args.filter((argument) => argument === "-ss").length, 2);
+});
+
+test("render artifact path is project-relative with URL-safe separators", () => {
+  assert.equal(
+    renderArtifactRelativePath(
+      "muc-than-ky-review-001",
+      "projects\\muc-than-ky-review-001\\workspace\\renders\\draft.mp4",
+    ),
+    "workspace/renders/draft.mp4",
+  );
+  assert.equal(
+    renderArtifactRelativePath(
+      "muc-than-ky-review-001",
+      "D:\\studio\\projects\\muc-than-ky-review-001\\workspace\\renders\\draft.mp4",
+    ),
+    "workspace/renders/draft.mp4",
+  );
+});
+
+test("draft render output is versioned to avoid overwriting an open preview", () => {
+  assert.equal(
+    draftRenderOutputPath("sample-project", new Date("2026-08-21T02:40:00.123Z")),
+    "projects\\sample-project\\workspace\\renders\\draft-20260821-024000-123.mp4",
+  );
 });

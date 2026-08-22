@@ -4,7 +4,14 @@ import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { basename, extname, join, resolve } from "node:path";
 import { createReadStream } from "node:fs";
 import Busboy from "busboy";
-import { saveAsset, type AssetMediaType } from "./assets.ts";
+import {
+  loadAssetManifest,
+  saveAsset,
+  updateAssetMetadata,
+  validateAssetManifest,
+  type AssetMediaType,
+} from "./assets.ts";
+import { analyzeAsset } from "./asset-analysis.ts";
 import {
   checkStoryContinuity,
   createStoryBible,
@@ -59,6 +66,13 @@ import {
   renderDraftProject,
 } from "./workflow.ts";
 import { deriveWorkflowStepStates, getWorkflowTemplate, WORKFLOW_TEMPLATES } from "./workflow-templates.ts";
+import {
+  buildNarrationScenes,
+  generateVisualMapping,
+  loadVisualMapping,
+  saveVisualMapping,
+  validateVisualMapping,
+} from "./visual-mapping.ts";
 
 export type StudioServerOptions = {
   projectsRoot?: string;
@@ -637,11 +651,14 @@ async function routeRequest(
 
   if (method === "POST" && rest === "render") {
     const state = await loadProjectState(projectId);
+    const manifest = await loadAssetManifest(projectId);
+    const mapping = await loadVisualMapping(projectId);
     const reasons: string[] = [];
     if (!state.approvals.script) reasons.push("script-approval-missing");
     if (!state.approvals.copyright) reasons.push("copyright-approval-missing");
     if (state.approvals.script && !state.artifacts.voice) reasons.push("voice-missing");
     if (state.approvals.script && !state.artifacts.captions) reasons.push("captions-missing");
+    if (manifest.assets.length > 0 && mapping?.status !== "approved") reasons.push("visual-mapping-not-approved");
 
     if (reasons.length > 0) {
       sendError(response, 409, {
@@ -669,14 +686,119 @@ async function routeRequest(
         rightsConfirmed: uploaded.fields.rightsConfirmed === "true",
         usagePurpose: uploaded.fields.usagePurpose,
       });
-      sendJson(response, 200, { ok: true, asset });
+      const analyzedAsset = await analyzeAsset(projectId, asset.id);
+      sendJson(response, 200, { ok: true, asset: analyzedAsset });
     } finally {
       await rm(uploaded.path, { force: true });
     }
     return;
   }
 
+  const assetAnalysisMatch = /^assets\/([a-zA-Z0-9-]+)\/analyze$/.exec(rest);
+  if (method === "POST" && assetAnalysisMatch) {
+    const asset = await analyzeAsset(projectId, assetAnalysisMatch[1]);
+    sendJson(response, 200, { ok: true, asset });
+    return;
+  }
+
+  if (method === "POST" && rest === "visual-mapping/generate") {
+    const state = await loadProjectState(projectId);
+    const captionsPath = state.artifacts.captions?.relativePath;
+    if (!captionsPath) {
+      sendError(response, 409, { code: "visual-mapping-missing-captions", message: "Generate captions before visual mapping." });
+      return;
+    }
+    const captions = await readFile(resolveProjectPath(projectId, captionsPath), "utf8");
+    const manifest = await loadAssetManifest(projectId);
+    const mapping = generateVisualMapping(buildNarrationScenes(captions), manifest.assets);
+    await saveVisualMapping(projectId, mapping);
+    sendJson(response, 200, { ok: true, mapping });
+    return;
+  }
+
+  if (method === "GET" && rest === "visual-mapping") {
+    sendJson(response, 200, { ok: true, mapping: await loadVisualMapping(projectId) });
+    return;
+  }
+
+  const mappingSegmentMatch = /^visual-mapping\/segments\/([a-zA-Z0-9-]+)$/.exec(rest);
+  if (method === "PATCH" && mappingSegmentMatch) {
+    const mapping = await loadVisualMapping(projectId);
+    if (!mapping) {
+      sendError(response, 404, { code: "visual-mapping-missing", message: "Generate visual mapping first." });
+      return;
+    }
+    const segment = mapping.segments.find((candidate) => candidate.id === mappingSegmentMatch[1]);
+    if (!segment) {
+      sendError(response, 404, { code: "visual-mapping-segment-missing", message: "Mapping segment not found." });
+      return;
+    }
+    const body = await readJsonBody(request);
+    if (typeof body.assetId === "string" || body.assetId === null) segment.assetId = body.assetId as string | null;
+    if (body.fitMode === "cover" || body.fitMode === "contain") segment.fitMode = body.fitMode;
+    if (typeof body.sourceStartSeconds === "number") segment.sourceStartSeconds = Math.max(0, body.sourceStartSeconds);
+    if (typeof body.sourceDurationSeconds === "number") segment.sourceDurationSeconds = Math.max(0, body.sourceDurationSeconds);
+    if (typeof body.muteSourceAudio === "boolean") segment.muteSourceAudio = body.muteSourceAudio;
+    const asset = (await loadAssetManifest(projectId)).assets.find((candidate) => candidate.id === segment.assetId);
+    segment.mediaType = asset?.mediaType;
+    segment.fallback = segment.assetId ? undefined : "generated-background";
+    segment.selectionMode = "manual";
+    mapping.status = "draft";
+    await saveVisualMapping(projectId, mapping);
+    sendJson(response, 200, { ok: true, segment, mapping });
+    return;
+  }
+
+  if (method === "POST" && rest === "visual-mapping/approve") {
+    const mapping = await loadVisualMapping(projectId);
+    if (!mapping) {
+      sendError(response, 404, { code: "visual-mapping-missing", message: "Generate visual mapping first." });
+      return;
+    }
+    const manifest = await loadAssetManifest(projectId);
+    const validation = validateVisualMapping(mapping, manifest.assets);
+    if (!validation.valid) {
+      sendError(response, 409, { code: "visual-mapping-invalid", message: validation.errors.join("; "), details: validation });
+      return;
+    }
+    mapping.status = "approved";
+    await saveVisualMapping(projectId, mapping);
+    sendJson(response, 200, { ok: true, mapping });
+    return;
+  }
+
+  const assetMetadataMatch = /^assets\/([a-zA-Z0-9-]+)$/.exec(rest);
+  if (method === "PATCH" && assetMetadataMatch) {
+    const body = await readJsonBody(request);
+    const usagePurpose = typeof body.usagePurpose === "string" ? body.usagePurpose.trim() : "";
+    if (!usagePurpose) {
+      sendError(response, 400, {
+        code: "asset-metadata-invalid",
+        message: "Asset usage purpose is required.",
+        action: "edit-asset-purpose",
+      });
+      return;
+    }
+    const asset = await updateAssetMetadata(projectId, assetMetadataMatch[1], {
+      usagePurpose,
+      rightsConfirmed: body.rightsConfirmed === true,
+    });
+    sendJson(response, 200, { ok: true, asset });
+    return;
+  }
+
   if (method === "POST" && rest === "assets/approve") {
+    const manifest = await loadAssetManifest(projectId);
+    const validation = validateAssetManifest(manifest);
+    if (!validation.valid) {
+      sendError(response, 409, {
+        code: "asset-manifest-invalid",
+        message: validation.errors.join("; "),
+        action: "edit-asset-details",
+        details: { errors: validation.errors },
+      });
+      return;
+    }
     await approveEmptyAssetManifest(projectId);
     sendJson(response, 200, { ok: true });
     return;
@@ -793,11 +915,15 @@ async function sendProject(response: ServerResponse, projectsRoot: string, proje
   const briefPath = join(projectsRoot, projectId, "brief.json");
   const brief = JSON.parse(await readFile(briefPath, "utf8")) as unknown;
   const state = await loadProjectState(projectId);
+  const assetManifest = await loadAssetManifest(projectId);
+  const visualMapping = await loadVisualMapping(projectId);
   const workflowType = typeof brief === "object" && brief !== null && "workflowType" in brief ? brief.workflowType : undefined;
   const template = getWorkflowTemplate(workflowType);
   sendJson(response, 200, {
     brief,
     state,
+    assetManifest,
+    visualMapping,
     workflow: {
       ...template,
       steps: deriveWorkflowStepStates(template.type, state),

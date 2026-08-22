@@ -467,6 +467,319 @@ video {
   margin-top: 0.75rem;
 }
 
+.render-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.mapping-status {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #334155;
+  border-radius: 999px;
+  padding: 0.35rem 0.7rem;
+  background: #111827;
+  color: #cbd5e1;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.mapping-status-approved {
+  border-color: #15803d;
+  color: #bbf7d0;
+}
+
+.render-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(260px, 0.65fr);
+  grid-template-areas: "monitor inspector" "timeline timeline";
+  gap: 0.75rem;
+  min-height: 680px;
+  border: 1px solid #263244;
+  border-radius: 10px;
+  padding: 0.75rem;
+  background: #0b1018;
+  color: #e5e7eb;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.18);
+}
+
+.render-monitor {
+  grid-area: monitor;
+  min-width: 0;
+  border: 1px solid #263244;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #05070a;
+}
+
+.monitor-viewport {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 9;
+  min-height: 320px;
+  overflow: hidden;
+  background: radial-gradient(circle at 50% 40%, #1e293b, #030712 70%);
+}
+
+.monitor-viewport img,
+.monitor-viewport video {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  object-fit: contain;
+  background: #000000;
+}
+
+.monitor-fallback {
+  color: #94a3b8;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.monitor-overlay {
+  position: absolute;
+  right: 8%;
+  bottom: 7%;
+  left: 8%;
+  border-radius: 6px;
+  padding: 0.45rem 0.7rem;
+  background: rgba(0, 0, 0, 0.68);
+  color: #ffffff;
+  text-align: center;
+  font-size: clamp(0.8rem, 1.5vw, 1.1rem);
+  line-height: 1.35;
+  text-shadow: 0 1px 2px #000000;
+}
+
+.monitor-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.65rem 0.75rem;
+  background: #111827;
+  color: #94a3b8;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.78rem;
+}
+
+.render-inspector {
+  grid-area: inspector;
+  align-content: start;
+  display: grid;
+  gap: 0.65rem;
+  min-width: 0;
+  border: 1px solid #263244;
+  border-radius: 8px;
+  padding: 0.8rem;
+  background: #111827;
+}
+
+.render-inspector h3,
+.render-inspector p {
+  margin: 0;
+}
+
+.render-inspector p {
+  color: #94a3b8;
+  font-size: 0.82rem;
+}
+
+.render-inspector .field span,
+.render-inspector .checkbox-field {
+  color: #cbd5e1;
+}
+
+.render-inspector .field input,
+.render-inspector .field select {
+  border-color: #334155;
+  background: #0f172a;
+  color: #f8fafc;
+}
+
+.confidence-meter {
+  position: relative;
+  overflow: hidden;
+  min-height: 28px;
+  border: 1px solid #334155;
+  border-radius: 5px;
+  padding: 0.3rem 0.45rem;
+  background: #0f172a;
+  color: #ffffff;
+  font-size: 0.75rem;
+}
+
+.confidence-meter span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: 0;
+  background: rgba(37, 99, 235, 0.48);
+}
+
+.confidence-meter {
+  isolation: isolate;
+}
+
+.confidence-meter span + * {
+  position: relative;
+}
+
+.render-timeline {
+  grid-area: timeline;
+  position: relative;
+  min-width: 0;
+  overflow-x: auto;
+  border: 1px solid #263244;
+  border-radius: 8px;
+  background: #090e16;
+}
+
+.timeline-ruler {
+  position: relative;
+  height: 34px;
+  margin-left: 92px;
+  border-bottom: 1px solid #334155;
+  background: repeating-linear-gradient(90deg, transparent 0, transparent calc(5% - 1px), #263244 5%);
+}
+
+.timeline-ruler span {
+  position: absolute;
+  top: 7px;
+  transform: translateX(-50%);
+  color: #94a3b8;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.68rem;
+}
+
+.timeline-tracks {
+  display: grid;
+  grid-template-columns: 92px minmax(820px, 1fr);
+  grid-template-rows: 102px 74px;
+}
+
+.timeline-track-label {
+  display: grid;
+  place-content: center;
+  border-right: 1px solid #334155;
+  border-bottom: 1px solid #263244;
+  background: #111827;
+  color: #94a3b8;
+  text-align: center;
+  font-size: 0.7rem;
+}
+
+.timeline-track-label strong {
+  color: #e2e8f0;
+  font-size: 0.78rem;
+}
+
+.timeline-track {
+  position: relative;
+  overflow: hidden;
+  border-bottom: 1px solid #263244;
+  background: repeating-linear-gradient(90deg, #0c121c 0, #0c121c calc(5% - 1px), #1e293b 5%);
+}
+
+.timeline-clip,
+.timeline-narration {
+  position: absolute;
+  top: 7px;
+  bottom: 7px;
+  overflow: hidden;
+  min-width: 44px;
+  border: 1px solid #475569;
+  border-radius: 5px;
+  padding: 0.35rem;
+  background-color: #1d4ed8;
+  background-position: center;
+  background-size: cover;
+  color: #ffffff;
+  text-align: left;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.06);
+}
+
+.timeline-clip strong,
+.timeline-clip small {
+  position: relative;
+  z-index: 1;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-shadow: 0 1px 2px #000000;
+}
+
+.timeline-clip small {
+  margin-top: 0.2rem;
+  font-size: 0.66rem;
+  color: #dbeafe;
+}
+
+.timeline-video {
+  background: linear-gradient(135deg, #155e75, #0e7490);
+}
+
+.timeline-image {
+  background-color: #7c3aed;
+}
+
+.timeline-fallback {
+  background: repeating-linear-gradient(135deg, #334155 0 8px, #1e293b 8px 16px);
+}
+
+.timeline-clip.selected {
+  border-color: #facc15;
+  box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.5);
+}
+
+.timeline-clip.low-confidence::after {
+  content: "Low match";
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  border-radius: 3px;
+  padding: 0.1rem 0.25rem;
+  background: #991b1b;
+  color: #fee2e2;
+  font-size: 0.58rem;
+  font-weight: 700;
+}
+
+.timeline-narration {
+  background: linear-gradient(180deg, #166534, #14532d);
+  color: #dcfce7;
+  font-size: 0.67rem;
+  line-height: 1.25;
+}
+
+.timeline-playhead {
+  position: absolute;
+  top: 26px;
+  bottom: 0;
+  z-index: 5;
+  width: 2px;
+  pointer-events: none;
+  background: #ef4444;
+  box-shadow: 0 0 0 1px rgba(0,0,0,.35);
+}
+
+.timeline-playhead::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -5px;
+  border-top: 8px solid #ef4444;
+  border-right: 6px solid transparent;
+  border-left: 6px solid transparent;
+}
+
 @media (max-width: 900px) {
   .layout {
     grid-template-columns: 1fr;
@@ -508,6 +821,23 @@ video {
 
   .batch-episode-row {
     grid-template-columns: 1fr;
+  }
+
+  .render-editor {
+    grid-template-columns: 1fr;
+    grid-template-areas: "monitor" "inspector" "timeline";
+  }
+
+  .monitor-viewport {
+    min-height: 240px;
+  }
+
+  .timeline-tracks {
+    grid-template-columns: 72px minmax(760px, 1fr);
+  }
+
+  .timeline-ruler {
+    margin-left: 72px;
   }
 }
 

@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { resolveProjectPath } from "./project-paths.ts";
+import { invalidateApproval } from "./project-state.ts";
 
 export type AssetMediaType = "image" | "video";
 
@@ -27,11 +28,28 @@ export type AssetRecord = {
   rightsConfirmed: boolean;
   usagePurpose: string;
   createdAt: string;
+  analysisStatus?: "pending" | "running" | "ready" | "limited" | "failed";
+  analysisError?: string;
+  durationSeconds?: number;
+  width?: number;
+  height?: number;
+  hasAudio?: boolean;
+  subtitleSource?: "embedded" | "asr" | "none";
+  transcriptPath?: string;
+  contextPath?: string;
+  keywords?: string[];
+  contextSummary?: string;
+  analysisUpdatedAt?: string;
 };
 
 export type AssetManifest = {
   version: 1;
   assets: AssetRecord[];
+};
+
+export type AssetMetadataUpdate = {
+  usagePurpose: string;
+  rightsConfirmed: boolean;
 };
 
 export type AssetValidation = {
@@ -66,6 +84,7 @@ export async function saveAsset(projectId: string, upload: AssetUpload): Promise
     rightsConfirmed: upload.rightsConfirmed === true,
     usagePurpose: upload.usagePurpose?.trim() ?? "",
     createdAt: new Date().toISOString(),
+    analysisStatus: "pending",
   };
 
   const manifest = await loadAssetManifest(projectId);
@@ -106,7 +125,30 @@ export async function loadAssetManifest(projectId: string): Promise<AssetManifes
   }
 }
 
-async function saveAssetManifest(projectId: string, manifest: AssetManifest): Promise<void> {
+export async function updateAssetMetadata(
+  projectId: string,
+  assetId: string,
+  update: AssetMetadataUpdate,
+): Promise<AssetRecord> {
+  const usagePurpose = update.usagePurpose.trim();
+  if (!usagePurpose) {
+    throw new Error("Asset usage purpose is required.");
+  }
+
+  const manifest = await loadAssetManifest(projectId);
+  const asset = manifest.assets.find((candidate) => candidate.id === assetId);
+  if (!asset) {
+    throw new Error(`Asset not found: ${assetId}`);
+  }
+
+  asset.usagePurpose = usagePurpose;
+  asset.rightsConfirmed = update.rightsConfirmed === true;
+  await saveAssetManifest(projectId, manifest);
+  await invalidateApproval(projectId, "assets");
+  return asset;
+}
+
+export async function saveAssetManifest(projectId: string, manifest: AssetManifest): Promise<void> {
   const path = resolveProjectPath(projectId, MANIFEST_PATH);
   await mkdir(resolveProjectPath(projectId, "assets"), { recursive: true });
   await writeFile(path, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");

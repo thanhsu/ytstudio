@@ -44,6 +44,15 @@ test("web app exposes UI controls for media, ASR, captions, and render actions",
   assert.match(script, /workflow.steps/);
   assert.match(script, /Series Manager/);
   assert.match(script, /Generate episode plan/);
+  assert.match(script, /Generate mapping/);
+  assert.match(script, /Approve mapping/);
+  assert.match(script, /visual-mapping/);
+  assert.match(script, /render-editor/);
+  assert.match(script, /render-monitor/);
+  assert.match(script, /timeline-ruler/);
+  assert.match(script, /timeline-clip/);
+  assert.match(script, /render-inspector/);
+  assert.match(script, /selectMappingScene/);
   assert.match(script, /Perform task/);
   assert.match(script, /Create Batch Review/);
   assert.match(script, /Generate Story Arc/);
@@ -65,6 +74,10 @@ test("web app exposes UI controls for media, ASR, captions, and render actions",
   assert.match(script, /#series/);
   assert.match(script, /Copyright Check/);
   assert.match(script, /Upload Asset/);
+  assert.match(script, /Uploaded assets/);
+  assert.match(script, /saveAssetMetadata/);
+  assert.match(script, /usagePurpose/);
+  assert.match(script, /rightsConfirmed/);
   assert.match(script, /Export/);
 });
 
