@@ -29,6 +29,17 @@ const STAGE_TITLES = {
   config: "Config",
 };
 
+// Groups the 12 pipeline stages into visible production phases. Every stage
+// button above still carries its own data-stage and click handler; this only
+// changes how they are clustered on the rail.
+const STAGE_PHASES = [
+  { label: "Plan", stages: ["brief", "script"] },
+  { label: "Source", stages: ["media", "asr", "subtitles", "translation"] },
+  { label: "Produce", stages: ["voice", "captions", "assets"] },
+  { label: "Compliance", stages: ["copyright"] },
+  { label: "Output", stages: ["render", "export"] },
+];
+
 const RUN_AVAILABLE_TASKS_LABEL = "Run available tasks";
 
 const appState = {
@@ -39,6 +50,7 @@ const appState = {
   brandKits: {},
   thumbnailBriefs: {},
   selectedSeries: null,
+  selectedSeriesTab: "overview",
   selectedReviewProjectId: null,
   selectedProject: null,
   activeStage: "brief",
@@ -181,6 +193,7 @@ async function loadProjects() {
   if (!appState.selectedSeries && appState.series.length > 0) {
     appState.selectedSeries = appState.series[0];
   }
+  renderStageRail();
   renderProjects();
   if (location.hash === "#sources") {
     await renderSources();
@@ -281,19 +294,48 @@ function workflowTemplateCards() {
 function renderStageRail() {
   const workflow = appState.projectSnapshot?.workflow;
   const stages = workflow ? unique(workflow.steps.map((step) => step.stage)) : STAGES;
-  stageRail.replaceChildren(
+  const stageSet = new Set(stages);
+  const grouped = new Set();
+  const items = [];
+
+  for (const phase of STAGE_PHASES) {
+    const phaseStages = phase.stages.filter((stage) => stageSet.has(stage));
+    if (phaseStages.length === 0) continue;
+    phaseStages.forEach((stage) => grouped.add(stage));
+    items.push(stagePhaseItem(phase.label, phaseStages));
+  }
+
+  const ungrouped = stages.filter((stage) => !grouped.has(stage));
+  if (ungrouped.length > 0) {
+    items.push(stagePhaseItem("Other", ungrouped));
+  }
+
+  stageRail.replaceChildren(...items);
+  bindStageRail();
+  setActiveStageButton();
+}
+
+function stagePhaseItem(label, stages) {
+  const item = document.createElement("li");
+  const group = document.createElement("div");
+  group.className = "stage-phase";
+  const heading = document.createElement("span");
+  heading.className = "stage-phase-label";
+  heading.textContent = label;
+  const buttons = document.createElement("div");
+  buttons.className = "stage-phase-buttons";
+  buttons.append(
     ...stages.map((stage) => {
-      const item = document.createElement("li");
       const button = document.createElement("button");
       button.type = "button";
       button.dataset.stage = stage;
       button.textContent = STAGE_TITLES[stage] ?? stage;
-      item.append(button);
-      return item;
+      return button;
     }),
   );
-  bindStageRail();
-  setActiveStageButton();
+  group.append(heading, buttons);
+  item.append(group);
+  return item;
 }
 
 function bindStageRail() {
@@ -398,6 +440,7 @@ function renderSeriesList() {
   for (const series of appState.series) {
     const button = actionButton(`${series.title} (${series.episodes.length})`, () => {
       appState.selectedSeries = series;
+      appState.selectedSeriesTab = defaultSeriesTab(series);
       appState.selectedReviewProjectId = null;
       renderSeriesManager();
     });
@@ -408,6 +451,7 @@ function renderSeriesList() {
 }
 
 function renderSeriesDetail(series) {
+  const selectedTab = appState.selectedSeriesTab || defaultSeriesTab(series);
   const planForm = document.createElement("form");
   planForm.className = "form-grid compact-form";
   planForm.addEventListener("submit", (event) => {
@@ -427,20 +471,84 @@ function renderSeriesDetail(series) {
     table.append(renderEpisodeRow(series.id, episode));
   }
 
+  const panel = {
+    overview: () => renderSeriesOverview(series, planForm, table),
+    brand: () => renderBrandKitPanel(series),
+    audio: () => renderAudioStoryPanel(series),
+    batch: () => renderBatchReviewPanel(series),
+  }[selectedTab] ?? (() => renderSeriesOverview(series, planForm, table));
+
   return wrapSection(
-    `${series.title} - ${series.episodes.length} episodes`,
+    `${series.title} - Production Workspace`,
+    renderSeriesWorkspaceHeader(series),
+    renderSeriesWorkspaceTabs(series, selectedTab),
+    panel(),
+  );
+}
+
+function defaultSeriesTab(series) {
+  return series.workflowType === "audio-story" ? "audio" : "overview";
+}
+
+function renderSeriesWorkspaceHeader(series) {
+  const header = document.createElement("div");
+  header.className = "series-workspace-header card";
+  header.append(
     summaryGrid({
       Show: series.show,
       Original: series.originalTitle,
       Workflow: series.workflowType,
+      Episodes: String(series.episodes.length),
       Audience: series.audience,
       Language: series.language,
       Schedule: series.scheduleNotes,
     }),
-    renderBrandKitPanel(series),
+    gateNotice(
+      "Workspace scope",
+      "This workspace plans channel output and production assets. Any source footage still needs the source rights gate and project copyright check before render.",
+      "info",
+    ),
+  );
+  return header;
+}
+
+function renderSeriesWorkspaceTabs(series, selectedTab) {
+  const tabs = document.createElement("div");
+  tabs.className = "workspace-tabs";
+  const batchCount = appState.reviewProjectsBySeries[series.id]?.length ?? 0;
+  const chapterCount = appState.audioStoryWorkspaces[series.id]?.chapters?.length ?? 0;
+  const kit = appState.brandKits[series.id] ?? {};
+  const hasBrandAssets = Boolean(kit.logoRoundPath || kit.logoTextPath || kit.watermarkPath);
+  const tabDefs = [
+    ["overview", "Overview", `${series.episodes.length} episodes`],
+    ["brand", "Brand Kit", hasBrandAssets ? "assets ready" : "needs assets"],
+    ["audio", "Audio Story", `${chapterCount} chapters`],
+    ["batch", "Batch Review", `${batchCount} batches`],
+  ];
+  for (const [id, label, meta] of tabDefs) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `workspace-tab${selectedTab === id ? " selected" : ""}`;
+    button.dataset.seriesTab = id;
+    const labelElement = document.createElement("span");
+    labelElement.className = "workspace-tab-label";
+    labelElement.textContent = label;
+    button.append(labelElement, readinessPill(selectedTab === id ? "progress" : "neutral", meta));
+    button.addEventListener("click", () => {
+      appState.selectedSeriesTab = id;
+      renderSeriesManager();
+    });
+    tabs.append(button);
+  }
+  return tabs;
+}
+
+function renderSeriesOverview(series, planForm, episodeTable) {
+  return wrapSection(
+    "Series Plan",
+    paragraph("Plan the first content run, keep episode titles editable, and then move into Brand Kit, Audio Story, or Batch Review when a production lane is ready."),
     planForm,
-    table,
-    series.workflowType === "audio-story" ? renderAudioStoryPanel(series) : renderBatchReviewPanel(series),
+    episodeTable,
   );
 }
 
@@ -1804,69 +1912,99 @@ function renderConfig() {
     saveConfig(form).catch((error) => setStatus(error.message));
   });
 
+  const scriptReady = config.script.provider === "dry-run"
+    ? ["done", "Ready (offline)"]
+    : config.script.provider === "openai-compatible" && config.script.model && config.script.baseUrl
+      ? ["done", "Ready"]
+      : ["warn", "Needs setup"];
+  const translationReady = config.translation.provider === "prompt-only"
+    ? ["done", "Ready (manual)"]
+    : config.translation.model
+      ? ["done", "Ready"]
+      : ["warn", "Needs setup"];
+  const asrReady = config.asr.provider === "disabled"
+    ? ["neutral", "Optional"]
+    : config.asr.executablePath
+      ? ["done", "Ready"]
+      : ["warn", "Needs setup"];
+  const ttsProvider = config.tts.defaultProvider;
+  const ttsReady = ttsProvider === "piper"
+    ? (config.tts.piper.executablePath && config.tts.piper.modelPath ? ["done", "Ready"] : ["warn", "Needs setup"])
+    : ttsProvider === "vietnamese-local"
+      ? (config.tts.vietnameseLocal.pythonPath && config.tts.vietnameseLocal.appPath ? ["done", "Ready"] : ["warn", "Needs setup"])
+      : (config.tts.openai.apiKeyEnv ? ["done", "Ready"] : ["warn", "Needs setup"]);
+  const renderReady = config.render.ffmpegPath && config.render.ffprobePath ? ["done", "Ready"] : ["warn", "Needs setup"];
+  const sourcesReady = config.sources.ytDlpPath ? ["done", "Ready"] : ["neutral", "Optional"];
+
   form.replaceChildren(
-    sectionTitle("Script"),
-    selectField("Script provider", "script.provider", config.script.provider, scriptProviderOptions(config.script.provider)),
-    field("Script model", "script.model", config.script.model),
-    field("Script base URL", "script.baseUrl", config.script.baseUrl),
-    field("Script API key env", "script.apiKeyEnv", config.script.apiKeyEnv),
-    checkboxField("Script provider is paid", "script.paid", config.script.paid),
-    field("Script temperature", "script.temperature", String(config.script.temperature), "number", "", "any"),
-    field("Script max output tokens", "script.maxOutputTokens", String(config.script.maxOutputTokens), "number"),
-    sectionTitle("Translation"),
-    selectField("Translation provider", "translation.provider", config.translation.provider, [
-      ["prompt-only", "Prompt only"],
-      ["openai", "OpenAI"],
-      ["gemini", "Gemini"],
+    configSection("Script", scriptReady[0], scriptReady[1], [
+      selectField("Script provider", "script.provider", config.script.provider, scriptProviderOptions(config.script.provider)),
+      field("Script model", "script.model", config.script.model),
+      field("Script base URL", "script.baseUrl", config.script.baseUrl),
+      field("Script API key env", "script.apiKeyEnv", config.script.apiKeyEnv),
+      checkboxField("Script provider is paid", "script.paid", config.script.paid),
+      field("Script temperature", "script.temperature", String(config.script.temperature), "number", "", "any"),
+      field("Script max output tokens", "script.maxOutputTokens", String(config.script.maxOutputTokens), "number"),
     ]),
-    field("Translation model", "translation.model", config.translation.model),
-    selectField("Default target", "translation.defaultTarget", config.translation.defaultTarget, targetOptions()),
-    selectField("Default genre", "translation.defaultGenre", config.translation.defaultGenre, [
-      ["cultivation", "Cultivation"],
-      ["fantasy-system", "Fantasy / system"],
-      ["modern-drama", "Modern drama"],
+    configSection("Translation", translationReady[0], translationReady[1], [
+      selectField("Translation provider", "translation.provider", config.translation.provider, [
+        ["prompt-only", "Prompt only"],
+        ["openai", "OpenAI"],
+        ["gemini", "Gemini"],
+      ]),
+      field("Translation model", "translation.model", config.translation.model),
+      selectField("Default target", "translation.defaultTarget", config.translation.defaultTarget, targetOptions()),
+      selectField("Default genre", "translation.defaultGenre", config.translation.defaultGenre, [
+        ["cultivation", "Cultivation"],
+        ["fantasy-system", "Fantasy / system"],
+        ["modern-drama", "Modern drama"],
+      ]),
     ]),
-    sectionTitle("ASR"),
-    selectField("ASR provider", "asr.provider", config.asr.provider, [
-      ["disabled", "Disabled"],
-      ["faster-whisper", "Faster Whisper"],
-      ["whisper-cpp", "whisper.cpp"],
+    configSection("ASR", asrReady[0], asrReady[1], [
+      selectField("ASR provider", "asr.provider", config.asr.provider, [
+        ["disabled", "Disabled"],
+        ["faster-whisper", "Faster Whisper"],
+        ["whisper-cpp", "whisper.cpp"],
+      ]),
+      field("ASR executable", "asr.executablePath", config.asr.executablePath),
+      field("ASR model", "asr.model", config.asr.model),
+      field("ASR model path", "asr.modelPath", config.asr.modelPath),
+      field("ASR language", "asr.language", config.asr.language),
     ]),
-    field("ASR executable", "asr.executablePath", config.asr.executablePath),
-    field("ASR model", "asr.model", config.asr.model),
-    field("ASR model path", "asr.modelPath", config.asr.modelPath),
-    field("ASR language", "asr.language", config.asr.language),
-    sectionTitle("Voice"),
-    selectField("Default voice provider", "tts.defaultProvider", config.tts.defaultProvider, [
-      ["piper", "Piper"],
-      ["vietnamese-local", "Vietnamese local"],
-      ["openai", "OpenAI"],
+    configSection("Voice", ttsReady[0], ttsReady[1], [
+      selectField("Default voice provider", "tts.defaultProvider", config.tts.defaultProvider, [
+        ["piper", "Piper"],
+        ["vietnamese-local", "Vietnamese local"],
+        ["openai", "OpenAI"],
+      ]),
+      field("OpenAI speech model", "tts.openai.model", config.tts.openai.model),
+      field("OpenAI voice", "tts.openai.voice", config.tts.openai.voice),
+      field("OpenAI API key env", "tts.openai.apiKeyEnv", config.tts.openai.apiKeyEnv),
+      field("Piper executable", "tts.piper.executablePath", config.tts.piper.executablePath),
+      field("Piper model path", "tts.piper.modelPath", config.tts.piper.modelPath),
+      field("Piper voice label", "tts.piper.voice", config.tts.piper.voice),
+      field("Vietnamese Python path", "tts.vietnameseLocal.pythonPath", config.tts.vietnameseLocal.pythonPath),
+      field("Vietnamese app path", "tts.vietnameseLocal.appPath", config.tts.vietnameseLocal.appPath),
+      field("Vietnamese voice", "tts.vietnameseLocal.voice", config.tts.vietnameseLocal.voice),
     ]),
-    field("OpenAI speech model", "tts.openai.model", config.tts.openai.model),
-    field("OpenAI voice", "tts.openai.voice", config.tts.openai.voice),
-    field("OpenAI API key env", "tts.openai.apiKeyEnv", config.tts.openai.apiKeyEnv),
-    field("Piper executable", "tts.piper.executablePath", config.tts.piper.executablePath),
-    field("Piper model path", "tts.piper.modelPath", config.tts.piper.modelPath),
-    field("Piper voice label", "tts.piper.voice", config.tts.piper.voice),
-    field("Vietnamese Python path", "tts.vietnameseLocal.pythonPath", config.tts.vietnameseLocal.pythonPath),
-    field("Vietnamese app path", "tts.vietnameseLocal.appPath", config.tts.vietnameseLocal.appPath),
-    field("Vietnamese voice", "tts.vietnameseLocal.voice", config.tts.vietnameseLocal.voice),
-    sectionTitle("Render"),
-    field("FFmpeg path", "render.ffmpegPath", config.render.ffmpegPath),
-    field("FFprobe path", "render.ffprobePath", config.render.ffprobePath),
-    field("Shorts width", "render.shortsWidth", String(config.render.shortsWidth), "number"),
-    field("Shorts height", "render.shortsHeight", String(config.render.shortsHeight), "number"),
-    sectionTitle("Sources"),
-    field("yt-dlp path", "sources.ytDlpPath", config.sources.ytDlpPath),
-    textareaField("yt-dlp args", "sources.ytDlpArgs", (config.sources.ytDlpArgs ?? []).join("\n")),
-    field("Download format", "sources.format", config.sources.format),
-    textareaField("Subtitle languages", "sources.subtitleLanguages", (config.sources.subtitleLanguages ?? []).join("\n")),
-    selectField("Default source search", "sources.defaultSearchPlatform", config.sources.defaultSearchPlatform, sourcePlatformOptions()),
-    field("Source search limit", "sources.searchLimit", String(config.sources.searchLimit), "number"),
-    field("YouTube search prefix", "sources.searchPrefixes.youtube", config.sources.searchPrefixes.youtube),
-    field("Bilibili search prefix", "sources.searchPrefixes.bilibili", config.sources.searchPrefixes.bilibili),
-    field("TikTok search prefix", "sources.searchPrefixes.tiktok", config.sources.searchPrefixes.tiktok),
-    field("Douyin search prefix", "sources.searchPrefixes.douyin", config.sources.searchPrefixes.douyin),
+    configSection("Render", renderReady[0], renderReady[1], [
+      field("FFmpeg path", "render.ffmpegPath", config.render.ffmpegPath),
+      field("FFprobe path", "render.ffprobePath", config.render.ffprobePath),
+      field("Shorts width", "render.shortsWidth", String(config.render.shortsWidth), "number"),
+      field("Shorts height", "render.shortsHeight", String(config.render.shortsHeight), "number"),
+    ]),
+    configSection("Sources", sourcesReady[0], sourcesReady[1], [
+      field("yt-dlp path", "sources.ytDlpPath", config.sources.ytDlpPath),
+      textareaField("yt-dlp args", "sources.ytDlpArgs", (config.sources.ytDlpArgs ?? []).join("\n")),
+      field("Download format", "sources.format", config.sources.format),
+      textareaField("Subtitle languages", "sources.subtitleLanguages", (config.sources.subtitleLanguages ?? []).join("\n")),
+      selectField("Default source search", "sources.defaultSearchPlatform", config.sources.defaultSearchPlatform, sourcePlatformOptions()),
+      field("Source search limit", "sources.searchLimit", String(config.sources.searchLimit), "number"),
+      field("YouTube search prefix", "sources.searchPrefixes.youtube", config.sources.searchPrefixes.youtube),
+      field("Bilibili search prefix", "sources.searchPrefixes.bilibili", config.sources.searchPrefixes.bilibili),
+      field("TikTok search prefix", "sources.searchPrefixes.tiktok", config.sources.searchPrefixes.tiktok),
+      field("Douyin search prefix", "sources.searchPrefixes.douyin", config.sources.searchPrefixes.douyin),
+    ]),
     actionButton("Save Config", null, "submit", "primary"),
   );
   stageContent.replaceChildren(form);
@@ -2318,6 +2456,38 @@ function sectionTitle(text) {
   return element;
 }
 
+function readinessPill(level, label) {
+  const pill = document.createElement("span");
+  pill.className = `status-pill status-pill-${level}`;
+  pill.textContent = label;
+  return pill;
+}
+
+function configSection(title, level, label, fields) {
+  const section = document.createElement("div");
+  section.className = "config-section";
+  const header = document.createElement("div");
+  header.className = "config-section-header";
+  header.append(sectionTitle(title), readinessPill(level, label));
+  const fieldWrap = document.createElement("div");
+  fieldWrap.className = "config-section-fields";
+  fieldWrap.append(...fields);
+  section.append(header, fieldWrap);
+  return section;
+}
+
+function gateNotice(title, text, level = "warn") {
+  const notice = document.createElement("div");
+  notice.className = `gate-notice gate-notice-${level}`;
+  const heading = document.createElement("p");
+  heading.className = "gate-notice-title";
+  heading.textContent = title;
+  const body = document.createElement("p");
+  body.textContent = text;
+  notice.append(heading, body);
+  return notice;
+}
+
 function field(label, name, value, type = "text", placeholder = "", step = "1") {
   const wrapper = document.createElement("label");
   wrapper.className = "field";
@@ -2564,6 +2734,11 @@ async function renderSources() {
   boundary.className = "source-boundary";
 
   stageContent.replaceChildren(
+    gateNotice(
+      "Discovery only",
+      "Searching and tracking a candidate does not grant reuse permission. Declaring rights permits the download only — a project still needs its own approved copyright check before it can render.",
+      "block",
+    ),
     wrapSection(
       "Search by keyword",
       paragraph("Find possible review sources first. Search results are not downloaded or tracked until you choose one."),
