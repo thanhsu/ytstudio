@@ -567,3 +567,82 @@ test("project snapshot reports what the render gate is waiting on", async () => 
     }
   });
 });
+
+async function readEventStreamUntil(
+  response: Response,
+  matches: (payload: Record<string, unknown>) => boolean,
+  timeoutMs = 10_000,
+): Promise<Record<string, unknown>> {
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  const deadline = setTimeout(() => void reader.cancel(), timeoutMs);
+  let buffer = "";
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) throw new Error("Event stream closed before the expected event.");
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const payload = JSON.parse(line.slice(6)) as Record<string, unknown>;
+        if (matches(payload)) return payload;
+      }
+    }
+  } finally {
+    clearTimeout(deadline);
+    await reader.cancel();
+  }
+}
+
+test("slow routes run as jobs and report their outcome over the event stream", async () => {
+  await withTempCwd(async () => {
+    const running = await startStudioServer(createStudioServer(), { port: 0 });
+    try {
+      const events = await fetch(`${running.url}/api/projects/sample-project/events`);
+
+      // ASR is disabled by default, so the job fails quickly without external tools.
+      const started = await postJson(running, "asr");
+      assert.equal(started.status, 202);
+      const { job } = await started.json();
+      assert.equal(job.kind, "asr");
+      assert.equal(job.status, "running");
+
+      const finished = await readEventStreamUntil(
+        events,
+        (payload) => payload.id === job.id && payload.status !== "running",
+      );
+      assert.equal(finished.status, "failed");
+      assert.match(String(finished.error), /asr/i);
+    } finally {
+      await running.close();
+    }
+  });
+});
+
+test("a second job is refused while one is still running for the project", async () => {
+  await withTempCwd(async () => {
+    const running = await startStudioServer(createStudioServer(), { port: 0 });
+    try {
+      await postJson(running, "script");
+      await postJson(running, "script/approve");
+      const events = await fetch(`${running.url}/api/projects/sample-project/events`);
+
+      const first = await postJson(running, "voice", { provider: "piper" });
+      assert.equal(first.status, 202);
+      const firstJob = (await first.json()).job;
+
+      const second = await postJson(running, "voice", { provider: "piper" });
+      assert.equal(second.status, 409);
+      assert.equal((await second.json()).code, "job-already-running");
+
+      await readEventStreamUntil(
+        events,
+        (payload) => payload.id === firstJob.id && payload.status !== "running",
+      );
+    } finally {
+      await running.close();
+    }
+  });
+});

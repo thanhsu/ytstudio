@@ -47,7 +47,62 @@ const appState = {
   workflowTemplates: null,
   config: null,
   selectedMappingSceneId: null,
+  eventStream: null,
+  eventStreamProject: null,
+  activeJob: null,
 };
+
+const JOB_LABELS = { voice: "Voice", render: "Render", asr: "ASR", captions: "Captions", asset: "Asset analysis" };
+
+/**
+ * Slow routes answer with a job instead of a finished artifact, so the studio
+ * follows the project event stream for progress rather than holding a request
+ * open for the whole render.
+ */
+function ensureProjectEventStream(projectId) {
+  if (appState.eventStreamProject === projectId && appState.eventStream) {
+    return;
+  }
+  appState.eventStream?.close();
+  const source = new EventSource(`/api/projects/${encodeURIComponent(projectId)}/events`);
+  source.addEventListener("job", (event) => handleJobEvent(JSON.parse(event.data)));
+  appState.eventStream = source;
+  appState.eventStreamProject = projectId;
+}
+
+function handleJobEvent(job) {
+  const label = JOB_LABELS[job.kind] ?? job.kind;
+  if (job.status === "running") {
+    appState.activeJob = job;
+    setStatus(`${label}: ${job.message} (${job.progress}%)`);
+    return;
+  }
+
+  appState.activeJob = null;
+  if (job.status === "succeeded") {
+    setStatus(`${label} finished.`);
+  } else if (job.status === "cancelled") {
+    setStatus(`${label} cancelled.`);
+  } else {
+    setStatus(`${label} failed: ${job.error ?? "unknown error"}`);
+  }
+  if (appState.selectedProject) {
+    void selectProject(appState.selectedProject);
+  }
+}
+
+/**
+ * Returns true when the route accepted the work as a background job, so the
+ * caller should wait for the event stream instead of reading an artifact.
+ */
+function reportedAsJob(response, data) {
+  if (response.status !== 202) {
+    return false;
+  }
+  const label = JOB_LABELS[data.job?.kind] ?? data.job?.kind ?? "Job";
+  setStatus(`${label} started.`);
+  return true;
+}
 
 const projectList = document.querySelector("#project-list");
 const seriesPanel = document.querySelector("#series-panel");
@@ -234,6 +289,7 @@ function bindStageRail() {
 
 async function selectProject(projectId) {
   appState.selectedProject = projectId;
+  ensureProjectEventStream(projectId);
   const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}`);
   appState.projectSnapshot = await response.json();
   const workflowStages = appState.projectSnapshot.workflow?.steps?.map((step) => step.stage) ?? [];
@@ -1606,12 +1662,14 @@ async function runAvailableTasks() {
 
   const results = await Promise.allSettled(runnable.map((step) => runStepTask(step)));
   const failures = results.filter((result) => result.status === "rejected");
+  const started = results.filter((result) => result.status === "fulfilled" && result.value?.job).length;
   await selectProject(appState.selectedProject);
   if (failures.length > 0) {
     setStatus(`${runnable.length - failures.length}/${runnable.length} tasks completed. ${failures[0].reason.message}`);
     return;
   }
-  setStatus(`${runnable.length} available task(s) completed.${pendingApprovalNotice()}`);
+  const background = started > 0 ? ` ${started} running in the background.` : "";
+  setStatus(`${runnable.length - started} available task(s) completed.${background}${pendingApprovalNotice()}`);
 }
 
 function pendingApprovalNotice() {
@@ -1652,13 +1710,12 @@ async function runStepTask(step) {
       thumbnailFromCopyrightFrame: false,
       clipsHaveCommentaryPurpose: true,
     });
-    return;
+    return {};
   }
   if (step.id === "voice") {
     const provider = appState.config?.tts?.defaultProvider ?? "piper";
     const voice = appState.config?.tts?.[provider === "vietnamese-local" ? "vietnameseLocal" : provider]?.voice;
-    await runProjectRoute("voice", { provider, voice, confirmedPaidRequest: false });
-    return;
+    return runProjectRoute("voice", { provider, voice, confirmedPaidRequest: false });
   }
   if (step.id === "translation") {
     await runProjectRoute("subtitles/translation-prompt", {
@@ -1666,9 +1723,9 @@ async function runStepTask(step) {
       target: appState.config?.translation?.defaultTarget ?? "vi",
       genre: appState.config?.translation?.defaultGenre ?? "cultivation",
     });
-    return;
+    return {};
   }
-  await runProjectRoute(taskActionForStep(step), {});
+  return runProjectRoute(taskActionForStep(step), {});
 }
 
 async function runProjectRoute(route, body) {
@@ -1716,6 +1773,9 @@ async function requestVoice(confirmedPaidRequest) {
     setStatus(`${data.code}: ${data.message}`);
     return;
   }
+  if (reportedAsJob(response, data)) {
+    return;
+  }
   setStatus(`Voice ready: ${data.artifact.relativePath}`);
   await selectProject(appState.selectedProject);
 }
@@ -1729,6 +1789,9 @@ async function requestRender() {
   const data = await response.json();
   if (!response.ok) {
     setStatus(`${data.code}: ${data.message || (data.details?.reasons ?? []).join(", ")}`);
+    return;
+  }
+  if (reportedAsJob(response, data)) {
     return;
   }
   setStatus(`Rendered: ${data.artifact.relativePath}`);
@@ -1829,6 +1892,9 @@ async function postProjectAction(route, body, successMessage) {
   const data = await response.json();
   if (!response.ok) {
     setStatus(`${data.code}: ${data.message}`);
+    return;
+  }
+  if (reportedAsJob(response, data)) {
     return;
   }
   const artifact = data.artifact ?? data.asset ?? data.check ?? data.draft;

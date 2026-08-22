@@ -1,8 +1,9 @@
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { projectsRoot as defaultProjectsRoot } from "./fs.ts";
 
-export type JobKind = "voice" | "captions" | "render" | "asset";
+export type JobKind = "voice" | "captions" | "render" | "asset" | "asr";
 export type JobStatus = "running" | "succeeded" | "failed" | "cancelled";
 
 export type JobRecord = {
@@ -36,10 +37,18 @@ type RunningJob = {
 export class ProjectJobManager {
   private readonly running = new Map<string, RunningJob>();
   private readonly listeners = new Map<string, Set<JobListener>>();
-  private readonly projectsRoot: string;
+  private readonly resolveProjectsRoot: () => string;
 
-  constructor(projectsRoot = "projects") {
-    this.projectsRoot = projectsRoot;
+  /**
+   * Accepts a resolver so the manager follows a projects root that is decided per
+   * call, rather than freezing whatever the root happened to be at construction.
+   */
+  constructor(projectsRoot: string | (() => string) = defaultProjectsRoot) {
+    this.resolveProjectsRoot = typeof projectsRoot === "string" ? () => projectsRoot : projectsRoot;
+  }
+
+  isBusy(projectId: string): boolean {
+    return this.running.has(projectId);
   }
 
   async start(projectId: string, kind: JobKind, operation: JobOperation): Promise<JobRecord> {
@@ -181,14 +190,23 @@ export class ProjectJobManager {
     }
   }
 
+  /**
+   * Bookkeeping is a record of the run, not the run itself. A failed write is
+   * reported and dropped so it cannot reject out of the detached operation
+   * promise and take the studio down with an unhandled rejection.
+   */
   private async persist(record: JobRecord): Promise<void> {
-    const dir = this.jobsDir(record.projectId);
-    await mkdir(dir, { recursive: true });
-    await writeFile(join(dir, `${record.id}.json`), `${JSON.stringify(record, null, 2)}\n`, "utf8");
+    try {
+      const dir = this.jobsDir(record.projectId);
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, `${record.id}.json`), `${JSON.stringify(record, null, 2)}\n`, "utf8");
+    } catch (error: unknown) {
+      console.error(`Unable to record job ${record.id} for ${record.projectId}:`, error);
+    }
   }
 
   private jobsDir(projectId: string): string {
-    return join(this.projectsRoot, projectId, "workspace", "jobs");
+    return join(this.resolveProjectsRoot(), projectId, "workspace", "jobs");
   }
 
   private emit(projectId: string, record: JobRecord): void {

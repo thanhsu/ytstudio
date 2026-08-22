@@ -28,6 +28,7 @@ import { saveCopyrightCheck } from "./copyright.ts";
 import { saveEditingPlan } from "./editing-plan.ts";
 import { saveEpisodeAnalysis, type EpisodeAnalysis } from "./episode-analysis.ts";
 import { exportReviewPackage } from "./export-package.ts";
+import { ProjectJobManager, type JobKind, type JobOperation } from "./jobs.ts";
 import { extractAudioForAsr, importMedia } from "./media-ingest.ts";
 import { projectsRoot } from "./fs.ts";
 import { loadProjectState } from "./project-state.ts";
@@ -95,6 +96,29 @@ type ApiError = {
   details?: unknown;
 };
 
+const jobs = new ProjectJobManager();
+
+/**
+ * Runs a slow operation as a tracked job so the HTTP request returns immediately
+ * and progress reaches the studio over the project event stream instead of being
+ * lost to a request timeout.
+ */
+async function startProjectJob(
+  response: ServerResponse,
+  projectId: string,
+  kind: JobKind,
+  operation: JobOperation,
+): Promise<void> {
+  if (jobs.isBusy(projectId)) {
+    sendError(response, 409, {
+      code: "job-already-running",
+      message: "This project already has a job running. Wait for it to finish or cancel it.",
+    });
+    return;
+  }
+  sendJson(response, 202, { ok: true, job: await jobs.start(projectId, kind, operation) });
+}
+
 export function createStudioServer(options: StudioServerOptions = {}): http.Server {
   const staticRoot = options.staticRoot ?? process.cwd();
 
@@ -134,7 +158,13 @@ export async function startStudioServer(
     server,
     address: { address: address.address, port: address.port },
     url: `http://${address.address}:${address.port}`,
-    close: () => new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve()))),
+    close: () =>
+      new Promise((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+        // Event-stream clients hold their sockets open indefinitely, so close them
+        // explicitly instead of waiting for a keep-alive that never ends.
+        server.closeAllConnections();
+      }),
   };
 }
 
@@ -636,13 +666,13 @@ async function routeRequest(
       });
       return;
     }
-    const artifact = await generateVoice({
-      projectId,
-      provider: voiceProvider(body.provider),
-      voice: typeof body.voice === "string" ? body.voice : undefined,
-      confirmedPaidRequest: body.confirmedPaidRequest === true,
-    });
-    sendJson(response, 200, { ok: true, artifact });
+    await startProjectJob(response, projectId, "voice", () =>
+      generateVoice({
+        projectId,
+        provider: voiceProvider(body.provider),
+        voice: typeof body.voice === "string" ? body.voice : undefined,
+        confirmedPaidRequest: body.confirmedPaidRequest === true,
+      }));
     return;
   }
 
@@ -674,8 +704,7 @@ async function routeRequest(
       });
       return;
     }
-    const artifact = await renderDraftProject(projectId);
-    sendJson(response, 200, { ok: true, artifact });
+    await startProjectJob(response, projectId, "render", () => renderDraftProject(projectId));
     return;
   }
 
@@ -852,13 +881,13 @@ async function routeRequest(
 
   if (method === "POST" && rest === "asr") {
     const body = await readJsonBody(request);
-    const artifact = await generateSourceSrtFromAsr({
-      projectId,
-      provider:
-        body.provider === "faster-whisper" || body.provider === "whisper-cpp" ? body.provider : undefined,
-      audioRelativePath: typeof body.audio === "string" ? body.audio : undefined,
-    });
-    sendJson(response, 200, { ok: true, artifact });
+    await startProjectJob(response, projectId, "asr", () =>
+      generateSourceSrtFromAsr({
+        projectId,
+        provider:
+          body.provider === "faster-whisper" || body.provider === "whisper-cpp" ? body.provider : undefined,
+        audioRelativePath: typeof body.audio === "string" ? body.audio : undefined,
+      }));
     return;
   }
 
@@ -1217,13 +1246,20 @@ async function sendProjectEvents(response: ServerResponse, projectId: string): P
     "cache-control": "no-store",
     connection: "keep-alive",
   });
-  response.write(`event: snapshot\ndata: ${JSON.stringify({ projectId, jobs: [] })}\n\n`);
+  response.write(`event: snapshot\ndata: ${JSON.stringify({ projectId, busy: jobs.isBusy(projectId) })}\n\n`);
+
+  const unsubscribe = jobs.subscribe(projectId, (job) => {
+    response.write(`event: job\ndata: ${JSON.stringify(job)}\n\n`);
+  });
 
   const heartbeat = setInterval(() => {
     response.write(": heartbeat\n\n");
   }, 15_000);
 
-  response.on("close", () => clearInterval(heartbeat));
+  response.on("close", () => {
+    clearInterval(heartbeat);
+    unsubscribe();
+  });
 }
 
 if (process.argv[1] && process.argv[1].endsWith("server.ts")) {

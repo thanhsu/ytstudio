@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { ProjectJobManager, type JobOperation } from "../src/jobs.ts";
@@ -60,6 +60,23 @@ test("subscribers receive immutable job snapshots", async () => {
 
     assert.ok(snapshots.includes("running"));
     assert.ok(snapshots.includes("succeeded"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a job whose bookkeeping cannot be written still settles", async () => {
+  const root = await mkdtemp(join(tmpdir(), "yt-jobs-"));
+  // A file where the jobs directory should go makes every persist attempt fail.
+  const blocked = join(root, "blocked");
+  await writeFile(blocked, "not a directory", "utf8");
+  const manager = new ProjectJobManager(blocked);
+
+  try {
+    await manager.start("sample-project", "render", async () => ({ ok: true }));
+    const settled = await manager.waitForIdle("sample-project");
+
+    assert.equal(settled?.status, "succeeded");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -123,3 +123,16 @@ test("the render stage explains which gates still block a draft", async () => {
   assert.match(script, /renderGate/);
   assert.match(script, /RENDER_GATE_LABELS/);
 });
+
+test("the studio follows job progress over the project event stream", async () => {
+  const script = await readFile("src/web/app.js", "utf8");
+
+  assert.match(script, /new EventSource/);
+  assert.match(script, /addEventListener\("job"/);
+  assert.match(script, /ensureProjectEventStream/);
+  // Slow routes answer 202 with a job, not a finished artifact.
+  assert.match(script, /reportedAsJob/);
+  assert.match(script, /202/);
+  // The batch runner must not report background work as finished.
+  assert.match(script, /running in the background/);
+});
