@@ -39,9 +39,9 @@ Status: first build slice approved
 
 ## Phase 5: Render Pipeline
 
-- [ ] Detect local FFmpeg.
-- [ ] Render 9:16 Shorts draft from voice, cards, captions, and background assets.
-- [ ] Render 16:9 draft for long-form later.
+- [x] Detect local FFmpeg.
+- [x] Render 9:16 Shorts draft from voice, cards, captions, and background assets.
+- [x] Render 16:9 draft for long-form.
 - [ ] Export final MP4 and render report.
 
 ## Phase 6: Local UI

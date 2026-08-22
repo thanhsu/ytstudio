@@ -16,7 +16,7 @@ commentary.
 - SRT import, translation-prompt generation, and subtitle structure validation.
 - TTS voice generation hook.
 - Visual asset planning for captions, cards, rankings, and generated B-roll.
-- FFmpeg-based render pipeline for Shorts and long-form exports.
+- FFmpeg-based render pipeline for 9:16 Shorts and 16:9 long-form exports.
 
 ## Planned MVP
 
@@ -186,8 +186,36 @@ next module.
 
 ## Safety Gates
 
-- Script approval is tied to the extracted narration hash.
-- Asset approval requires rights confirmation and a usage purpose.
+Every approval is recorded against a hash of the content it was given for. Edit
+that content afterwards and the approval goes stale, which blocks render until a
+human approves the new version. Nothing in the pipeline approves on your behalf.
+
+- Script approval is tied to the extracted narration hash, and is an explicit
+  action (`POST /api/projects/<id>/script/approve`). Voice generation refuses to
+  run until the current script is approved.
+- Asset approval requires rights confirmation and a usage purpose. It is only
+  required for projects that actually have assets.
 - Copyright approval refuses blocked checks.
-- Render requires current approvals, voice, and captions.
+- Render re-derives every gate from current content and refuses on any missing
+  or stale approval. The Render stage lists exactly what is still blocking.
+- The studio's "Run available tasks" button prepares inputs only; approvals stay
+  with the operator.
 - Generated files stay under ignored `projects/<id>/workspace/`.
+
+## Background Jobs
+
+Voice, render, and ASR run as background jobs. Those routes answer `202` with a
+job record and report progress over `GET /api/projects/<id>/events`, which the
+studio follows through `EventSource`. One job runs per project at a time; a
+second request while one is running is refused with `409 job-already-running`.
+
+## Project Library Location
+
+Projects live in `./projects` relative to the working directory. Set
+`YT_STUDIO_PROJECTS_DIR` to keep the library somewhere else, such as a drive with
+room for renders:
+
+```powershell
+$env:YT_STUDIO_PROJECTS_DIR="D:\studio-projects"
+npm run studio
+```
