@@ -34,7 +34,7 @@
 **Interfaces:**
 - Produces: `sourcesRoot(): string`; `validateSourceId(id: string): string`; `deriveSourceId(extractorKey: string, platformVideoId: string): string`; `resolveSourcePath(id: string, ...segments: string[]): string`; `saveCandidate`, `loadCandidate`, `listCandidates`; and the `SourceCandidate`, `SourceScore`, `SourceRights`, `SourceStatus` types. Every later task consumes these.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/sources-store.test.ts`:
 
@@ -134,12 +134,12 @@ test("a directory without a readable candidate file is never listed", async () =
 });
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 Run: `node --test tests/sources-store.test.ts`
 Expected: FAIL — `src/sources/store.ts` does not exist.
 
-- [ ] **Step 3: Add the root**
+- [x] **Step 3: Add the root**
 
 In `src/fs.ts`, beside `projectsRoot`:
 
@@ -158,7 +158,7 @@ export function sourcesRoot(): string {
 
 Add `sources/` to `.gitignore` beside `projects/`.
 
-- [ ] **Step 4: Write the store**
+- [x] **Step 4: Write the store**
 
 Create `src/sources/store.ts` with the types from the spec plus:
 
@@ -204,7 +204,7 @@ export function resolveSourcePath(id: string, ...segments: string[]): string {
 
 `saveCandidate` writes `candidate.json` through `mkdir` + `writeFile`. `loadCandidate` returns `null` on `ENOENT`. `listCandidates` reads the root, keeps entries passing `validateSourceId`, loads each, and **skips any whose `candidate.json` is missing or unreadable** rather than throwing or inventing one.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run: `node --test tests/sources-store.test.ts` — PASS. Then `npm test` and `npx tsc --noEmit`.
 
@@ -226,7 +226,7 @@ git commit -m "feat: add a sources store beside the projects store"
 - Consumes: `SourceCandidate` from Task 1.
 - Produces: `fetchSourceMetadata(url, options): Promise<SourceMetadata>` where `SourceMetadata = { platform, platformVideoId, canonicalUrl, title, uploader, durationSeconds, description }`; and `YtDlpOptions = { ytDlpPath?: string; prefixArgs?: string[]; signal?: AbortSignal }`. Task 3 consumes both.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/sources-yt-dlp.test.ts`. The fake executable prints a recorded yt-dlp payload, so nothing reaches the network:
 
@@ -296,19 +296,19 @@ test("a failing yt-dlp surfaces its message with credentials redacted", async ()
 
 Append to `tests/config.test.ts` a case asserting the `sources` block defaults: `ytDlpPath: ""`, `format: "bv*+ba/b"`, `subtitleLanguages: ["en"]`.
 
-- [ ] **Step 2: Run and watch fail**
+- [x] **Step 2: Run and watch fail**
 
 Run: `node --test tests/sources-yt-dlp.test.ts` — FAIL, module missing.
 
-- [ ] **Step 3: Add the config block**
+- [x] **Step 3: Add the config block**
 
 In `src/config.ts`, mirroring the `render` block: a `sources` section with `ytDlpPath: stringValue(candidate.sources?.ytDlpPath, "")`, `format: stringValue(candidate.sources?.format, "bv*+ba/b")`, and `subtitleLanguages` normalised to a string array defaulting to `["en"]`.
 
-- [ ] **Step 4: Write the adapter**
+- [x] **Step 4: Write the adapter**
 
 Create `src/sources/yt-dlp.ts`. `fetchSourceMetadata` throws naming `sources.ytDlpPath` when no path is given, runs `[...prefixArgs, "--dump-single-json", "--skip-download", url]` through `runProcess`, parses stdout, and normalises: `extractor_key || "unknown"`, `webpage_url || url`, `title || url`, `uploader || ""`, `description || ""`, `Math.max(0, Math.floor(Number(duration) || 0))`. Wrap a `ProcessError` so its stderr passes through `redact` from `src/redact.ts` — a URL can carry a token, and the message is about to be shown and logged.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 ```bash
 git add src/config.ts src/sources/yt-dlp.ts tests/sources-yt-dlp.test.ts tests/config.test.ts
@@ -328,7 +328,7 @@ git commit -m "feat: read source metadata without downloading anything"
 - Consumes: Task 1's store, Task 2's `fetchSourceMetadata`.
 - Produces: `addCandidate(url, options): Promise<{ candidate: SourceCandidate; created: boolean }>`, and the routes `GET /api/sources`, `POST /api/sources`, `GET /api/sources/:id`. Tasks 4, 6, and 7 add routes beside these.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `tests/sources-candidates.test.ts` covers the duplicate policy — the part most likely to be got wrong:
 
@@ -427,17 +427,17 @@ test("the sources routes reject a missing url and list an empty store", async ()
 });
 ```
 
-- [ ] **Step 2: Run and watch fail**
+- [x] **Step 2: Run and watch fail**
 
-- [ ] **Step 3: Implement `addCandidate`**
+- [x] **Step 3: Implement `addCandidate`**
 
 Derive the id from the fetched metadata. Then: no directory → create; `candidate.json` present and `platform` + `platformVideoId` both match → return it with `created: false`; present and not matching → throw naming both identities; directory present without `candidate.json` → throw naming the path.
 
-- [ ] **Step 4: Add the routes**
+- [x] **Step 4: Add the routes**
 
 In `src/server.ts`, beside the existing `/api/projects` routes. 409 for the collision and the occupied-directory cases with codes `source-id-collision` and `source-directory-occupied`; 400 `source-url-required` for a missing url.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 ```bash
 git add src/sources/candidates.ts src/server.ts tests/sources-candidates.test.ts tests/server.test.ts
@@ -455,7 +455,7 @@ git commit -m "feat: add source candidates from a pasted url"
 **Interfaces:**
 - Produces: `setCandidateRights(id, rights, rightsNote): Promise<SourceCandidate>` and `assertDownloadable(candidate): void`, both consumed by Task 7.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/sources-candidates.test.ts`:
 
@@ -512,11 +512,11 @@ test("the rights route refuses a value it does not recognise", async () => {
 });
 ```
 
-- [ ] **Step 2-4: Run, implement, verify**
+- [x] **Step 2-4: Run, implement, verify**
 
 `assertDownloadable` throws when `rights === "unknown"`. `setCandidateRights` validates against the four literals, takes the per-candidate lock, and rewrites `candidate.json`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git commit -m "feat: gate source downloads behind a rights declaration"
@@ -536,7 +536,7 @@ Pure refactor. The existing script-generation tests are the proof it changed not
 **Interfaces:**
 - Produces: `chatJson(config: OpenAiCompatibleConfig, messages: ChatMessage[], options: { confirmedPaidRequest: boolean; signal?: AbortSignal }): Promise<string>`. Task 6 consumes it.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `tests/llm-chat.test.ts`, with an injected `fetch`:
 
@@ -617,9 +617,9 @@ test("the returned string is the message content", async () => {
 
 Write each body in full, mirroring the assertions already in `tests/llm-openai-compatible.test.ts`.
 
-- [ ] **Step 2: Run and watch fail**
+- [x] **Step 2: Run and watch fail**
 
-- [ ] **Step 3: Move the code**
+- [x] **Step 3: Move the code**
 
 Move everything from endpoint construction through content extraction into `chatJson`, unchanged. `createOpenAiCompatibleProvider.generate` becomes:
 
@@ -633,11 +633,11 @@ Move everything from endpoint construction through content extraction into `chat
     },
 ```
 
-- [ ] **Step 4: Verify nothing moved underfoot**
+- [x] **Step 4: Verify nothing moved underfoot**
 
 Run `npm test`. Every pre-existing LLM and script test must pass **without edits**. If any needed changing, the extraction changed behaviour — revert and redo.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git commit -m "refactor: extract the chat transport from script generation"
@@ -666,7 +666,7 @@ export type SourceScorer = {
 
 **This is deliberately not `LlmProvider`.** That interface returns a `ScriptGenerationResult`; a scorer returns raw JSON for `parseSourceScore` to validate. Typing the scorer as `LlmProvider` will not compile — Codex caught this in review. `createConfiguredScorer(config)` builds the OpenAI-compatible scorer over `chatJson`, and `createDryRunScorer()` is the default when no model is configured.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 import assert from "node:assert/strict";
@@ -736,11 +736,11 @@ test("the dry-run scorer needs no model and says what it is", async () => {
 });
 ```
 
-- [ ] **Step 2-4: Run, implement, verify**
+- [x] **Step 2-4: Run, implement, verify**
 
 `buildScorePrompt(candidate)` sends title, uploader, duration, and description only — nothing is downloaded yet — and demands a single JSON object. `parseSourceScore` validates like `src/llm/parse.ts`, naming the bad field. `scoreCandidate` stamps `provider`, `model`, and `scoredAt`, and writes under the per-candidate lock.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git commit -m "feat: score source candidates with the configured model"
@@ -790,7 +790,7 @@ Routes: `POST /api/sources/:id/download`, `POST /api/sources/:id/cancel`, `DELET
 
 **Cleanup ownership.** The `finally` block removes partial media and fragments, wrapped in its own try/catch, and the status write happens after it regardless. A full disk that also defeats cleanup must still leave `failed` on record rather than an empty catch and a candidate frozen in `downloading`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 test("progress comes off the download lines", () => {
@@ -909,13 +909,13 @@ test("deleting a source is refused while one of its jobs is running", async () =
 
 Add `ytDlpArgs` to the Task 2 config block and its defaults test (`[]`).
 
-- [ ] **Step 2-4: Run, implement, verify**
+- [x] **Step 2-4: Run, implement, verify**
 
 The download runs on `sourceJobs = new ProjectJobManager(sourcesRoot)` with its own `startSourceJob` and `sendSourceEvents` helpers in `src/server.ts` — the project helpers persist to the projects root and must not be reused. `JobKind` gains `"download"` and `"score"`; the UI label map gains both. Document in `src/jobs.ts` that `JobRecord.projectId` carries the owner id, which is a candidate id for this manager.
 
 Cleanup lives in `finally`: remove partial media and fragments, then write status. A cleanup failure must not prevent the status write, and neither abort nor failure may leave `downloaded`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git commit -m "feat: download a declared source as a background job"
@@ -932,7 +932,7 @@ git commit -m "feat: download a declared source as a background job"
 **Interfaces:**
 - Consumes: every route above.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 test("the sources screen exposes paste, rights, score, and download", async () => {
@@ -949,17 +949,17 @@ test("the sources screen exposes paste, rights, score, and download", async () =
 });
 ```
 
-- [ ] **Step 2-4: Run, implement, verify**
+- [x] **Step 2-4: Run, implement, verify**
 
 A paste box, and a list sorted by `score.value` descending with unscored candidates last. Each row shows title, uploader, duration, platform, rights, status, and — when scored — `value`, `angle`, and `risks`. `reason` and `risks` are shown beside the number, never the number alone: the score is an ordinal hint, and hiding its reasoning would present it as a verdict.
 
 The download control is disabled while `rights === "unknown"`, with the reason in text rather than only as a disabled state.
 
-- [ ] **Step 5: Drive it**
+- [x] **Step 5: Drive it**
 
 Run `npm run studio`, open the Sources screen, paste a URL. With no `sources.ytDlpPath` configured, expect the error naming that setting — that is the correct result, not a failure of the screen.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/web/index.html src/web/app.js src/web/styles.css tests/web.test.ts

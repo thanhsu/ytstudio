@@ -107,6 +107,7 @@ Use the `Config` button in the local studio to edit model and tool settings:
 - local ASR provider/model/language
 - default voice provider and voice model
 - Piper, Vietnamese local TTS, FFmpeg, and FFprobe paths
+- yt-dlp path, download format, and subtitle languages
 
 The UI saves these settings to `studio.config.json`, which is ignored by Git
 because it contains machine-specific paths. API keys are not stored there; keep
@@ -242,6 +243,56 @@ This writes `workspace/subtitles/source.asr.srt`, which can then be sent through
 the subtitle translation workflow. OCR for hard-sub-only videos is a separate
 next module.
 
+## Source Acquisition
+
+Paste a video URL on the **Sources** screen. The studio reads its metadata
+without downloading anything, so adding a candidate is cheap and commits to
+nothing. You then declare what you may do with the material, and only after that
+can it be downloaded.
+
+`yt-dlp` is an external tool, not bundled. Point the studio at it the same way
+you point it at FFmpeg:
+
+```json
+{
+  "sources": {
+    "ytDlpPath": "D:/tools/yt-dlp/yt-dlp.exe",
+    "format": "bv*+ba/b",
+    "subtitleLanguages": ["en", "vi"]
+  }
+}
+```
+
+One binary covers YouTube, Bilibili, Facebook, and X, because yt-dlp does.
+Subtitle conversion to SRT uses the FFmpeg you already configured; without it the
+download still succeeds and whatever subtitle format arrived is kept as-is.
+
+Downloads and scoring run as background jobs against
+`GET /api/sources/<id>/events`. Sources live in `./sources`, a sibling of
+`./projects`, so one download can serve several projects. Set
+`YT_STUDIO_SOURCES_DIR` to move the store.
+
+**What this is for, and what it is not.** One URL at a time, pasted by you, to
+serve original review commentary. There is no channel crawler, no bulk queue, no
+scheduled polling, no watermark removal, and no content-matching evasion — the
+difference between fetching a source to review and harvesting a library to
+republish.
+
+**Declaring rights permits the download and nothing else.** A project still needs
+its own approved copyright checklist before it renders; the candidate rights
+never satisfy a project gate.
+
+### Scoring
+
+If a script model is configured, the studio can rate a candidate for how worth
+reviewing it is and propose an angle. The score is stamped with the provider and
+model that produced it, and the reasoning and risks are always shown beside the
+number.
+
+Scores are ordinal hints, not calibrated measures: they are not comparable across
+models, prompt revisions, or runs. With no model configured, a clearly labelled
+dry-run scorer answers instead of a template masquerading as judgement.
+
 ## Safety Gates
 
 Every approval is recorded against a hash of the content it was given for. Edit
@@ -262,7 +313,8 @@ human approves the new version. Nothing in the pipeline approves on your behalf.
 
 ## Background Jobs
 
-Voice, render, ASR, and script generation run as background jobs. Those routes answer `202` with a
+Voice, render, ASR, script generation, source scoring, and source downloads run
+as background jobs. Those routes answer `202` with a
 job record and report progress over `GET /api/projects/<id>/events`, which the
 studio follows through `EventSource`. One job runs per project at a time; a
 second request while one is running is refused with `409 job-already-running`.
