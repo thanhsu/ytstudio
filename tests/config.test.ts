@@ -167,6 +167,8 @@ test("the sources block defaults, and rejects entries that are not usable string
     assert.equal(defaults.sources.searchLimit, 8);
     assert.equal(defaults.sources.searchPrefixes.youtube, "ytsearch");
     assert.equal(defaults.sources.searchPrefixes.bilibili, "bilisearch");
+    assert.equal(defaults.sources.searchPrefixes.tiktok, "");
+    assert.equal(defaults.sources.searchPrefixes.douyin, "");
 
     await writeFile(
       "studio.config.json",
@@ -175,9 +177,9 @@ test("the sources block defaults, and rejects entries that are not usable string
           ytDlpPath: "tools/yt-dlp.exe",
           subtitleLanguages: ["vi", "", 7],
           ytDlpArgs: "nope",
-          defaultSearchPlatform: "bilibili",
+          defaultSearchPlatform: "douyin",
           searchLimit: 12,
-          searchPrefixes: { bilibili: "custombili", youtube: "" },
+          searchPrefixes: { bilibili: "custombili", youtube: "", tiktok: "customtiktok", douyin: "customdouyin" },
         },
       }),
       "utf8",
@@ -186,10 +188,12 @@ test("the sources block defaults, and rejects entries that are not usable string
     assert.equal(loaded.sources.ytDlpPath, "tools/yt-dlp.exe");
     assert.deepEqual(loaded.sources.subtitleLanguages, ["vi"]);
     assert.deepEqual(loaded.sources.ytDlpArgs, []);
-    assert.equal(loaded.sources.defaultSearchPlatform, "bilibili");
+    assert.equal(loaded.sources.defaultSearchPlatform, "douyin");
     assert.equal(loaded.sources.searchLimit, 12);
     assert.equal(loaded.sources.searchPrefixes.youtube, "ytsearch");
     assert.equal(loaded.sources.searchPrefixes.bilibili, "custombili");
+    assert.equal(loaded.sources.searchPrefixes.tiktok, "customtiktok");
+    assert.equal(loaded.sources.searchPrefixes.douyin, "customdouyin");
   } finally {
     process.chdir(previousCwd);
     await rm(root, { recursive: true, force: true });

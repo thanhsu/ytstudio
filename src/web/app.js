@@ -1861,13 +1861,12 @@ function renderConfig() {
     textareaField("yt-dlp args", "sources.ytDlpArgs", (config.sources.ytDlpArgs ?? []).join("\n")),
     field("Download format", "sources.format", config.sources.format),
     textareaField("Subtitle languages", "sources.subtitleLanguages", (config.sources.subtitleLanguages ?? []).join("\n")),
-    selectField("Default source search", "sources.defaultSearchPlatform", config.sources.defaultSearchPlatform, [
-      ["youtube", "YouTube"],
-      ["bilibili", "Bilibili"],
-    ]),
+    selectField("Default source search", "sources.defaultSearchPlatform", config.sources.defaultSearchPlatform, sourcePlatformOptions()),
     field("Source search limit", "sources.searchLimit", String(config.sources.searchLimit), "number"),
     field("YouTube search prefix", "sources.searchPrefixes.youtube", config.sources.searchPrefixes.youtube),
     field("Bilibili search prefix", "sources.searchPrefixes.bilibili", config.sources.searchPrefixes.bilibili),
+    field("TikTok search prefix", "sources.searchPrefixes.tiktok", config.sources.searchPrefixes.tiktok),
+    field("Douyin search prefix", "sources.searchPrefixes.douyin", config.sources.searchPrefixes.douyin),
     actionButton("Save Config", null, "submit", "primary"),
   );
   stageContent.replaceChildren(form);
@@ -2458,6 +2457,15 @@ function workflowTypeOptions() {
   return (appState.workflowTemplates?.templates ?? []).map((template) => [template.type, template.title]);
 }
 
+function sourcePlatformOptions() {
+  return [
+    ["youtube", "YouTube"],
+    ["bilibili", "Bilibili"],
+    ["tiktok", "TikTok (URL-only unless search prefix is configured)"],
+    ["douyin", "Douyin (URL-only unless search prefix is configured)"],
+  ];
+}
+
 function translationTargetLabels() {
   return (appState.translationPresets?.presets ?? []).map((preset) => preset.label);
 }
@@ -2530,12 +2538,9 @@ async function renderSources() {
   expandedQueries.classList.add("source-query-preview");
   searchForm.replaceChildren(
     field("Keyword", "query", appState.sourceSearchFilters.query ?? "", "text", "牧神记 episode 1"),
-    selectField("Platform", "platform", appState.sourceSearchFilters.platform ?? appState.config?.sources?.defaultSearchPlatform ?? "youtube", [
-      ["youtube", "YouTube"],
-      ["bilibili", "Bilibili"],
-    ]),
+    selectField("Platform", "platform", appState.sourceSearchFilters.platform ?? appState.config?.sources?.defaultSearchPlatform ?? "youtube", sourcePlatformOptions()),
     field("Limit", "limit", String(appState.sourceSearchFilters.limit ?? appState.config?.sources?.searchLimit ?? 8), "number"),
-    checkboxField("Expand Bilibili query", "expandBilibiliQuery", appState.sourceSearchFilters.expandBilibiliQuery !== false),
+    checkboxField("Expand Bilibili/Douyin query", "expandBilibiliQuery", appState.sourceSearchFilters.expandBilibiliQuery !== false),
     field("Include keywords", "includeKeywords", appState.sourceSearchFilters.includeKeywords ?? "", "text", "episode, recap"),
     field("Exclude keywords", "excludeKeywords", appState.sourceSearchFilters.excludeKeywords ?? "", "text", "official, trailer"),
     field("Max views", "maxViews", String(appState.sourceSearchFilters.maxViews || ""), "number"),
@@ -2685,7 +2690,7 @@ function buildSourceSearchQueries(values, options = {}) {
 
   const query = String(values.query ?? "").trim();
   if (!query) return [];
-  if (values.platform !== "bilibili" || values.expandBilibiliQuery === false) return [query];
+  if (!["bilibili", "douyin"].includes(values.platform) || values.expandBilibiliQuery === false) return [query];
 
   const aliases = expandSourceAliases(query);
   return unique([query, ...aliases]).slice(0, 6);

@@ -229,6 +229,10 @@ test("the config screen exposes source search settings", async () => {
   assert.match(script, /sources\.searchPrefixes\.youtube/);
   assert.match(script, /Bilibili search prefix/);
   assert.match(script, /sources\.searchPrefixes\.bilibili/);
+  assert.match(script, /TikTok search prefix/);
+  assert.match(script, /sources\.searchPrefixes\.tiktok/);
+  assert.match(script, /Douyin search prefix/);
+  assert.match(script, /sources\.searchPrefixes\.douyin/);
 });
 
 test("the sources screen exposes paste, rights, score, download, and delete", async () => {
@@ -261,6 +265,9 @@ test("the sources screen exposes keyword search before tracking a source", async
   assert.match(script, /sourceSearchResults/);
   assert.match(script, /source-search-results/);
   assert.match(script, /bilibili/);
+  assert.match(script, /tiktok/);
+  assert.match(script, /douyin/);
+  assert.match(script, /URL-only unless search prefix is configured/);
   assert.match(styles, /\.source-search-results/);
   assert.match(styles, /\.source-result-card/);
   assert.match(styles, /\.source-thumbnail/);
@@ -291,7 +298,7 @@ test("the sources screen exposes editable Bilibili query expansion", async () =>
   const script = await readFile("src/web/app.js", "utf8");
   const styles = await readFile("src/web/styles.css", "utf8");
 
-  assert.match(script, /Expand Bilibili query/);
+  assert.match(script, /Expand Bilibili\/Douyin query/);
   assert.match(script, /Expanded queries/);
   assert.match(script, /buildSourceSearchQueries/);
   assert.match(script, /牧神记/);

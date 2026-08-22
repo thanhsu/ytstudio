@@ -1241,7 +1241,11 @@ async function routeSourceRequest(
 
 function sendSourceError(response: ServerResponse, error: unknown): void {
   const message = error instanceof Error ? error.message : String(error);
-  if (/source search query|required/.test(message) || /^Unsupported source search platform/.test(message)) {
+  if (
+    /source search query|required/.test(message) ||
+    /^Unsupported source search platform/.test(message) ||
+    /does not have keyword search configured/.test(message)
+  ) {
     sendError(response, 400, { code: "source-search-invalid", message });
     return;
   }
@@ -1493,7 +1497,7 @@ function recordStringBody(value: unknown): Record<string, string> | undefined {
 }
 
 function sourceSearchPlatformBody(value: unknown, fallback: SourceSearchPlatform): SourceSearchPlatform {
-  if (value === "youtube" || value === "bilibili") return value;
+  if (value === "youtube" || value === "bilibili" || value === "tiktok" || value === "douyin") return value;
   if (value === undefined || value === null || value === "") return fallback;
   throw new Error(`Unsupported source search platform ${JSON.stringify(value)}.`);
 }

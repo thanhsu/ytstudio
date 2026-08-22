@@ -166,6 +166,45 @@ test("keyword search builds a Bilibili search URL from the configured prefix", a
   assert.equal(results[0].url, "https://www.bilibili.com/video/BV1abc");
 });
 
+test("keyword search builds TikTok and Douyin result URLs when a search provider supplies ids", async () => {
+  const tiktokExecutable = await makeFakeExecutable(
+    `console.log(JSON.stringify({ extractor_key: "TikTok", id: "7123456789012345678", title: "short" }));`,
+  );
+  const douyinExecutable = await makeFakeExecutable(
+    `console.log(JSON.stringify({ extractor_key: "Douyin", id: "7234567890123456789", title: "douyin" }));`,
+  );
+
+  const tiktok = await searchSourceMetadata("muc than ky", {
+    platform: "tiktok",
+    limit: 1,
+    ytDlpPath: process.execPath,
+    ytDlpArgs: [tiktokExecutable],
+    searchPrefixes: { tiktok: "customtiktok" },
+  });
+  const douyin = await searchSourceMetadata("牧神记", {
+    platform: "douyin",
+    limit: 1,
+    ytDlpPath: process.execPath,
+    ytDlpArgs: [douyinExecutable],
+    searchPrefixes: { douyin: "customdouyin" },
+  });
+
+  assert.equal(tiktok[0].url, "https://www.tiktok.com/@unknown/video/7123456789012345678");
+  assert.equal(douyin[0].url, "https://www.douyin.com/video/7234567890123456789");
+});
+
+test("keyword search explains URL-only platforms when no search prefix is configured", async () => {
+  await assert.rejects(
+    () =>
+      searchSourceMetadata("muc than ky", {
+        platform: "tiktok",
+        limit: 5,
+        ytDlpPath: process.execPath,
+      }),
+    /does not have keyword search configured/,
+  );
+});
+
 test("keyword search refuses unsupported platforms instead of passing user text into the search target", async () => {
   await assert.rejects(
     () =>

@@ -11,7 +11,7 @@ export type SourceMetadata = {
   description: string;
 };
 
-export type SourceSearchPlatform = "youtube" | "bilibili";
+export type SourceSearchPlatform = "youtube" | "bilibili" | "tiktok" | "douyin";
 
 export type SourceSearchResult = {
   platform: string;
@@ -62,6 +62,8 @@ type YtDlpPayload = {
 const DEFAULT_SEARCH_PREFIXES: Record<SourceSearchPlatform, string> = {
   youtube: "ytsearch",
   bilibili: "bilisearch",
+  tiktok: "",
+  douyin: "",
 };
 
 export function requireYtDlpPath(ytDlpPath?: string): string {
@@ -122,6 +124,9 @@ export async function searchSourceMetadata(query: string, options: SourceSearchO
   const platform = searchPlatform(options.platform);
   const limit = clampLimit(options.limit);
   const prefix = options.searchPrefixes?.[platform] || DEFAULT_SEARCH_PREFIXES[platform];
+  if (!prefix) {
+    throw new Error(`${platform} does not have keyword search configured. Paste a direct video URL or configure sources.searchPrefixes.${platform}.`);
+  }
   const executable = requireYtDlpPath(options.ytDlpPath);
   const target = `${prefix}${limit}:${trimmed}`;
   const args = [...(options.ytDlpArgs ?? []), "--dump-json", "--flat-playlist", "--skip-download", target];
@@ -216,11 +221,13 @@ function resultUrl(payload: YtDlpPayload, platform: SourceSearchPlatform, id: st
   if (/^https?:\/\//i.test(explicitUrl)) return explicitUrl;
   if (platform === "youtube" && id) return `https://www.youtube.com/watch?v=${encodeURIComponent(id)}`;
   if (platform === "bilibili" && id) return `https://www.bilibili.com/video/${encodeURIComponent(id)}`;
+  if (platform === "tiktok" && id) return `https://www.tiktok.com/@unknown/video/${encodeURIComponent(id)}`;
+  if (platform === "douyin" && id) return `https://www.douyin.com/video/${encodeURIComponent(id)}`;
   return "";
 }
 
 function searchPlatform(value: SourceSearchPlatform): SourceSearchPlatform {
-  if (value === "youtube" || value === "bilibili") return value;
+  if (value === "youtube" || value === "bilibili" || value === "tiktok" || value === "douyin") return value;
   throw new Error(`Unsupported source search platform ${JSON.stringify(value)}.`);
 }
 
