@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createStudioServer, resolveStaticFilePath, startStudioServer } from "../src/server.ts";
+import { makeFakeExecutable, sampleCandidate, seedCandidate, writeStudioConfig } from "./helpers.ts";
 
 async function withTempCwd<T>(fn: () => Promise<T>): Promise<T> {
   const previousCwd = process.cwd();
@@ -975,4 +976,96 @@ test("a paid flag left on the offline template does not demand spend confirmatio
       await running.close();
     }
   });
+});
+
+async function withSourcesServer(
+  run: (running: Awaited<ReturnType<typeof startStudioServer>>) => Promise<void>,
+  payload: unknown = { extractor_key: "Youtube", id: "dQw4w9WgXcQ", webpage_url: "https://youtu.be/dQw4w9WgXcQ", title: "Episode 1" },
+): Promise<void> {
+  await withTempCwd(async () => {
+    await writeStudioConfig({
+      sources: {
+        ytDlpPath: process.execPath,
+        ytDlpArgs: [await makeFakeExecutable(`console.log(${JSON.stringify(JSON.stringify(payload))});`)],
+      },
+    });
+    const running = await startStudioServer(createStudioServer(), { port: 0 });
+    try {
+      await run(running);
+    } finally {
+      await running.close();
+    }
+  });
+}
+
+test("the sources routes reject a missing url and list an empty store", async () => {
+  await withSourcesServer(async (running) => {
+    const listed = await fetch(`${running.url}/api/sources`);
+    assert.deepEqual(await listed.json(), { sources: [] });
+
+    const created = await fetch(`${running.url}/api/sources`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: running.url },
+      body: "{}",
+    });
+    assert.equal(created.status, 400);
+    assert.equal((await created.json()).code, "source-url-required");
+  });
+});
+
+test("a pasted url becomes a candidate, and pasting it again does not duplicate it", async () => {
+  await withSourcesServer(async (running) => {
+    const post = () => fetch(`${running.url}/api/sources`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: running.url },
+      body: JSON.stringify({ url: "https://youtu.be/dQw4w9WgXcQ" }),
+    });
+
+    const first = await post();
+    assert.equal(first.status, 200);
+    const body = await first.json();
+    assert.equal(body.created, true);
+    assert.equal(body.candidate.id, "youtube-dqw4w9wgxcq");
+    assert.equal(body.candidate.rights, "unknown");
+
+    assert.equal((await (await post()).json()).created, false);
+    assert.equal((await (await fetch(`${running.url}/api/sources`)).json()).sources.length, 1);
+  });
+});
+
+test("reading a candidate that does not exist is a 404, not an empty object", async () => {
+  await withSourcesServer(async (running) => {
+    const response = await fetch(`${running.url}/api/sources/youtube-missing`);
+    assert.equal(response.status, 404);
+    assert.equal((await response.json()).code, "source-missing");
+  });
+});
+
+test("the rights route records a declaration and refuses a value it does not recognise", async () => {
+  await withSourcesServer(async (running) => {
+    await seedCandidate(sampleCandidate("youtube-abc"));
+
+    const bad = await fetch(`${running.url}/api/sources/youtube-abc`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", origin: running.url },
+      body: JSON.stringify({ rights: "whatever" }),
+    });
+    assert.equal(bad.status, 400);
+    assert.equal((await bad.json()).code, "source-rights-invalid");
+
+    const good = await fetch(`${running.url}/api/sources/youtube-abc`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", origin: running.url },
+      body: JSON.stringify({ rights: "third-party-fair-use", rightsNote: "Review commentary." }),
+    });
+    assert.equal(good.status, 200);
+    assert.equal((await good.json()).candidate.rights, "third-party-fair-use");
+  });
+});
+
+test("no route takes an executable path or process arguments from a request body", async () => {
+  // Read before any test changes the working directory; a path plus arguments
+  // accepted over HTTP would make a same-origin POST arbitrary code execution.
+  const source = await readFile(new URL("../src/server.ts", import.meta.url), "utf8");
+  assert.ok(!/body\.(ytDlpPath|ytDlpArgs|prefixArgs|ffmpegPath|ffprobePath|executablePath)/.test(source));
 });

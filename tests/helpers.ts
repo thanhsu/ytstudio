@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { SourceCandidate } from "../src/sources/store.ts";
@@ -99,4 +99,14 @@ export function sampleCandidate(id: string): SourceCandidate {
     rights: "unknown",
     rightsNote: "",
   };
+}
+
+export async function writeStudioConfig(config: Record<string, unknown>): Promise<void> {
+  await writeFile("studio.config.json", JSON.stringify(config, null, 2), "utf8");
+}
+
+export async function seedCandidate(candidate: SourceCandidate): Promise<void> {
+  const dir = join("sources", candidate.id);
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, "candidate.json"), JSON.stringify(candidate, null, 2), "utf8");
 }

@@ -36,6 +36,9 @@ import {
   loadEditManifest,
 } from "./edit-manifest.ts";
 import { saveEpisodeAnalysis, type EpisodeAnalysis } from "./episode-analysis.ts";
+import { addCandidate, requireCandidate, setCandidateRights } from "./sources/candidates.ts";
+import { listCandidates, type SourceRights } from "./sources/store.ts";
+import type { YtDlpOptions } from "./sources/yt-dlp.ts";
 import { exportReviewPackage } from "./export-package.ts";
 import { ProjectJobManager, type JobKind, type JobOperation } from "./jobs.ts";
 import { extractAudioForAsr, importMedia } from "./media-ingest.ts";
@@ -194,6 +197,11 @@ async function routeRequest(
 
   if (method !== "GET" && !isSameOrigin(request)) {
     sendError(response, 403, { code: "same-origin-required", message: "Mutating requests require same-origin." });
+    return;
+  }
+
+  if (url.pathname === "/api/sources" || url.pathname.startsWith("/api/sources/")) {
+    await routeSourceRequest(request, response, method, url);
     return;
   }
 
@@ -1021,6 +1029,101 @@ async function routeRequest(
   }
 
   sendError(response, 404, { code: "not-found", message: "Route not found." });
+}
+
+/**
+ * Every source route reads its yt-dlp path and arguments from configuration.
+ * Taking either from a request body would turn a same-origin POST into arbitrary
+ * command execution, so no route here accepts them.
+ */
+async function ytDlpOptionsFromConfig(): Promise<YtDlpOptions> {
+  const config = await loadStudioConfig();
+  return { ytDlpPath: config.sources.ytDlpPath || undefined, ytDlpArgs: config.sources.ytDlpArgs };
+}
+
+async function routeSourceRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  method: string,
+  url: URL,
+): Promise<void> {
+  if (method === "GET" && url.pathname === "/api/sources") {
+    sendJson(response, 200, { sources: await listCandidates() });
+    return;
+  }
+
+  if (method === "POST" && url.pathname === "/api/sources") {
+    const body = await readJsonBody(request);
+    if (typeof body.url !== "string" || !body.url.trim()) {
+      sendError(response, 400, { code: "source-url-required", message: "A source URL is required." });
+      return;
+    }
+    try {
+      const result = await addCandidate(body.url, await ytDlpOptionsFromConfig());
+      sendJson(response, 200, { ok: true, created: result.created, candidate: result.candidate });
+    } catch (error: unknown) {
+      sendSourceError(response, error);
+    }
+    return;
+  }
+
+  const idMatch = /^\/api\/sources\/([^/]+)$/.exec(url.pathname);
+  if (!idMatch) {
+    sendError(response, 404, { code: "not-found", message: "Unknown source route." });
+    return;
+  }
+  const sourceId = decodeURIComponent(idMatch[1]);
+
+  if (method === "GET") {
+    try {
+      sendJson(response, 200, { candidate: await requireCandidate(sourceId) });
+    } catch (error: unknown) {
+      sendSourceError(response, error);
+    }
+    return;
+  }
+
+  if (method === "PATCH") {
+    const body = await readJsonBody(request);
+    try {
+      const candidate = await setCandidateRights(
+        sourceId,
+        body.rights as SourceRights,
+        typeof body.rightsNote === "string" ? body.rightsNote : "",
+      );
+      sendJson(response, 200, { ok: true, candidate });
+    } catch (error: unknown) {
+      sendSourceError(response, error);
+    }
+    return;
+  }
+
+  sendError(response, 405, { code: "method-not-allowed", message: `${method} is not allowed here.` });
+}
+
+function sendSourceError(response: ServerResponse, error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/^No source candidate /.test(message) || /^Invalid source id/.test(message)) {
+    sendError(response, 404, { code: "source-missing", message });
+    return;
+  }
+  if (/^Unknown rights value/.test(message)) {
+    sendError(response, 400, { code: "source-rights-invalid", message });
+    return;
+  }
+  if (/already holds/.test(message)) {
+    sendError(response, 409, { code: "source-id-collision", message });
+    return;
+  }
+  if (/holds no candidate file/.test(message)) {
+    sendError(response, 409, { code: "source-directory-occupied", message });
+    return;
+  }
+  if (/sources\.ytDlpPath/.test(message)) {
+    sendError(response, 400, { code: "source-tool-missing", message });
+    return;
+  }
+  sendError(response, 400, { code: "source-request-failed", message });
 }
 
 async function sendProjects(response: ServerResponse): Promise<void> {
