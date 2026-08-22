@@ -1069,3 +1069,55 @@ test("no route takes an executable path or process arguments from a request body
   const source = await readFile(new URL("../src/server.ts", import.meta.url), "utf8");
   assert.ok(!/body\.(ytDlpPath|ytDlpArgs|prefixArgs|ffmpegPath|ffprobePath|executablePath)/.test(source));
 });
+
+test("downloading is refused until rights are declared", async () => {
+  await withSourcesServer(async (running) => {
+    await seedCandidate(sampleCandidate("youtube-abc"));
+
+    const response = await fetch(`${running.url}/api/sources/youtube-abc/download`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: running.url },
+      body: "{}",
+    });
+
+    assert.equal(response.status, 400);
+    assert.match((await response.json()).message, /rights/);
+  });
+});
+
+test("deleting a source is refused while one of its jobs is running, then allowed after cancelling", async () => {
+  await withSourcesServer(async (running) => {
+    await seedCandidate({ ...sampleCandidate("youtube-abc"), rights: "own", rightsNote: "Mine." });
+    const hanging = await makeFakeExecutable("setInterval(() => {}, 1000);");
+    await writeStudioConfig({ sources: { ytDlpPath: process.execPath, ytDlpArgs: [hanging] } });
+
+    const started = await fetch(`${running.url}/api/sources/youtube-abc/download`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: running.url },
+      body: "{}",
+    });
+    assert.equal(started.status, 202);
+    const jobId = (await started.json()).job.id;
+
+    const refused = await fetch(`${running.url}/api/sources/youtube-abc`, {
+      method: "DELETE",
+      headers: { origin: running.url },
+    });
+    assert.equal(refused.status, 409);
+    assert.equal((await refused.json()).code, "source-job-running");
+
+    const cancelled = await fetch(`${running.url}/api/sources/youtube-abc/cancel`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: running.url },
+      body: JSON.stringify({ jobId }),
+    });
+    assert.equal(cancelled.status, 200);
+
+    const deleted = await fetch(`${running.url}/api/sources/youtube-abc`, {
+      method: "DELETE",
+      headers: { origin: running.url },
+    });
+    assert.equal(deleted.status, 200);
+    assert.deepEqual((await (await fetch(`${running.url}/api/sources`)).json()).sources, []);
+  });
+});

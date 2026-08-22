@@ -36,9 +36,10 @@ import {
   loadEditManifest,
 } from "./edit-manifest.ts";
 import { saveEpisodeAnalysis, type EpisodeAnalysis } from "./episode-analysis.ts";
-import { addCandidate, requireCandidate, setCandidateRights } from "./sources/candidates.ts";
+import { addCandidate, assertDownloadable, requireCandidate, setCandidateRights } from "./sources/candidates.ts";
+import { downloadCandidate } from "./sources/download.ts";
 import { scoreCandidate } from "./sources/score.ts";
-import { listCandidates, type SourceRights } from "./sources/store.ts";
+import { listCandidates, resolveSourcePath, type SourceRights } from "./sources/store.ts";
 import type { YtDlpOptions } from "./sources/yt-dlp.ts";
 import { exportReviewPackage } from "./export-package.ts";
 import { ProjectJobManager, type JobKind, type JobOperation } from "./jobs.ts";
@@ -1131,6 +1132,37 @@ async function routeSourceRequest(
       return;
     }
 
+    if (method === "POST" && action === "download") {
+      try {
+        assertDownloadable(await requireCandidate(sourceId));
+      } catch (error: unknown) {
+        sendSourceError(response, error);
+        return;
+      }
+      await startSourceJob(response, sourceId, "download", ({ signal, update }) =>
+        downloadCandidate(sourceId, { signal, update }));
+      return;
+    }
+
+    if (method === "POST" && action === "cancel") {
+      const body = await readJsonBody(request);
+      try {
+        const job = await sourceJobs.cancel(sourceId, String(body.jobId ?? ""));
+        // The manager clears its running entry inside the operation's finally,
+        // which runs after the abort propagates. Returning before that leaves a
+        // caller unable to act on its own cancellation — a delete issued next
+        // would still be refused as busy.
+        await sourceJobs.waitForIdle(sourceId);
+        sendJson(response, 200, { ok: true, job });
+      } catch (error: unknown) {
+        sendError(response, 409, {
+          code: "source-job-not-running",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+      return;
+    }
+
     sendError(response, 404, { code: "not-found", message: "Unknown source route." });
     return;
   }
@@ -1160,6 +1192,26 @@ async function routeSourceRequest(
         typeof body.rightsNote === "string" ? body.rightsNote : "",
       );
       sendJson(response, 200, { ok: true, candidate });
+    } catch (error: unknown) {
+      sendSourceError(response, error);
+    }
+    return;
+  }
+
+  if (method === "DELETE") {
+    // The job writes into the directory about to be removed, so it is stopped
+    // deliberately rather than raced.
+    if (sourceJobs.isBusy(sourceId)) {
+      sendError(response, 409, {
+        code: "source-job-running",
+        message: "Cancel the running job before deleting this source.",
+      });
+      return;
+    }
+    try {
+      await requireCandidate(sourceId);
+      await rm(resolveSourcePath(sourceId), { recursive: true, force: true });
+      sendJson(response, 200, { ok: true, id: sourceId });
     } catch (error: unknown) {
       sendSourceError(response, error);
     }
