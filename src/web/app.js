@@ -123,6 +123,7 @@ const audioPreview = document.querySelector("#audio-preview");
 const videoPreview = document.querySelector("#video-preview");
 
 document.querySelector("#refresh-projects").addEventListener("click", () => loadProjects());
+document.querySelector("#open-sources").addEventListener("click", () => renderSources().catch((error) => setStatus(error.message)));
 document.querySelector("#open-series").addEventListener("click", () => renderSeriesManager());
 document.querySelector("#new-project").addEventListener("click", () => renderCreateProject());
 document.querySelector("#open-config").addEventListener("click", () => renderConfig());
@@ -2449,3 +2450,256 @@ function setStatus(message) {
 }
 
 loadProjects().catch((error) => setStatus(error.message));
+
+const SOURCE_RIGHTS_OPTIONS = [
+  { value: "unknown", label: "Not declared" },
+  { value: "own", label: "I own this footage" },
+  { value: "licensed", label: "I hold a licence" },
+  { value: "third-party-fair-use", label: "Third party, review commentary" },
+];
+
+async function renderSources() {
+  stageTitle.textContent = "Sources";
+  setActiveStageButton("sources");
+  seriesPanel.replaceChildren();
+  setStatus("Loading sources...");
+
+  let sources = [];
+  try {
+    sources = (await (await fetch("/api/sources")).json()).sources ?? [];
+  } catch (error) {
+    setStatus(error.message);
+  }
+
+  const addForm = document.createElement("form");
+  addForm.className = "form-grid";
+  addForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      const { url } = formValues(addForm);
+      const data = await postJson("/api/sources", { url });
+      setStatus(data.created ? `Added ${data.candidate.title}.` : `Already tracked: ${data.candidate.title}.`);
+      await renderSources();
+    } catch (error) {
+      setStatus(error.message);
+    }
+  });
+  addForm.replaceChildren(
+    field("Video URL", "url", "", "text", "https://www.youtube.com/watch?v=..."),
+    actionButton("Add Source", null, "submit", "primary"),
+  );
+
+  // Rights are permission to download, and only that. A project still needs its
+  // own approved copyright checklist before anything renders, and this screen
+  // must not let anyone believe otherwise.
+  const boundary = paragraph(
+    "One pasted URL at a time, for making original review commentary. " +
+      "Declaring rights permits the download only — a project still needs its own approved copyright check before it can render.",
+  );
+  boundary.className = "source-boundary";
+
+  stageContent.replaceChildren(
+    wrapSection(
+      "Add a source",
+      paragraph("Paste a video URL. Metadata is read first; nothing is downloaded until you declare rights."),
+      addForm,
+    ),
+    wrapSection("Candidates", boundary, renderSourceList(sources)),
+  );
+  setStatus(`${sources.length} source${sources.length === 1 ? "" : "s"} tracked.`);
+}
+
+function renderSourceList(sources) {
+  if (!sources.length) {
+    return paragraph("No sources yet. Paste a URL above to start.");
+  }
+
+  const list = document.createElement("ul");
+  list.className = "source-list";
+  // Unscored candidates sort last rather than being hidden: a score is an
+  // ordinal hint, not a filter.
+  const ranked = [...sources].sort((left, right) => (right.score?.value ?? -1) - (left.score?.value ?? -1));
+  for (const candidate of ranked) {
+    list.append(renderSourceRow(candidate));
+  }
+  return list;
+}
+
+function renderSourceRow(candidate) {
+  const item = document.createElement("li");
+  item.className = `source-row source-status-${candidate.status}`;
+
+  const heading = document.createElement("h4");
+  heading.textContent = candidate.title;
+
+  const meta = document.createElement("p");
+  meta.className = "source-meta";
+  meta.textContent = [
+    candidate.platform,
+    candidate.uploader || "unknown channel",
+    formatSourceDuration(candidate.durationSeconds),
+    candidate.status,
+  ].join(" · ");
+
+  const children = [heading, meta];
+
+  if (candidate.score) {
+    children.push(renderSourceScore(candidate.score));
+  }
+
+  if (candidate.error) {
+    const failure = document.createElement("p");
+    failure.className = "source-error";
+    failure.textContent = candidate.error;
+    children.push(failure);
+  }
+
+  const rightsForm = document.createElement("form");
+  rightsForm.className = "form-grid source-rights";
+  rightsForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      await patchJson(`/api/sources/${encodeURIComponent(candidate.id)}`, formValues(rightsForm));
+      setStatus(`Rights recorded for ${candidate.title}.`);
+      await renderSources();
+    } catch (error) {
+      setStatus(error.message);
+    }
+  });
+  rightsForm.replaceChildren(
+    selectField("Rights", "rights", candidate.rights, SOURCE_RIGHTS_OPTIONS),
+    field("Note", "rightsNote", candidate.rightsNote),
+    actionButton("Save rights", null, "submit"),
+  );
+
+  const actions = document.createElement("div");
+  actions.className = "source-actions";
+  const download = actionButton("Download", () => startSourceJob(candidate.id, "download"), "button", "primary");
+  if (candidate.rights === "unknown") {
+    download.disabled = true;
+    download.title = "Declare rights before downloading.";
+  }
+  actions.append(
+    actionButton("Score", () => startSourceJob(candidate.id, "score")),
+    download,
+    actionButton("Delete", () => deleteSource(candidate.id, candidate.title)),
+  );
+
+  item.replaceChildren(...children, rightsForm, actions);
+  return item;
+}
+
+/**
+ * The number never stands alone. A score is one model reading metadata it has not
+ * verified, so the angle it proposes, the risks it saw, and what produced it are
+ * shown beside it.
+ */
+function renderSourceScore(score) {
+  const panel = document.createElement("div");
+  panel.className = "source-score";
+
+  const value = document.createElement("strong");
+  value.textContent = `${score.value}/100`;
+
+  const angle = document.createElement("p");
+  angle.textContent = `Angle: ${score.angle}`;
+
+  const reason = document.createElement("p");
+  reason.className = "source-score-reason";
+  reason.textContent = score.reason;
+
+  panel.append(value, angle, reason);
+
+  if (score.risks?.length) {
+    const risks = document.createElement("ul");
+    risks.className = "source-risks";
+    for (const risk of score.risks) {
+      const entry = document.createElement("li");
+      entry.textContent = risk;
+      risks.append(entry);
+    }
+    panel.append(risks);
+  }
+
+  const provenance = document.createElement("p");
+  provenance.className = "source-score-provenance";
+  provenance.textContent = `Scored by ${score.provider} · ${score.model}`;
+  panel.append(provenance);
+
+  return panel;
+}
+
+async function startSourceJob(id, action) {
+  try {
+    const response = await fetch(`/api/sources/${encodeURIComponent(id)}/${action}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      setStatus(`${data.code}: ${data.message}`);
+      return;
+    }
+    setStatus(`${action} running in the background for ${id}.`);
+    followSourceJob(id);
+  } catch (error) {
+    setStatus(error.message);
+  }
+}
+
+function followSourceJob(id) {
+  const stream = new EventSource(`/api/sources/${encodeURIComponent(id)}/events`);
+  stream.addEventListener("job", async (event) => {
+    const job = JSON.parse(event.data);
+    setStatus(`${job.kind} ${job.status}: ${job.message}`);
+    if (job.status !== "running") {
+      stream.close();
+      await renderSources();
+    }
+  });
+  stream.addEventListener("error", () => stream.close());
+}
+
+async function deleteSource(id, title) {
+  if (!confirm(`Delete the source "${title}" and every file downloaded for it?`)) return;
+  try {
+    const response = await fetch(`/api/sources/${encodeURIComponent(id)}`, { method: "DELETE" });
+    const data = await response.json();
+    if (!response.ok) {
+      setStatus(`${data.code}: ${data.message}`);
+      return;
+    }
+    setStatus(`Deleted ${title}.`);
+    await renderSources();
+  } catch (error) {
+    setStatus(error.message);
+  }
+}
+
+async function postJson(url, body) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
+  return data;
+}
+
+async function patchJson(url, body) {
+  const response = await fetch(url, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
+  return data;
+}
+
+function formatSourceDuration(seconds) {
+  if (!seconds) return "duration unknown";
+  return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
+}

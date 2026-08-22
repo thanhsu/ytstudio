@@ -215,3 +215,36 @@ test("the config screen lists an unrecognized script provider instead of hiding 
   assert.match(script, /unrecognized — pick a valid provider/);
   assert.match(script, /scriptProviderOptions\(config\.script\.provider\)/);
 });
+
+test("the sources screen exposes paste, rights, score, download, and delete", async () => {
+  const html = await readFile("src/web/index.html", "utf8");
+  const script = await readFile("src/web/app.js", "utf8");
+  const styles = await readFile("src/web/styles.css", "utf8");
+
+  assert.match(html, /id="open-sources"/);
+  assert.match(script, /"\/api\/sources"/);
+  assert.match(script, /Add Source/);
+  assert.match(script, /Score/);
+  assert.match(script, /Download/);
+  assert.match(script, /third-party-fair-use/);
+  assert.match(script, /startSourceJob\(candidate\.id, "download"\)/);
+  assert.match(script, /startSourceJob\(candidate\.id, "score"\)/);
+  assert.match(script, /deleteSource\(candidate\.id/);
+  assert.match(script, /Declare rights before downloading/);
+  assert.match(styles, /\.source-list/);
+});
+
+test("the sources screen refuses to imply that declaring rights clears a project gate", async () => {
+  const script = await readFile("src/web/app.js", "utf8");
+
+  assert.match(script, /Declaring rights permits the download only/);
+  assert.match(script, /copyright/i);
+});
+
+test("the sources screen shows why a score was given, never the number alone", async () => {
+  const script = await readFile("src/web/app.js", "utf8");
+
+  assert.match(script, /score\.reason/);
+  assert.match(script, /score\.risks/);
+  assert.match(script, /score\.angle/);
+});
