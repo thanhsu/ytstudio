@@ -1475,8 +1475,10 @@ function renderInspector(segment, assets) {
     paragraph(segment.reason),
     selectField("Asset", "assetId", segment.assetId ?? "", [["", "Generated background"], ...assets.map((asset) => [asset.id, asset.filename])]),
     selectField("Fit", "fitMode", segment.fitMode, [["cover", "Cover"], ["contain", "Contain"]]),
-    field("Source start (seconds)", "sourceStartSeconds", String(segment.sourceStartSeconds), "number"),
-    field("Source duration (max 5s for video)", "sourceDurationSeconds", String(segment.sourceDurationSeconds), "number"),
+    // Visual mapping produces fractional seconds, so the default step="1" would
+    // make native validation reject the value and silently block the submit.
+    field("Source start (seconds)", "sourceStartSeconds", String(segment.sourceStartSeconds), "number", "", "any"),
+    field("Source duration (max 5s for video)", "sourceDurationSeconds", String(segment.sourceDurationSeconds), "number", "", "any"),
     checkboxField("Mute source audio", "muteSourceAudio", segment.muteSourceAudio),
     actionButton("Save mapping", null, "submit", "primary"),
   );

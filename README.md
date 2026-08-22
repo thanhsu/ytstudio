@@ -154,6 +154,14 @@ key, and mark it paid so the studio asks before every spend:
 The same settings reach any OpenAI-compatible endpoint, including LM Studio,
 llama.cpp, vLLM, DeepSeek, Groq, and OpenRouter.
 
+`provider` accepts only `dry-run` and `openai-compatible`. Any other value is
+rejected when the config loads, rather than falling back to the template and
+reporting success. With `paid: true`, the CLI needs the confirmation flag:
+
+```powershell
+npm run cli -- generate-script --project muc-than-ky-review-001 --confirm-paid true
+```
+
 A failed model call fails the job and reports why. The studio never falls back
 to the template, because template output presented as model output is exactly
 the sameness this setting exists to remove. Generating a script also makes any

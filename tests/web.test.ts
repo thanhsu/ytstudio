@@ -162,3 +162,14 @@ test("the paid script dialog is raised only for a hosted model, never for the of
   assert.match(script, /step\.id === "script" && paidScriptModelConfigured\(\)/);
   assert.doesNotMatch(script, /appState\.config\?\.script\?\.paid\)/);
 });
+
+test("number inputs holding machine-produced fractional values accept any step", async () => {
+  const script = await readFile("src/web/app.js", "utf8");
+
+  // step defaults to "1", which makes native validation reject a fractional
+  // value and silently block the form submit.
+  assert.match(script, /"sourceStartSeconds", String\(segment\.sourceStartSeconds\), "number", "", "any"/);
+  assert.match(script, /"sourceDurationSeconds", String\(segment\.sourceDurationSeconds\), "number", "", "any"/);
+  assert.match(script, /"watermarkOpacity",[^\n]*"number", "", "any"/);
+  assert.match(script, /"script\.temperature",[^\n]*"number", "", "any"/);
+});
