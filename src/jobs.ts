@@ -3,11 +3,16 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { projectsRoot as defaultProjectsRoot } from "./fs.ts";
 
-export type JobKind = "voice" | "captions" | "render" | "asset" | "asr" | "script";
+export type JobKind = "voice" | "captions" | "render" | "asset" | "asr" | "script" | "download" | "score";
 export type JobStatus = "running" | "succeeded" | "failed" | "cancelled";
 
 export type JobRecord = {
   id: string;
+  /**
+   * The owner of the job: a project id under the projects root, or a source
+   * candidate id when the manager is rooted at the sources store. The name is
+   * kept because renaming it would invalidate every job record already on disk.
+   */
   projectId: string;
   kind: JobKind;
   status: JobStatus;

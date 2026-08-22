@@ -37,12 +37,13 @@ import {
 } from "./edit-manifest.ts";
 import { saveEpisodeAnalysis, type EpisodeAnalysis } from "./episode-analysis.ts";
 import { addCandidate, requireCandidate, setCandidateRights } from "./sources/candidates.ts";
+import { scoreCandidate } from "./sources/score.ts";
 import { listCandidates, type SourceRights } from "./sources/store.ts";
 import type { YtDlpOptions } from "./sources/yt-dlp.ts";
 import { exportReviewPackage } from "./export-package.ts";
 import { ProjectJobManager, type JobKind, type JobOperation } from "./jobs.ts";
 import { extractAudioForAsr, importMedia } from "./media-ingest.ts";
-import { projectsRoot } from "./fs.ts";
+import { projectsRoot, sourcesRoot } from "./fs.ts";
 import { loadProjectState } from "./project-state.ts";
 import { resolveProjectPath, validateProjectId } from "./project-paths.ts";
 import {
@@ -111,6 +112,48 @@ type ApiError = {
 };
 
 const jobs = new ProjectJobManager();
+
+/**
+ * A second manager rooted at the sources store. It keeps its own running and
+ * listener maps, so a source job never lands in a project's job directory and the
+ * two event streams stay apart.
+ */
+const sourceJobs = new ProjectJobManager(sourcesRoot);
+
+async function startSourceJob(
+  response: ServerResponse,
+  sourceId: string,
+  kind: JobKind,
+  operation: JobOperation,
+): Promise<void> {
+  if (sourceJobs.isBusy(sourceId)) {
+    sendError(response, 409, {
+      code: "source-job-running",
+      message: "This source already has a job running. Wait for it to finish or cancel it.",
+    });
+    return;
+  }
+  sendJson(response, 202, { ok: true, job: await sourceJobs.start(sourceId, kind, operation) });
+}
+
+async function sendSourceEvents(response: ServerResponse, sourceId: string): Promise<void> {
+  response.writeHead(200, {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-store",
+    connection: "keep-alive",
+  });
+  response.write(`event: snapshot\ndata: ${JSON.stringify({ sourceId, busy: sourceJobs.isBusy(sourceId) })}\n\n`);
+
+  const unsubscribe = sourceJobs.subscribe(sourceId, (job) => {
+    response.write(`event: job\ndata: ${JSON.stringify(job)}\n\n`);
+  });
+  const heartbeat = setInterval(() => response.write(": heartbeat\n\n"), 15_000);
+
+  response.on("close", () => {
+    clearInterval(heartbeat);
+    unsubscribe();
+  });
+}
 
 /**
  * Runs a slow operation as a tracked job so the HTTP request returns immediately
@@ -1064,6 +1107,31 @@ async function routeSourceRequest(
     } catch (error: unknown) {
       sendSourceError(response, error);
     }
+    return;
+  }
+
+  const actionMatch = /^\/api\/sources\/([^/]+)\/([^/]+)$/.exec(url.pathname);
+  if (actionMatch) {
+    const sourceId = decodeURIComponent(actionMatch[1]);
+    const action = actionMatch[2];
+
+    if (method === "GET" && action === "events") {
+      await sendSourceEvents(response, sourceId);
+      return;
+    }
+
+    if (method === "POST" && action === "score") {
+      try {
+        await requireCandidate(sourceId);
+      } catch (error: unknown) {
+        sendSourceError(response, error);
+        return;
+      }
+      await startSourceJob(response, sourceId, "score", ({ signal }) => scoreCandidate(sourceId, { signal }));
+      return;
+    }
+
+    sendError(response, 404, { code: "not-found", message: "Unknown source route." });
     return;
   }
 
