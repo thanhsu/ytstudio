@@ -43,6 +43,8 @@ const appState = {
   selectedProject: null,
   activeStage: "brief",
   projectSnapshot: null,
+  editManifest: null,
+  editExport: null,
   translationPresets: null,
   workflowTemplates: null,
   config: null,
@@ -293,7 +295,10 @@ function bindStageRail() {
 async function selectProject(projectId) {
   appState.selectedProject = projectId;
   ensureProjectEventStream(projectId);
-  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}`);
+  const [response] = await Promise.all([
+    fetch(`/api/projects/${encodeURIComponent(projectId)}`),
+    loadEditManifestState(projectId),
+  ]);
   appState.projectSnapshot = await response.json();
   const workflowStages = appState.projectSnapshot.workflow?.steps?.map((step) => step.stage) ?? [];
   if (!workflowStages.includes(appState.activeStage)) {
@@ -1244,7 +1249,130 @@ function renderTranslation(snapshot) {
     paragraph("Build the prompt for ChatGPT/Gemini while preserving cue numbers and timestamps."),
     form,
     paragraph(`Targets: ${translationTargetLabels().join(", ")}`),
+    renderSegmentEditor(),
   );
+}
+
+function renderSegmentEditor() {
+  const manifest = appState.editManifest;
+  const createForm = document.createElement("form");
+  createForm.className = "form-grid segment-editor-actions";
+  createForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      const values = formValues(createForm);
+      if (manifest && !confirm("Replace the existing edit manifest? This resets all keep/remove decisions.")) {
+        return;
+      }
+      const data = await runProjectRoute("edit-manifest", manifest ? { ...values, replace: true } : values);
+      appState.editManifest = data.manifest;
+      appState.editExport = null;
+      renderTranslation(appState.projectSnapshot);
+      setStatus(`Edit manifest created with ${data.manifest.segments.length} cues.`);
+    } catch (error) {
+      setStatus(error.message);
+    }
+  });
+  createForm.replaceChildren(
+    field("Source SRT path", "source", manifest?.sourceRelativePath ?? sourceSubtitlePath()),
+    actionButton("Create Edit Manifest", null, "submit", "primary"),
+  );
+
+  const children = [
+    sectionTitle("Subtitle Segment Editor"),
+    paragraph("Human review step: select subtitle cues to remove, then export a clean SRT and an audit CSV."),
+    createForm,
+  ];
+  if (!manifest) {
+    children.push(paragraph("Create an edit manifest to load subtitle cue decisions."));
+    return wrapSection("Cue review", ...children);
+  }
+
+  const removed = manifest.segments.filter((segment) => segment.decision === "remove");
+  const decisionStatus = document.createElement("p");
+  decisionStatus.className = "segment-editor-status";
+  decisionStatus.setAttribute("aria-live", "polite");
+  decisionStatus.textContent = `${manifest.segments.length - removed.length} kept · ${removed.length} removed · ${manifest.segments.length} total`;
+
+  const removeForm = document.createElement("form");
+  removeForm.className = "form-grid segment-editor-actions";
+  removeForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      const data = await runProjectRoute("edit-manifest/remove-list", formValues(removeForm));
+      appState.editManifest = data.manifest;
+      appState.editExport = null;
+      renderTranslation(appState.projectSnapshot);
+      setStatus("Keep/remove decisions saved.");
+    } catch (error) {
+      setStatus(error.message);
+    }
+  });
+  removeForm.replaceChildren(
+    field("Remove cue numbers", "remove", removed.map((segment) => segment.cueIndex).join(","), "text", "1,5,10-12"),
+    actionButton("Apply Keep/Remove Decisions", null, "submit", "primary"),
+  );
+
+  const exportButton = actionButton("Export Clean SRT + CSV", async () => {
+    try {
+      const data = await runProjectRoute("edit-manifest/export", {});
+      appState.editExport = data.exported;
+      renderTranslation(appState.projectSnapshot);
+      setStatus(`Exported ${data.exported.keptCueCount} kept cues.`);
+    } catch (error) {
+      setStatus(error.message);
+    }
+  });
+  children.push(decisionStatus, removeForm, exportButton, renderSegmentDecisionTable(manifest));
+  if (appState.editExport) {
+    children.push(
+      linkButton("Open clean SRT", appState.editExport.cleanSrtRelativePath),
+      linkButton("Open decision CSV", appState.editExport.csvRelativePath),
+    );
+  }
+  return wrapSection("Cue review", ...children);
+}
+
+function renderSegmentDecisionTable(manifest) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "segment-editor-table-wrap";
+  const table = document.createElement("table");
+  table.className = "segment-editor-table";
+  const caption = document.createElement("caption");
+  caption.textContent = "Subtitle cue decisions";
+  const head = document.createElement("thead");
+  const headRow = document.createElement("tr");
+  for (const label of ["Cue", "Timing", "Decision", "Text"]) {
+    const cell = document.createElement("th");
+    cell.scope = "col";
+    cell.textContent = label;
+    headRow.append(cell);
+  }
+  head.append(headRow);
+  const body = document.createElement("tbody");
+  for (const segment of manifest.segments) {
+    const row = document.createElement("tr");
+    row.className = `decision-${segment.decision}`;
+    for (const value of [segment.cueIndex, `${segment.start} → ${segment.end}`, segment.decision, segment.text]) {
+      const cell = document.createElement("td");
+      cell.textContent = String(value);
+      row.append(cell);
+    }
+    body.append(row);
+  }
+  table.append(caption, head, body);
+  wrapper.append(table);
+  return wrapper;
+}
+
+async function loadEditManifestState(projectId) {
+  appState.editExport = null;
+  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/edit-manifest`);
+  if (!response.ok) {
+    appState.editManifest = null;
+    return;
+  }
+  appState.editManifest = (await response.json()).manifest;
 }
 
 function renderVoice(snapshot) {

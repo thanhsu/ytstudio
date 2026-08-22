@@ -81,6 +81,24 @@ test("web app exposes UI controls for media, ASR, captions, and render actions",
   assert.match(script, /Export/);
 });
 
+test("translation stage exposes the human subtitle segment editor", async () => {
+  const script = await readFile("src/web/app.js", "utf8");
+  const styles = await readFile("src/web/styles.css", "utf8");
+
+  assert.match(script, /Create Edit Manifest/);
+  assert.match(script, /Remove cue numbers/);
+  assert.match(script, /Apply Keep\/Remove Decisions/);
+  assert.match(script, /Export Clean SRT \+ CSV/);
+  assert.match(script, /edit-manifest\/remove-list/);
+  assert.match(script, /edit-manifest\/export/);
+  assert.match(script, /Subtitle cue decisions/);
+  assert.match(script, /aria-live/);
+  assert.match(script, /confirm\("Replace the existing edit manifest/);
+  assert.match(script, /replace: true/);
+  assert.match(styles, /\.segment-editor-table/);
+  assert.match(styles, /\.decision-remove/);
+});
+
 test("server serves the studio shell without exposing project files", async () => {
   const previousCwd = process.cwd();
   const root = await mkdtemp(join(tmpdir(), "yt-web-"));

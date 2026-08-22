@@ -26,6 +26,15 @@ import { createBrief } from "./brief.ts";
 import { loadStudioConfig, saveStudioConfig } from "./config.ts";
 import { saveCopyrightCheck } from "./copyright.ts";
 import { saveEditingPlan } from "./editing-plan.ts";
+import {
+  applyRemoveSelection,
+  createEditManifest,
+  EditManifestConflictError,
+  EditManifestInputError,
+  EditSelectionError,
+  exportEditManifest,
+  loadEditManifest,
+} from "./edit-manifest.ts";
 import { saveEpisodeAnalysis, type EpisodeAnalysis } from "./episode-analysis.ts";
 import { exportReviewPackage } from "./export-package.ts";
 import { ProjectJobManager, type JobKind, type JobOperation } from "./jobs.ts";
@@ -637,6 +646,73 @@ async function routeRequest(
 
   if (method === "GET" && rest === "events") {
     await sendProjectEvents(response, projectId);
+    return;
+  }
+
+  if (method === "GET" && rest === "edit-manifest") {
+    try {
+      sendJson(response, 200, { ok: true, manifest: await loadEditManifest(projectId) });
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        sendError(response, 404, { code: "edit-manifest-missing", message: "Create an edit manifest for this project first." });
+      } else {
+        throw error;
+      }
+    }
+    return;
+  }
+
+  if (method === "POST" && rest === "edit-manifest") {
+    const body = await readJsonBody(request);
+    if (typeof body.source !== "string" || !body.source.trim()) {
+      sendError(response, 400, { code: "edit-source-required", message: "A project-relative source SRT path is required." });
+      return;
+    }
+    try {
+      const manifest = await createEditManifest(projectId, body.source, { replace: body.replace === true });
+      sendJson(response, 200, { ok: true, manifest });
+    } catch (error: unknown) {
+      if (error instanceof EditManifestConflictError) {
+        sendError(response, 409, { code: "edit-manifest-exists", message: error.message });
+      } else if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        sendError(response, 404, { code: "edit-source-missing", message: "The source SRT file does not exist in this project." });
+      } else if (error instanceof EditManifestInputError) {
+        sendError(response, 400, { code: "edit-source-invalid", message: error.message });
+      } else {
+        throw error;
+      }
+    }
+    return;
+  }
+
+  if (method === "POST" && rest === "edit-manifest/remove-list") {
+    const body = await readJsonBody(request);
+    try {
+      const manifest = await applyRemoveSelection(projectId, typeof body.remove === "string" ? body.remove : "");
+      sendJson(response, 200, { ok: true, manifest });
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        sendError(response, 404, { code: "edit-manifest-missing", message: "Create an edit manifest for this project first." });
+      } else if (error instanceof EditSelectionError) {
+        sendError(response, 400, { code: "edit-selection-invalid", message: error.message });
+      } else {
+        throw error;
+      }
+    }
+    return;
+  }
+
+  if (method === "POST" && rest === "edit-manifest/export") {
+    try {
+      const exported = await exportEditManifest(projectId);
+      sendJson(response, 200, { ok: true, exported });
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        sendError(response, 404, { code: "edit-manifest-missing", message: "Create an edit manifest for this project first." });
+      } else {
+        throw error;
+      }
+    }
     return;
   }
 

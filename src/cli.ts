@@ -1,5 +1,6 @@
 import { createBrief } from "./brief.ts";
 import { saveCopyrightCheck } from "./copyright.ts";
+import { applyRemoveSelection, createEditManifest, exportEditManifest } from "./edit-manifest.ts";
 import { generateSourceSrtFromAsr } from "./asr.ts";
 import { extractAudioForAsr, importMedia } from "./media-ingest.ts";
 import { generateDryRunScript, generateScript } from "./script.ts";
@@ -117,6 +118,15 @@ Commands:
 
   validate-translation --source <path> --translated <path>
     Validate translated SRT cue count, timestamps, line length, and Chinese leftovers.
+
+  create-edit-manifest --project <id> --source <project-relative-srt> [--replace true]
+    Create workspace/edit/segments.json. Replacement must be explicitly confirmed.
+
+  apply-remove-list --project <id> --remove <cue-selection>
+    Mark cue numbers such as 1,5,10-12 for removal; all omitted cues are kept.
+
+  export-edit-manifest --project <id>
+    Export workspace/edit/clean.srt and segments.csv from current decisions.
 
   studio [--port <n>]
     Start the local browser studio on 127.0.0.1.
@@ -311,6 +321,34 @@ async function run(): Promise<void> {
     if (!result.valid) {
       process.exitCode = 1;
     }
+    return;
+  }
+
+  if (command === "create-edit-manifest") {
+    const projectId = requireProject(args);
+    const source = textArg(args, "source");
+    if (!source) {
+      throw new Error("--source is required.");
+    }
+    const manifest = await createEditManifest(projectId, source, { replace: boolArg(args, "replace") });
+    console.log(`Created edit manifest with ${manifest.segments.length} cues: projects/${projectId}/workspace/edit/segments.json`);
+    return;
+  }
+
+  if (command === "apply-remove-list") {
+    const projectId = requireProject(args);
+    const remove = textArg(args, "remove");
+    const manifest = await applyRemoveSelection(projectId, remove);
+    const removedCount = manifest.segments.filter((segment) => segment.decision === "remove").length;
+    console.log(`Updated edit manifest: ${removedCount} removed cue${removedCount === 1 ? "" : "s"}.`);
+    return;
+  }
+
+  if (command === "export-edit-manifest") {
+    const projectId = requireProject(args);
+    const exported = await exportEditManifest(projectId);
+    console.log(`Exported clean subtitles: projects/${projectId}/${exported.cleanSrtRelativePath}`);
+    console.log(`Exported decision CSV: projects/${projectId}/${exported.csvRelativePath}`);
     return;
   }
 

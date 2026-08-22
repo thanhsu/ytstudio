@@ -860,3 +860,51 @@ video {
   font-size: 13px;
   line-height: 1.6;
 }
+
+.segment-editor-actions {
+  align-items: end;
+  margin-bottom: 12px;
+}
+
+.segment-editor-status {
+  font-weight: 700;
+}
+
+.segment-editor-table-wrap {
+  max-height: 420px;
+  overflow: auto;
+  margin: 12px 0;
+  border: 1px solid #334155;
+  border-radius: 8px;
+}
+
+.segment-editor-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.segment-editor-table caption {
+  padding: 10px;
+  font-weight: 700;
+  text-align: left;
+}
+
+.segment-editor-table th,
+.segment-editor-table td {
+  padding: 8px 10px;
+  border-top: 1px solid #334155;
+  text-align: left;
+  vertical-align: top;
+}
+
+.segment-editor-table th {
+  position: sticky;
+  top: 0;
+  background: #172033;
+}
+
+.segment-editor-table .decision-remove {
+  background: rgba(153, 27, 27, 0.2);
+  color: #fecaca;
+}
