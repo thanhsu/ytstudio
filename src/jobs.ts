@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { projectsRoot as defaultProjectsRoot } from "./fs.ts";
 
-export type JobKind = "voice" | "captions" | "render" | "asset" | "asr";
+export type JobKind = "voice" | "captions" | "render" | "asset" | "asr" | "script";
 export type JobStatus = "running" | "succeeded" | "failed" | "cancelled";
 
 export type JobRecord = {

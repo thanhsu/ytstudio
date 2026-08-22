@@ -510,7 +510,14 @@ test("script approval is an explicit action rather than a side effect of voice",
   await withTempCwd(async () => {
     const running = await startStudioServer(createStudioServer(), { port: 0 });
     try {
-      assert.equal((await postJson(running, "script")).status, 200);
+      const script = await postJson(running, "script");
+      assert.equal(script.status, 202);
+      const scriptJob = (await script.json()).job;
+      const scriptEvents = await fetch(`${running.url}/api/projects/sample-project/events`);
+      await readEventStreamUntil(
+        scriptEvents,
+        (payload) => payload.id === scriptJob.id && payload.status !== "running",
+      );
 
       const voice = await postJson(running, "voice", { provider: "piper" });
       assert.equal(voice.status, 409);
@@ -532,7 +539,13 @@ test("render refuses a stale copyright approval without re-approving it", async 
   await withTempCwd(async () => {
     const running = await startStudioServer(createStudioServer(), { port: 0 });
     try {
-      await postJson(running, "script");
+      const scriptStarted = await postJson(running, "script");
+      const scriptJob = (await scriptStarted.json()).job;
+      const scriptEvents = await fetch(`${running.url}/api/projects/sample-project/events`);
+      await readEventStreamUntil(
+        scriptEvents,
+        (payload) => payload.id === scriptJob.id && payload.status !== "running",
+      );
       await postJson(running, "script/approve");
       await postJson(running, "copyright-check", copyrightCheckBody(75));
       await postJson(running, "copyright/approve");
@@ -625,7 +638,13 @@ test("a second job is refused while one is still running for the project", async
   await withTempCwd(async () => {
     const running = await startStudioServer(createStudioServer(), { port: 0 });
     try {
-      await postJson(running, "script");
+      const scriptStarted = await postJson(running, "script");
+      const scriptJob = (await scriptStarted.json()).job;
+      const scriptEvents = await fetch(`${running.url}/api/projects/sample-project/events`);
+      await readEventStreamUntil(
+        scriptEvents,
+        (payload) => payload.id === scriptJob.id && payload.status !== "running",
+      );
       await postJson(running, "script/approve");
       const events = await fetch(`${running.url}/api/projects/sample-project/events`);
 
@@ -641,6 +660,48 @@ test("a second job is refused while one is still running for the project", async
         events,
         (payload) => payload.id === firstJob.id && payload.status !== "running",
       );
+    } finally {
+      await running.close();
+    }
+  });
+});
+
+test("script generation runs as a job and writes the project files", async () => {
+  await withTempCwd(async () => {
+    const running = await startStudioServer(createStudioServer(), { port: 0 });
+    try {
+      const events = await fetch(`${running.url}/api/projects/sample-project/events`);
+
+      const started = await postJson(running, "script");
+      assert.equal(started.status, 202);
+      const { job } = await started.json();
+      assert.equal(job.kind, "script");
+
+      const finished = await readEventStreamUntil(
+        events,
+        (payload) => payload.id === job.id && payload.status !== "running",
+      );
+      assert.equal(finished.status, "succeeded");
+      assert.match(await readFile(join("projects", "sample-project", "script.md"), "utf8"), /Hook/);
+    } finally {
+      await running.close();
+    }
+  });
+});
+
+test("a paid script model is refused without confirmation", async () => {
+  await withTempCwd(async () => {
+    await writeFile(
+      "studio.config.json",
+      JSON.stringify({ script: { provider: "openai-compatible", paid: true, apiKeyEnv: "TEST_SCRIPT_KEY" } }),
+      "utf8",
+    );
+    const running = await startStudioServer(createStudioServer(), { port: 0 });
+    try {
+      const response = await postJson(running, "script");
+
+      assert.equal(response.status, 409);
+      assert.equal((await response.json()).code, "paid-confirmation-required");
     } finally {
       await running.close();
     }

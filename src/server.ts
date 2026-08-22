@@ -42,7 +42,7 @@ import {
 import { importReviewEpisodeMedia, importReviewEpisodeSubtitle } from "./review-source.ts";
 import { regenerateScriptSegment, saveReviewScript, type ReviewScript } from "./review-script.ts";
 import { saveReviewEpisodeSceneMap } from "./scene-map.ts";
-import { generateDryRunScript } from "./script.ts";
+import { generateScript } from "./script.ts";
 import { saveStoryArc } from "./story-arc.ts";
 import {
   createSeriesProject,
@@ -677,8 +677,21 @@ async function routeRequest(
   }
 
   if (method === "POST" && rest === "script") {
-    await generateDryRunScript(projectId);
-    sendJson(response, 200, { ok: true });
+    const body = await readJsonBody(request);
+    const config = await loadStudioConfig();
+    if (config.script.paid && body.confirmedPaidRequest !== true) {
+      sendError(response, 409, {
+        code: "paid-confirmation-required",
+        message: "The configured script model is paid and requires explicit confirmation.",
+        action: "confirm-paid-request",
+      });
+      return;
+    }
+    await startProjectJob(response, projectId, "script", ({ signal }) =>
+      generateScript(projectId, {
+        confirmedPaidRequest: body.confirmedPaidRequest === true,
+        signal,
+      }));
     return;
   }
 
