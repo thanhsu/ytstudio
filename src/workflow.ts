@@ -3,11 +3,19 @@ import { join } from "node:path";
 import { loadAssetManifest, validateAssetManifest } from "./assets.ts";
 import { saveCaptions, type CaptionArtifact } from "./captions.ts";
 import { loadStudioConfig } from "./config.ts";
-import { loadProjectState, approveStage, setArtifact, sha256 } from "./project-state.ts";
+import {
+  derivePipelineStatus,
+  loadProjectState,
+  approveStage,
+  setArtifact,
+  sha256,
+  type PipelineStatus,
+  type SourceHashes,
+} from "./project-state.ts";
 import { resolveProjectPath } from "./project-paths.ts";
 import { extractNarration } from "./narration.ts";
 import { probeDuration } from "./media.ts";
-import { renderDraft, type RenderArtifact } from "./render.ts";
+import { evaluateRenderGate, renderDraft, type RenderArtifact, type RenderGateResult } from "./render.ts";
 import { loadVisualMapping } from "./visual-mapping.ts";
 import { createPiperProvider } from "./tts/piper.ts";
 import { createOpenAiProvider } from "./tts/openai.ts";
@@ -39,6 +47,58 @@ export type RenderDraftOptions = {
 export async function approveCurrentScript(projectId: string): Promise<void> {
   const narration = await readProjectNarration(projectId);
   await approveStage(projectId, "script", narration.hash, "Approved current narration.");
+}
+
+/**
+ * Hashes of everything an approval is taken against. An approval whose hash no
+ * longer matches is stale, which is what stops edited content from riding on a
+ * signature the operator gave to an earlier version.
+ */
+export async function currentSourceHashes(projectId: string): Promise<SourceHashes> {
+  const hashes: SourceHashes = {};
+
+  try {
+    hashes.script = (await readProjectNarration(projectId)).hash;
+  } catch (error: unknown) {
+    if (!isNotFound(error)) throw error;
+  }
+
+  hashes.assets = sha256(JSON.stringify(await loadAssetManifest(projectId)));
+
+  try {
+    hashes.copyright = sha256(await readFile(resolveProjectPath(projectId, "copyright-check.json"), "utf8"));
+  } catch (error: unknown) {
+    if (!isNotFound(error)) throw error;
+  }
+
+  return hashes;
+}
+
+export async function projectPipelineStatus(projectId: string): Promise<PipelineStatus> {
+  const state = await loadProjectState(projectId);
+  return derivePipelineStatus(state, await currentSourceHashes(projectId));
+}
+
+export async function evaluateProjectRenderGate(projectId: string): Promise<RenderGateResult> {
+  const status = await projectPipelineStatus(projectId);
+  const manifest = await loadAssetManifest(projectId);
+  const mapping = await loadVisualMapping(projectId);
+  // With no assets there is nothing to grant rights over and nothing to map, so
+  // both gates stand down rather than blocking a purely narrated draft.
+  const hasAssets = manifest.assets.length > 0;
+
+  return evaluateRenderGate({
+    script: status.script,
+    assets: hasAssets ? status.assets : "not-required",
+    copyright: status.copyright,
+    voice: status.voice,
+    captions: status.captions,
+    visualMapping: !hasAssets ? "not-required" : mapping?.status === "approved" ? "approved" : "missing",
+  });
+}
+
+function isNotFound(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }
 
 export async function generateVoice(options: GenerateVoiceOptions): Promise<TtsArtifact> {

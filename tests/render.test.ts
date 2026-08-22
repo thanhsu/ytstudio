@@ -12,12 +12,12 @@ import { draftRenderOutputPath } from "../src/workflow.ts";
 
 function readyRenderInput(): RenderGateInput {
   return {
-    briefFormat: "shorts",
-    scriptApprovalCurrent: true,
-    assetsApprovalCurrent: true,
-    copyrightApprovalCurrent: true,
-    voiceReady: true,
-    captionsReady: true,
+    script: "approved",
+    assets: "approved",
+    copyright: "approved",
+    voice: "ready",
+    captions: "ready",
+    visualMapping: "not-required",
   };
 }
 
@@ -34,20 +34,43 @@ function sampleRenderInput(): RenderInput {
 }
 
 test("render is blocked by stale copyright approval", () => {
-  const result = evaluateRenderGate({ ...readyRenderInput(), copyrightApprovalCurrent: false });
+  const result = evaluateRenderGate({ ...readyRenderInput(), copyright: "stale" });
 
   assert.equal(result.allowed, false);
   assert.ok(result.reasons.includes("copyright-approval-stale"));
 });
 
-test("render reports missing approval gates", () => {
+test("render separates missing approvals from stale ones", () => {
   const result = evaluateRenderGate({
     ...readyRenderInput(),
-    scriptApprovalCurrent: false,
-    copyrightApprovalCurrent: false,
+    script: "stale",
+    copyright: "missing",
   });
 
-  assert.deepEqual(result.reasons, ["script-approval-stale", "copyright-approval-stale"]);
+  assert.deepEqual(result.reasons, ["script-approval-stale", "copyright-approval-missing"]);
+});
+
+test("render blames the upstream gate instead of artifacts it blocks", () => {
+  const result = evaluateRenderGate({
+    script: "missing",
+    assets: "not-required",
+    copyright: "missing",
+    voice: "blocked",
+    captions: "blocked",
+    visualMapping: "not-required",
+  });
+
+  assert.deepEqual(result.reasons, ["script-approval-missing", "copyright-approval-missing"]);
+});
+
+test("render requires an approved visual mapping once assets exist", () => {
+  const result = evaluateRenderGate({ ...readyRenderInput(), visualMapping: "missing" });
+
+  assert.deepEqual(result.reasons, ["visual-mapping-not-approved"]);
+});
+
+test("render allows a fully approved project", () => {
+  assert.equal(evaluateRenderGate(readyRenderInput()).allowed, true);
 });
 
 test("shorts render targets vertical H264 MP4", () => {
@@ -149,9 +172,3 @@ test("background video input index follows any mapped scene inputs", () => {
   assert.match(filter, /\[3:v\]trim=duration=8/);
 });
 
-test("long-form briefs are renderable", () => {
-  const result = evaluateRenderGate({ ...readyRenderInput(), briefFormat: "longform" });
-
-  assert.equal(result.allowed, true);
-  assert.deepEqual(result.reasons, []);
-});

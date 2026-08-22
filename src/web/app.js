@@ -1099,12 +1099,20 @@ function renderBrief(snapshot) {
 }
 
 function renderScript(snapshot) {
+  const scriptStatus = snapshot.pipeline?.script ?? "missing";
   stageContent.replaceChildren(
     paragraph("Generate or refresh the review script and metadata from the current brief."),
+    paragraph(
+      scriptStatus === "approved"
+        ? "This script is approved. Editing script.md makes the approval stale and blocks voice and render until you approve again."
+        : "Read the script before approving. Voice and render stay blocked until the current narration is approved.",
+    ),
     actionButton("Generate Script", () => postProjectAction("script", {}, "Script generated."), "button", "primary"),
+    actionButton("Approve Script", () => postProjectAction("script/approve", {}, "Script approved.")),
     summaryGrid({
       Topic: snapshot.brief.topic ?? "",
       Model: appState.config?.script?.model ?? "local-template",
+      Approval: scriptStatus,
       Output: "script.md, metadata.json, scene-plan.json",
     }),
   );
@@ -1278,8 +1286,38 @@ function renderCopyright(snapshot) {
   );
 }
 
+const RENDER_GATE_LABELS = {
+  "script-approval-missing": "Approve the script in the Script stage.",
+  "script-approval-stale": "The script changed after approval. Approve it again.",
+  "assets-approval-missing": "Approve the asset manifest in the Assets stage.",
+  "assets-approval-stale": "Assets changed after approval. Approve them again.",
+  "copyright-approval-missing": "Run and approve the copyright check.",
+  "copyright-approval-stale": "The copyright check changed after approval. Approve it again.",
+  "voice-missing": "Generate narration in the Voice stage.",
+  "voice-stale": "Narration is older than the approved script. Generate it again.",
+  "captions-missing": "Prepare captions in the Captions stage.",
+  "captions-stale": "Captions are older than the approved script. Prepare them again.",
+  "visual-mapping-not-approved": "Approve the visual mapping below.",
+};
+
+function renderGateNotice(snapshot) {
+  const gate = snapshot.renderGate;
+  if (!gate || gate.allowed) {
+    return null;
+  }
+  const notice = document.createElement("ul");
+  notice.className = "render-gate-notice";
+  for (const reason of gate.reasons) {
+    const item = document.createElement("li");
+    item.textContent = RENDER_GATE_LABELS[reason] ?? reason;
+    notice.append(item);
+  }
+  return notice;
+}
+
 function renderRender(snapshot) {
   const mapping = snapshot.visualMapping;
+  const gateNotice = renderGateNotice(snapshot);
   const toolbar = document.createElement("div");
   toolbar.className = "render-toolbar";
   const statusBadge = document.createElement("span");
@@ -1293,7 +1331,11 @@ function renderRender(snapshot) {
   );
 
   if (!mapping?.segments?.length) {
-    stageContent.replaceChildren(toolbar, paragraph("Generate a visual mapping to open the timeline editor."));
+    stageContent.replaceChildren(
+      toolbar,
+      ...(gateNotice ? [gateNotice] : []),
+      paragraph("Generate a visual mapping to open the timeline editor."),
+    );
     return;
   }
 
@@ -1303,7 +1345,12 @@ function renderRender(snapshot) {
   const editor = document.createElement("div");
   editor.className = "render-editor";
   editor.append(renderMonitor(selected, assets), renderInspector(selected, assets), renderTimeline(mapping, assets));
-  stageContent.replaceChildren(toolbar, editor, artifactList(snapshot.state?.artifacts ?? {}, ["voice", "captions", "render"]));
+  stageContent.replaceChildren(
+    toolbar,
+    ...(gateNotice ? [gateNotice] : []),
+    editor,
+    artifactList(snapshot.state?.artifacts ?? {}, ["voice", "captions", "render"]),
+  );
 }
 
 function renderMonitor(segment, assets) {
@@ -1564,8 +1611,19 @@ async function runAvailableTasks() {
     setStatus(`${runnable.length - failures.length}/${runnable.length} tasks completed. ${failures[0].reason.message}`);
     return;
   }
-  setStatus(`${runnable.length} available task(s) completed.`);
+  setStatus(`${runnable.length} available task(s) completed.${pendingApprovalNotice()}`);
 }
+
+function pendingApprovalNotice() {
+  const waiting = (appState.projectSnapshot?.workflow?.steps ?? [])
+    .filter((step) => APPROVAL_STEP_IDS.has(step.id) && step.status !== "done")
+    .map((step) => step.title);
+  return waiting.length > 0 ? ` Waiting on your approval: ${waiting.join(", ")}.` : "";
+}
+
+// Steps whose completion is a human approval. The batch runner may prepare their
+// inputs but must never sign them off, so they are always left to the operator.
+const APPROVAL_STEP_IDS = new Set(["script", "assets", "copyright", "source-risk"]);
 
 function taskActionForStep(step) {
   return {
@@ -1575,7 +1633,6 @@ function taskActionForStep(step) {
     translation: "subtitles/translation-prompt",
     voice: "voice",
     captions: "captions",
-    assets: "assets/approve",
     "source-risk": "copyright-check",
     copyright: "copyright-check",
     render: "render",
@@ -1595,7 +1652,6 @@ async function runStepTask(step) {
       thumbnailFromCopyrightFrame: false,
       clipsHaveCommentaryPurpose: true,
     });
-    await runProjectRoute("copyright/approve", {});
     return;
   }
   if (step.id === "voice") {

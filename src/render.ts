@@ -2,16 +2,18 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { runProcess } from "./process.ts";
 import { resolveProjectPath } from "./project-paths.ts";
-import { setArtifact, sha256 } from "./project-state.ts";
+import { setArtifact, sha256, type PipelineStageStatus } from "./project-state.ts";
 import type { ArtifactRecord, VideoFormat } from "./types.ts";
 
+export type RenderGateStageStatus = PipelineStageStatus | "not-required";
+
 export type RenderGateInput = {
-  briefFormat: VideoFormat;
-  scriptApprovalCurrent: boolean;
-  assetsApprovalCurrent: boolean;
-  copyrightApprovalCurrent: boolean;
-  voiceReady: boolean;
-  captionsReady: boolean;
+  script: RenderGateStageStatus;
+  assets: RenderGateStageStatus;
+  copyright: RenderGateStageStatus;
+  voice: RenderGateStageStatus;
+  captions: RenderGateStageStatus;
+  visualMapping: RenderGateStageStatus;
 };
 
 export type RenderGateResult = {
@@ -55,18 +57,29 @@ export type RenderArtifact = ArtifactRecord & {
 };
 
 export function evaluateRenderGate(input: RenderGateInput): RenderGateResult {
-  const reasons: string[] = [];
-
-  if (!input.scriptApprovalCurrent) reasons.push("script-approval-stale");
-  if (!input.assetsApprovalCurrent) reasons.push("assets-approval-stale");
-  if (!input.copyrightApprovalCurrent) reasons.push("copyright-approval-stale");
-  if (!input.voiceReady) reasons.push("voice-missing");
-  if (!input.captionsReady) reasons.push("captions-missing");
+  const reasons = [
+    ...gateReason(input.script, "script-approval"),
+    ...gateReason(input.assets, "assets-approval"),
+    ...gateReason(input.copyright, "copyright-approval"),
+    ...gateReason(input.voice, "voice"),
+    ...gateReason(input.captions, "captions"),
+    ...gateReason(input.visualMapping, "visual-mapping", "not-approved"),
+  ];
 
   return {
     allowed: reasons.length === 0,
     reasons,
   };
+}
+
+/**
+ * A blocked stage is always the consequence of an earlier unmet gate, so it stays
+ * silent: reporting it too would bury the reason the operator can actually act on.
+ */
+function gateReason(status: RenderGateStageStatus, name: string, missingSuffix = "missing"): string[] {
+  if (status === "missing") return [`${name}-${missingSuffix}`];
+  if (status === "stale") return [`${name}-stale`];
+  return [];
 }
 
 export function buildShortsRenderArgs(input: RenderInput): string[] {

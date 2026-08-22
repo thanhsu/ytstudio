@@ -11,7 +11,7 @@ import {
   validateAssetManifest,
   type AssetMediaType,
 } from "./assets.ts";
-import { analyzeAsset } from "./asset-analysis.ts";
+import { analyzeAsset, recoverInterruptedAnalysis } from "./asset-analysis.ts";
 import {
   checkStoryContinuity,
   createStoryBible,
@@ -62,8 +62,10 @@ import {
   approveCurrentScript,
   approveCurrentCopyrightCheck,
   approveEmptyAssetManifest,
+  evaluateProjectRenderGate,
   generateVoice,
   prepareCaptions,
+  projectPipelineStatus,
   renderDraftProject,
 } from "./workflow.ts";
 import { deriveWorkflowStepStates, getWorkflowTemplate, WORKFLOW_TEMPLATES } from "./workflow-templates.ts";
@@ -624,7 +626,16 @@ async function routeRequest(
       });
       return;
     }
-    await approveCurrentScript(projectId);
+    const scriptStatus = (await projectPipelineStatus(projectId)).script;
+    if (scriptStatus !== "approved") {
+      sendError(response, 409, {
+        code: "script-approval-required",
+        message: "Approve the current script before generating narration.",
+        action: "approve-script",
+        details: { reasons: [`script-approval-${scriptStatus === "stale" ? "stale" : "missing"}`] },
+      });
+      return;
+    }
     const artifact = await generateVoice({
       projectId,
       provider: voiceProvider(body.provider),
@@ -641,6 +652,12 @@ async function routeRequest(
     return;
   }
 
+  if (method === "POST" && rest === "script/approve") {
+    await approveCurrentScript(projectId);
+    sendJson(response, 200, { ok: true, state: await loadProjectState(projectId) });
+    return;
+  }
+
   if (method === "POST" && rest === "captions") {
     const artifact = await prepareCaptions(projectId);
     sendJson(response, 200, { ok: true, artifact });
@@ -648,26 +665,15 @@ async function routeRequest(
   }
 
   if (method === "POST" && rest === "render") {
-    const state = await loadProjectState(projectId);
-    const manifest = await loadAssetManifest(projectId);
-    const mapping = await loadVisualMapping(projectId);
-    const reasons: string[] = [];
-    if (!state.approvals.script) reasons.push("script-approval-missing");
-    if (!state.approvals.copyright) reasons.push("copyright-approval-missing");
-    if (state.approvals.script && !state.artifacts.voice) reasons.push("voice-missing");
-    if (state.approvals.script && !state.artifacts.captions) reasons.push("captions-missing");
-    if (manifest.assets.length > 0 && mapping?.status !== "approved") reasons.push("visual-mapping-not-approved");
-
-    if (reasons.length > 0) {
+    const gate = await evaluateProjectRenderGate(projectId);
+    if (!gate.allowed) {
       sendError(response, 409, {
         code: "render-gates-unmet",
         message: "Render cannot start until required approvals and artifacts are ready.",
-        details: { reasons },
+        details: { reasons: gate.reasons },
       });
       return;
     }
-    await approveEmptyAssetManifest(projectId);
-    await approveCurrentCopyrightCheck(projectId);
     const artifact = await renderDraftProject(projectId);
     sendJson(response, 200, { ok: true, artifact });
     return;
@@ -914,7 +920,7 @@ async function sendProject(response: ServerResponse, projectId: string): Promise
   const briefPath = resolveProjectPath(projectId, "brief.json");
   const brief = JSON.parse(await readFile(briefPath, "utf8")) as unknown;
   const state = await loadProjectState(projectId);
-  const assetManifest = await loadAssetManifest(projectId);
+  const assetManifest = await recoverInterruptedAnalysis(projectId);
   const visualMapping = await loadVisualMapping(projectId);
   const workflowType = typeof brief === "object" && brief !== null && "workflowType" in brief ? brief.workflowType : undefined;
   const template = getWorkflowTemplate(workflowType);
@@ -923,6 +929,8 @@ async function sendProject(response: ServerResponse, projectId: string): Promise
     state,
     assetManifest,
     visualMapping,
+    pipeline: await projectPipelineStatus(projectId),
+    renderGate: await evaluateProjectRenderGate(projectId),
     workflow: {
       ...template,
       steps: deriveWorkflowStepStates(template.type, state),

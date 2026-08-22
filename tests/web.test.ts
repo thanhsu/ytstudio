@@ -106,3 +106,20 @@ test("server serves the studio shell without exposing project files", async () =
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("the studio offers an explicit script approval and never auto-approves gates", async () => {
+  const script = await readFile("src/web/app.js", "utf8");
+
+  assert.match(script, /Approve Script/);
+  assert.match(script, /script\/approve/);
+  // The batch runner generates artifacts; approvals stay with the operator.
+  assert.doesNotMatch(script, /assets: "assets\/approve"/);
+  assert.match(script, /APPROVAL_STEP_IDS/);
+});
+
+test("the render stage explains which gates still block a draft", async () => {
+  const script = await readFile("src/web/app.js", "utf8");
+
+  assert.match(script, /renderGate/);
+  assert.match(script, /RENDER_GATE_LABELS/);
+});

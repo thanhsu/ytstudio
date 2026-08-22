@@ -486,3 +486,84 @@ test("project listing follows the configured projects root", async () => {
     await rm(library, { recursive: true, force: true });
   }
 });
+
+async function postJson(running: { url: string }, route: string, body: unknown = {}) {
+  return fetch(`${running.url}/api/projects/sample-project/${route}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin: running.url },
+    body: JSON.stringify(body),
+  });
+}
+
+function copyrightCheckBody(commentaryPercent: number) {
+  return {
+    commentaryPercent,
+    footagePercent: 10,
+    longestClipSeconds: 4,
+    usesFullScene: false,
+    thumbnailFromCopyrightFrame: false,
+    clipsHaveCommentaryPurpose: true,
+  };
+}
+
+test("script approval is an explicit action rather than a side effect of voice", async () => {
+  await withTempCwd(async () => {
+    const running = await startStudioServer(createStudioServer(), { port: 0 });
+    try {
+      assert.equal((await postJson(running, "script")).status, 200);
+
+      const voice = await postJson(running, "voice", { provider: "piper" });
+      assert.equal(voice.status, 409);
+      assert.deepEqual((await voice.json()).details.reasons, ["script-approval-missing"]);
+
+      const beforeApproval = await (await fetch(`${running.url}/api/projects/sample-project`)).json();
+      assert.equal(beforeApproval.state.approvals.script, undefined);
+
+      assert.equal((await postJson(running, "script/approve")).status, 200);
+      const afterApproval = await (await fetch(`${running.url}/api/projects/sample-project`)).json();
+      assert.ok(afterApproval.state.approvals.script.sourceHash);
+    } finally {
+      await running.close();
+    }
+  });
+});
+
+test("render refuses a stale copyright approval without re-approving it", async () => {
+  await withTempCwd(async () => {
+    const running = await startStudioServer(createStudioServer(), { port: 0 });
+    try {
+      await postJson(running, "script");
+      await postJson(running, "script/approve");
+      await postJson(running, "copyright-check", copyrightCheckBody(75));
+      await postJson(running, "copyright/approve");
+
+      const approved = await (await fetch(`${running.url}/api/projects/sample-project`)).json();
+      const approvedHash = approved.state.approvals.copyright.sourceHash;
+
+      await postJson(running, "copyright-check", copyrightCheckBody(55));
+
+      const render = await postJson(running, "render");
+      assert.equal(render.status, 409);
+      assert.ok((await render.json()).details.reasons.includes("copyright-approval-stale"));
+
+      const after = await (await fetch(`${running.url}/api/projects/sample-project`)).json();
+      assert.equal(after.state.approvals.copyright.sourceHash, approvedHash);
+    } finally {
+      await running.close();
+    }
+  });
+});
+
+test("project snapshot reports what the render gate is waiting on", async () => {
+  await withTempCwd(async () => {
+    const running = await startStudioServer(createStudioServer(), { port: 0 });
+    try {
+      const snapshot = await (await fetch(`${running.url}/api/projects/sample-project`)).json();
+
+      assert.equal(snapshot.renderGate.allowed, false);
+      assert.ok(snapshot.renderGate.reasons.includes("script-approval-missing"));
+    } finally {
+      await running.close();
+    }
+  });
+});
