@@ -151,3 +151,30 @@ test("a lenient enum elsewhere is unchanged by the strict script provider", asyn
     assert.equal((await loadStudioConfig()).translation.provider, "prompt-only");
   });
 });
+
+test("the sources block defaults, and rejects entries that are not usable strings", async () => {
+  const previousCwd = process.cwd();
+  const root = await mkdtemp(join(tmpdir(), "yt-config-sources-"));
+  try {
+    process.chdir(root);
+
+    const defaults = await loadStudioConfig();
+    assert.equal(defaults.sources.ytDlpPath, "");
+    assert.deepEqual(defaults.sources.ytDlpArgs, []);
+    assert.equal(defaults.sources.format, "bv*+ba/b");
+    assert.deepEqual(defaults.sources.subtitleLanguages, ["en"]);
+
+    await writeFile(
+      "studio.config.json",
+      JSON.stringify({ sources: { ytDlpPath: "tools/yt-dlp.exe", subtitleLanguages: ["vi", "", 7], ytDlpArgs: "nope" } }),
+      "utf8",
+    );
+    const loaded = await loadStudioConfig();
+    assert.equal(loaded.sources.ytDlpPath, "tools/yt-dlp.exe");
+    assert.deepEqual(loaded.sources.subtitleLanguages, ["vi"]);
+    assert.deepEqual(loaded.sources.ytDlpArgs, []);
+  } finally {
+    process.chdir(previousCwd);
+    await rm(root, { recursive: true, force: true });
+  }
+});

@@ -69,6 +69,15 @@ export type StudioConfig = {
     longformWidth: number;
     longformHeight: number;
   };
+  sources: {
+    ytDlpPath: string;
+    // Prepended to every invocation. Configuration is operator-owned, which is why
+    // this lives here and never in a request body: a path plus arguments taken over
+    // HTTP would turn a same-origin POST into arbitrary command execution.
+    ytDlpArgs: string[];
+    format: string;
+    subtitleLanguages: string[];
+  };
 };
 
 const CONFIG_PATH = "studio.config.json";
@@ -121,6 +130,12 @@ export const DEFAULT_STUDIO_CONFIG: StudioConfig = {
     shortsHeight: 1920,
     longformWidth: 1920,
     longformHeight: 1080,
+  },
+  sources: {
+    ytDlpPath: "",
+    ytDlpArgs: [],
+    format: "bv*+ba/b",
+    subtitleLanguages: ["en"],
   },
 };
 
@@ -204,12 +219,33 @@ export function normalizeStudioConfig(value: unknown): StudioConfig {
       longformWidth: numberValue(candidate.render?.longformWidth, 1920),
       longformHeight: numberValue(candidate.render?.longformHeight, 1080),
     },
+    sources: {
+      ytDlpPath: stringValue(candidate.sources?.ytDlpPath, ""),
+      ytDlpArgs: stringArrayValue(candidate.sources?.ytDlpArgs, DEFAULT_STUDIO_CONFIG.sources.ytDlpArgs),
+      format: stringValue(candidate.sources?.format, DEFAULT_STUDIO_CONFIG.sources.format),
+      subtitleLanguages: stringArrayValue(
+        candidate.sources?.subtitleLanguages,
+        DEFAULT_STUDIO_CONFIG.sources.subtitleLanguages,
+      ),
+    },
   };
+}
+
+function stringArrayValue(value: unknown, fallback: string[]): string[] {
+  if (!Array.isArray(value)) return [...fallback];
+  const entries = value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0);
+  return entries.length ? entries : [...fallback];
 }
 
 function deepMerge(base: unknown, override: unknown): unknown {
   if (!base || typeof base !== "object" || !override || typeof override !== "object") {
     return override ?? base;
+  }
+  // A configured list replaces the default outright. Merging element by element
+  // would splice a two-entry default into a one-entry setting and leave the
+  // operator with a value nobody wrote.
+  if (Array.isArray(base) || Array.isArray(override)) {
+    return override;
   }
   const merged: Record<string, unknown> = { ...(base as Record<string, unknown>) };
   for (const [key, value] of Object.entries(override)) {
