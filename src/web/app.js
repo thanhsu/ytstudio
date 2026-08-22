@@ -2521,15 +2521,15 @@ async function renderSources() {
     await searchSources(boolFormValues(searchForm));
   });
   searchForm.replaceChildren(
-    field("Keyword", "query", "", "text", "牧神记 episode 1"),
-    selectField("Platform", "platform", appState.config?.sources?.defaultSearchPlatform ?? "youtube", [
+    field("Keyword", "query", appState.sourceSearchFilters.query ?? "", "text", "牧神记 episode 1"),
+    selectField("Platform", "platform", appState.sourceSearchFilters.platform ?? appState.config?.sources?.defaultSearchPlatform ?? "youtube", [
       ["youtube", "YouTube"],
       ["bilibili", "Bilibili"],
     ]),
-    field("Limit", "limit", String(appState.config?.sources?.searchLimit ?? 8), "number"),
+    field("Limit", "limit", String(appState.sourceSearchFilters.limit ?? appState.config?.sources?.searchLimit ?? 8), "number"),
     field("Include keywords", "includeKeywords", appState.sourceSearchFilters.includeKeywords ?? "", "text", "episode, recap"),
     field("Exclude keywords", "excludeKeywords", appState.sourceSearchFilters.excludeKeywords ?? "", "text", "official, trailer"),
-    field("Max views", "maxViews", String(appState.sourceSearchFilters.maxViews ?? ""), "number"),
+    field("Max views", "maxViews", String(appState.sourceSearchFilters.maxViews || ""), "number"),
     checkboxField("Hide likely official", "hideLikelyOfficial", appState.sourceSearchFilters.hideLikelyOfficial === true),
     actionButton("Search Sources", null, "submit", "primary"),
   );
@@ -2608,9 +2608,12 @@ function renderSourceSearchResults(results) {
 async function searchSources(values) {
   try {
     appState.sourceSearchFilters = {
+      query: values.query,
+      platform: values.platform,
+      limit: values.limit,
       includeKeywords: values.includeKeywords,
       excludeKeywords: values.excludeKeywords,
-      maxViews: values.maxViews,
+      maxViews: Number(values.maxViews) > 0 ? values.maxViews : "",
       hideLikelyOfficial: values.hideLikelyOfficial === true,
     };
     const data = await postJson("/api/sources/search", {

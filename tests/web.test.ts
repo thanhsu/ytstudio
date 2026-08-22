@@ -271,6 +271,10 @@ test("the sources screen can filter and triage keyword search results", async ()
   assert.match(script, /Exclude keywords/);
   assert.match(script, /Max views/);
   assert.match(script, /Hide likely official/);
+  assert.match(script, /sourceSearchFilters\.query/);
+  assert.match(script, /sourceSearchFilters\.platform/);
+  assert.match(script, /sourceSearchFilters\.limit/);
+  assert.match(script, /maxViews: Number\(values\.maxViews\) > 0 \? values\.maxViews : ""/);
   assert.match(script, /filterSourceSearchResults/);
   assert.match(script, /triageSourceSearchResult/);
   assert.match(script, /review-friendly/);
