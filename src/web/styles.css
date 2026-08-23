@@ -1321,3 +1321,92 @@ video {
 .source-status-failed {
   border-color: #a12c2c;
 }
+
+/* ===== AI Story Factory ===== */
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.story-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  font-size: 0.86rem;
+}
+
+.story-table th,
+.story-table td {
+  padding: 0.45rem 0.6rem;
+  border-bottom: 1px solid var(--border-subtle);
+  text-align: left;
+  vertical-align: top;
+}
+
+.story-table th {
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.story-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin: 0.6rem 0;
+}
+
+.story-tabs button.selected {
+  background: var(--status-progress-bg);
+  color: var(--status-progress-fg);
+  border-color: var(--status-progress-fg);
+}
+
+.artifact-editor {
+  width: 100%;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 0.82rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 0.6rem;
+  background: var(--surface);
+}
+
+.artifact-pre {
+  max-height: 28rem;
+  overflow: auto;
+  background: var(--surface-muted);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 0.75rem;
+  white-space: pre-wrap;
+  font-size: 0.82rem;
+}
+
+.story-image-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+
+.story-image-grid figure {
+  margin: 0;
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 0.5rem;
+}
+
+.story-image-grid img,
+.story-thumbnail-preview {
+  max-width: 100%;
+  border-radius: var(--radius-md);
+}
+
+.story-image-grid figcaption {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  margin-top: 0.35rem;
+}

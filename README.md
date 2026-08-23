@@ -315,6 +315,56 @@ Scores are ordinal hints, not calibrated measures: they are not comparable acros
 models, prompt revisions, or runs. With no model configured, a clearly labelled
 dry-run scorer answers instead of a template masquerading as judgement.
 
+## AI Audio Story Factory
+
+The Story Factory produces original AI-generated audio-story videos end to end:
+idea → hook → outline → story bible → section-by-section writing → continuity
+QA → language naturalizer → originality/safety QA → chunked Google TTS →
+scene images → render → metadata → thumbnail → final QA → an upload-ready
+export package. Publishing stays manual: the pipeline ends at READY_TO_PUBLISH
+and you upload the packaged files through YouTube Studio.
+
+Design record: `docs/ai-audio-story-factory-design.md`.
+
+### Enable and configure
+
+1. Open Config and turn on **Story Factory**. Set the three model roles
+   (planner/writer/qa) — any OpenAI-compatible endpoint works (OpenAI,
+   OpenRouter, Groq, DeepSeek, local). Cheap stages run on the planner model;
+   the writer and QA roles deserve a stronger one. Optional `llmPricing`
+   entries (USD per million tokens by model substring) feed the cost ledger.
+2. Set the API key environment variables in the shell that starts the studio
+   (config stores only the variable NAMES, never keys):
+   - `GOOGLE_TTS_API_KEY` — Google Cloud TTS (enable the Text-to-Speech API in
+     a Google Cloud project and create an API key restricted to it).
+   - `GEMINI_API_KEY` — Gemini image generation; set `images.provider` to
+     `gemini`.
+   - Whatever variables your LLM endpoints name in `apiKeyEnv`.
+3. Create (or reuse) a series — a story channel is a series plus a
+   `story-channel.json` sidecar. Open **Story Factory → Channel Settings** to
+   set language/locale, niche, style prompts, budget, pronunciations, and an
+   optional licensed ambience track.
+4. Open the **Voice Lab**, list voices for your locale (tier badges follow
+   `tts.google.tierVoicePrefixes`), generate samples with the shared sample
+   text, and set the winner as the channel narrator.
+
+### Produce a story
+
+Story Factory → Create Story (id, title, sub-niche, target minutes, mode) →
+open it → tick the paid confirmation → **Generate Full Story**. The pipeline
+runs as one resumable background job; progress streams over the channel's
+event stream. In `assisted` mode (default) it generates everything and stops
+before export; in `manual` mode it pauses at the script and media gates for
+your approval. Every stage supports run/retry/regenerate individually — a
+failed TTS chunk or scene image retries alone, and finished audio/images are
+cached so nothing is paid for twice. Costs, token usage, and every AI call are
+inspectable in the story's Cost and AI Logs tabs; `budget.maxCostPerStoryUsd`
+pauses the pipeline instead of overspending.
+
+Exporting requires the three hash-bound approvals (script, media, final) and
+writes `stories/<id>/workspace/export/`: `story.mp4`, `thumbnail.png`,
+`captions.srt`, plus copy-paste `title.txt`, `description.txt`, `tags.txt`.
+
 ## Safety Gates
 
 Every approval is recorded against a hash of the content it was given for. Edit

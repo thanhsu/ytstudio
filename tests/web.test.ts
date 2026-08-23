@@ -18,6 +18,36 @@ test("web shell exposes the complete approval pipeline", async () => {
   assert.match(html, /aria-live="polite"/);
 });
 
+test("web shell and app expose the AI story factory screens", async () => {
+  const html = await readFile("src/web/index.html", "utf8");
+  assert.match(html, /id="open-story-factory"/);
+
+  const script = await readFile("src/web/app.js", "utf8");
+  for (const marker of [
+    "renderStoryFactory",
+    "renderStoryDetail",
+    "renderStoryChannelSettings",
+    "renderVoiceLab",
+    "story-channel",
+    "pipeline\\/run",
+    "voice-lab\\/sample",
+    "Generate Full Story",
+    "Set as channel default",
+    "I confirm paid API spend",
+    "story-pipeline",
+    "#story-factory",
+    "storyFactory.enabled",
+    "tts.google.apiKeyEnv",
+    "images.provider",
+  ]) {
+    assert.match(script, new RegExp(marker));
+  }
+
+  const styles = await readFile("src/web/styles.css", "utf8");
+  assert.match(styles, /\.story-table/);
+  assert.match(styles, /\.story-tabs/);
+});
+
 test("web app exposes UI controls for media, ASR, captions, and render actions", async () => {
   const script = await readFile("src/web/app.js", "utf8");
 
