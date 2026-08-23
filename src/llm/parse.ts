@@ -56,7 +56,7 @@ function requireNarratableScript(value: unknown): string {
   return script;
 }
 
-function parseJsonObject(raw: string): Record<string, unknown> {
+export function parseJsonObject(raw: string): Record<string, unknown> {
   let value: unknown;
   try {
     value = JSON.parse(stripCodeFence(raw).trim());
@@ -70,38 +70,38 @@ function parseJsonObject(raw: string): Record<string, unknown> {
 }
 
 // Local models frequently wrap JSON in a markdown fence even when asked not to.
-function stripCodeFence(raw: string): string {
+export function stripCodeFence(raw: string): string {
   const fenced = /^\s*```(?:json)?\s*\n([\s\S]*?)\n\s*```\s*$/.exec(raw);
   return fenced ? fenced[1] : raw;
 }
 
-function requireObject(value: unknown, field: string): Record<string, unknown> {
+export function requireObject(value: unknown, field: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`Model response field ${field} must be an object.`);
   }
   return value as Record<string, unknown>;
 }
 
-function requireArray(value: unknown, field: string): unknown[] {
+export function requireArray(value: unknown, field: string): unknown[] {
   if (!Array.isArray(value) || value.length === 0) {
     throw new Error(`Model response field ${field} must be a non-empty array.`);
   }
   return value;
 }
 
-function requireText(value: unknown, field: string): string {
+export function requireText(value: unknown, field: string): string {
   if (typeof value !== "string" || !value.trim()) {
     throw new Error(`Model response field ${field} must be a non-empty string.`);
   }
   return value;
 }
 
-function requireStringArray(value: unknown, field: string): string[] {
+export function requireStringArray(value: unknown, field: string): string[] {
   const items = requireArray(value, field);
   return items.map((item, index) => requireText(item, `${field}[${index}]`));
 }
 
-function requirePositiveNumber(value: unknown, field: string): number {
+export function requirePositiveNumber(value: unknown, field: string): number {
   const number = Number(value);
   if (!Number.isFinite(number) || number <= 0) {
     throw new Error(`Model response field ${field} must be a positive number.`);

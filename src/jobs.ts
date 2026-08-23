@@ -3,7 +3,18 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { projectsRoot as defaultProjectsRoot } from "./fs.ts";
 
-export type JobKind = "voice" | "captions" | "render" | "asset" | "asr" | "script" | "download" | "score";
+export type JobKind =
+  | "voice"
+  | "captions"
+  | "render"
+  | "asset"
+  | "asr"
+  | "script"
+  | "download"
+  | "score"
+  | "story-pipeline"
+  | "story-stage"
+  | "story-export";
 export type JobStatus = "running" | "succeeded" | "failed" | "cancelled";
 
 export type JobRecord = {

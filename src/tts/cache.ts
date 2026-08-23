@@ -14,6 +14,12 @@ export function ttsCacheKey(request: TtsRequest): string {
       speed: request.speed,
       instructions: request.instructions,
       confirmedPaidRequest: request.confirmedPaidRequest,
+      // Undefined values vanish from JSON.stringify, so requests that never set
+      // these fields hash to the same key they did before the fields existed —
+      // existing cached audio stays reachable.
+      languageCode: request.languageCode,
+      pitch: request.pitch,
+      model: request.model,
     }),
   );
 }

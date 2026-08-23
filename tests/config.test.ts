@@ -152,6 +152,61 @@ test("a lenient enum elsewhere is unchanged by the strict script provider", asyn
   });
 });
 
+test("the story factory, google tts, and images blocks default and normalize", async () => {
+  await withTempCwd(async () => {
+    const defaults = await loadStudioConfig();
+    assert.equal(defaults.storyFactory.enabled, false);
+    assert.equal(defaults.storyFactory.models.planner.baseUrl, "http://127.0.0.1:11434/v1");
+    assert.equal(defaults.storyFactory.models.writer.paid, false);
+    assert.deepEqual(defaults.storyFactory.llmPricing, []);
+    assert.equal(defaults.storyFactory.duplicateSimilarityThreshold, 0.6);
+    assert.equal(defaults.storyFactory.defaultMaxCostPerStoryUsd, 5);
+    assert.equal(defaults.tts.google.apiKeyEnv, "GOOGLE_TTS_API_KEY");
+    assert.equal(defaults.tts.google.audioEncoding, "MP3");
+    assert.equal(defaults.tts.google.chunkMaxChars, 4500);
+    assert.equal(defaults.tts.google.pricing.economy, 4);
+    assert.deepEqual(defaults.tts.google.tierVoicePrefixes.standard, ["Neural2", "Wavenet"]);
+    assert.equal(defaults.images.provider, "disabled");
+    assert.equal(defaults.images.gemini.apiKeyEnv, "GEMINI_API_KEY");
+
+    await writeFile(
+      "studio.config.json",
+      JSON.stringify({
+        storyFactory: {
+          enabled: true,
+          models: { writer: { model: "gpt-5-mini", apiKeyEnv: "OPENAI_API_KEY", paid: true } },
+          llmPricing: [
+            { modelPattern: "gpt-5-mini", inputUsdPerMTok: 0.25, outputUsdPerMTok: 2 },
+            { modelPattern: "", inputUsdPerMTok: 1, outputUsdPerMTok: 1 },
+            { modelPattern: "bad", inputUsdPerMTok: -1, outputUsdPerMTok: 1 },
+          ],
+          duplicateSimilarityThreshold: 3,
+        },
+        tts: { defaultProvider: "google", google: { chunkMaxChars: 9000, audioEncoding: "OGG" } },
+        images: { provider: "gemini", gemini: { model: "custom-image-model" } },
+      }),
+      "utf8",
+    );
+
+    const loaded = await loadStudioConfig();
+    assert.equal(loaded.storyFactory.enabled, true);
+    assert.equal(loaded.storyFactory.models.writer.model, "gpt-5-mini");
+    assert.equal(loaded.storyFactory.models.writer.paid, true);
+    // Malformed pricing rows are dropped; the valid one survives.
+    assert.deepEqual(loaded.storyFactory.llmPricing, [
+      { modelPattern: "gpt-5-mini", inputUsdPerMTok: 0.25, outputUsdPerMTok: 2 },
+    ]);
+    // Out-of-range values fall back rather than surviving.
+    assert.equal(loaded.storyFactory.duplicateSimilarityThreshold, 0.6);
+    assert.equal(loaded.tts.defaultProvider, "google");
+    // Google's synthesize limit is 5000 bytes; a request past it is clamped back to the default.
+    assert.equal(loaded.tts.google.chunkMaxChars, 4500);
+    assert.equal(loaded.tts.google.audioEncoding, "MP3");
+    assert.equal(loaded.images.provider, "gemini");
+    assert.equal(loaded.images.gemini.model, "custom-image-model");
+  });
+});
+
 test("the sources block defaults, and rejects entries that are not usable strings", async () => {
   const previousCwd = process.cwd();
   const root = await mkdtemp(join(tmpdir(), "yt-config-sources-"));

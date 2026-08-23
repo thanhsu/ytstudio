@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { chatJson, type ChatMessage, type OpenAiCompatibleConfig } from "../src/llm/chat.ts";
+import { chatJson, chatJsonWithUsage, type ChatMessage, type OpenAiCompatibleConfig } from "../src/llm/chat.ts";
 
 const MESSAGES: ChatMessage[] = [{ role: "user", content: "hi" }];
 
@@ -111,6 +111,45 @@ test("the request carries the caller's messages and the returned string is the c
   assert.equal(raw, '{"ok":true}');
   assert.deepEqual(sent.messages, MESSAGES);
   assert.equal(sent.model, "qwen2.5");
+});
+
+test("token usage is surfaced when the endpoint reports it", async () => {
+  const config = localConfig({
+    fetch: async () =>
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: '{"ok":true}' } }],
+          usage: { prompt_tokens: 120, completion_tokens: 30, total_tokens: 150 },
+        }),
+      ),
+  });
+
+  const result = await chatJsonWithUsage(config, MESSAGES, { confirmedPaidRequest: false });
+
+  assert.equal(result.content, '{"ok":true}');
+  assert.deepEqual(result.usage, { promptTokens: 120, completionTokens: 30, totalTokens: 150 });
+});
+
+test("a missing usage block reports null usage rather than a guessed count", async () => {
+  const result = await chatJsonWithUsage(localConfig(), MESSAGES, { confirmedPaidRequest: false });
+
+  assert.equal(result.content, '{"ok":true}');
+  assert.equal(result.usage, null);
+});
+
+test("a usage block without a total still totals the two measured counts", async () => {
+  const config = localConfig({
+    fetch: async () =>
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: "{}" } }],
+          usage: { prompt_tokens: 7, completion_tokens: 5 },
+        }),
+      ),
+  });
+
+  const result = await chatJsonWithUsage(config, MESSAGES, { confirmedPaidRequest: false });
+  assert.deepEqual(result.usage, { promptTokens: 7, completionTokens: 5, totalTokens: 12 });
 });
 
 test("a trailing slash on the base url does not double the path separator", async () => {

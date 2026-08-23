@@ -13,6 +13,17 @@ test("TTS cache keys change with paid request settings", () => {
   assert.notEqual(ttsCacheKey(base), ttsCacheKey({ ...base, text: `${base.text}!` }));
 });
 
+test("requests without the newer optional fields keep their original cache keys", () => {
+  const base = sampleTtsRequest();
+
+  // Cached audio written before languageCode/pitch/model existed must stay
+  // reachable: an absent optional field hashes identically to the old shape.
+  assert.equal(ttsCacheKey(base), ttsCacheKey({ ...base, languageCode: undefined, pitch: undefined, model: undefined }));
+  assert.notEqual(ttsCacheKey(base), ttsCacheKey({ ...base, languageCode: "es-US" }));
+  assert.notEqual(ttsCacheKey(base), ttsCacheKey({ ...base, pitch: -2 }));
+  assert.notEqual(ttsCacheKey(base), ttsCacheKey({ ...base, model: "Neural2" }));
+});
+
 test("TTS cache returns only records with existing audio files", async () => {
   const previousCwd = process.cwd();
   const root = await mkdtemp(join(tmpdir(), "yt-review-studio-"));

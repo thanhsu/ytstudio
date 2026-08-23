@@ -27,6 +27,27 @@ export type ChatOptions = {
 
 type ChatCompletionResponse = {
   choices?: Array<{ message?: { content?: unknown } }>;
+  usage?: {
+    prompt_tokens?: unknown;
+    completion_tokens?: unknown;
+    total_tokens?: unknown;
+  };
+};
+
+export type ChatUsage = {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+};
+
+export type ChatResult = {
+  content: string;
+  /**
+   * Null when the endpoint reported no usage block (several local servers omit
+   * it). Never estimated here: a guessed token count would flow into a cost
+   * ledger as if it were measured.
+   */
+  usage: ChatUsage | null;
 };
 
 /**
@@ -40,6 +61,19 @@ export async function chatJson(
   messages: ChatMessage[],
   options: ChatOptions,
 ): Promise<string> {
+  return (await chatJsonWithUsage(config, messages, options)).content;
+}
+
+/**
+ * Same transport, but also surfaces the endpoint's token usage so callers that
+ * keep a cost ledger can record measured counts. chatJson stays for callers that
+ * only want the message content.
+ */
+export async function chatJsonWithUsage(
+  config: OpenAiCompatibleConfig,
+  messages: ChatMessage[],
+  options: ChatOptions,
+): Promise<ChatResult> {
   if (config.paid && !options.confirmedPaidRequest) {
     throw new Error("This model is marked paid and requires an explicit confirmed paid request.");
   }
@@ -101,7 +135,24 @@ export async function chatJson(
     );
   }
 
-  return content;
+  return { content, usage: normalizeUsage(payload.usage) };
+}
+
+function normalizeUsage(usage: ChatCompletionResponse["usage"]): ChatUsage | null {
+  if (!usage || typeof usage !== "object") {
+    return null;
+  }
+  const promptTokens = Number(usage.prompt_tokens);
+  const completionTokens = Number(usage.completion_tokens);
+  if (!Number.isFinite(promptTokens) || !Number.isFinite(completionTokens)) {
+    return null;
+  }
+  const total = Number(usage.total_tokens);
+  return {
+    promptTokens,
+    completionTokens,
+    totalTokens: Number.isFinite(total) ? total : promptTokens + completionTokens,
+  };
 }
 
 // Thrown messages are persisted to the job file, pushed through SSE, and dropped
