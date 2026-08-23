@@ -20,8 +20,9 @@ export const STORY_STAGES = [
   "images",
   "bgm",
   "render",
-  "thumbnail",
+  // Metadata precedes the thumbnail: the overlay text comes from metadata.
   "metadata",
+  "thumbnail",
   "final-qa",
   "export",
 ] as const;
@@ -370,6 +371,10 @@ export type StoryMetadataArtifact = {
   chosenTitle: string;
   description: string;
   tags: string[];
+  /** 2-5 words drawn onto the thumbnail by the app, never by the image model. */
+  thumbnailText: string;
+  /** A one-line visual concept for the thumbnail background. */
+  thumbnailConcept: string;
   language: string;
   provenance: Provenance;
 };

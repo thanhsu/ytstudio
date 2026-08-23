@@ -101,6 +101,17 @@ export function requireStringArray(value: unknown, field: string): string[] {
   return items.map((item, index) => requireText(item, `${field}[${index}]`));
 }
 
+/** An absent field reads as an empty list; a present one must be an array of non-empty strings. */
+export function optionalStringArray(value: unknown, field: string): string[] {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new Error(`Model response field ${field} must be an array when present.`);
+  }
+  return value.map((item, index) => requireText(item, `${field}[${index}]`));
+}
+
 export function requirePositiveNumber(value: unknown, field: string): number {
   const number = Number(value);
   if (!Number.isFinite(number) || number <= 0) {

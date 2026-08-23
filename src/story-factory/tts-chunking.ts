@@ -130,6 +130,8 @@ export async function synthesizeChunks(
     signal?: AbortSignal;
     update?: (completed: number, total: number) => Promise<void>;
     onlyIndex?: number;
+    /** Called only for chunks actually synthesized (cache misses) — the ones that cost money. */
+    onGenerated?: (chunk: TtsChunk) => Promise<void>;
   },
 ): Promise<TtsChunkManifest> {
   const format = manifest.audioEncoding === "LINEAR16" ? "wav" : "mp3";
@@ -159,6 +161,7 @@ export async function synthesizeChunks(
       chunk.durationSeconds = artifact.durationSeconds;
       chunk.relativePath = artifact.relativePath;
       chunk.lastError = undefined;
+      await options.onGenerated?.(chunk);
     } catch (error: unknown) {
       chunk.status = "failed";
       chunk.attemptCount += 1;
