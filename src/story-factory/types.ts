@@ -116,6 +116,7 @@ export type StoryProject = {
 
 export type StoryStatus =
   | "DRAFT"
+  | "IN_PROGRESS"
   | "GENERATING"
   | "AWAITING_APPROVAL"
   | "FAILED"

@@ -1,3 +1,4 @@
+import { sep } from "node:path";
 import { validateProjectId, resolveProjectPath } from "../project-paths.ts";
 
 /**
@@ -18,7 +19,19 @@ export function validateStoryId(storyId: string): string {
 
 /** Absolute path inside one story's directory. */
 export function storyPath(channelId: string, storyId: string, ...segments: string[]): string {
-  return resolveProjectPath(validateProjectId(channelId), "stories", validateStoryId(storyId), ...segments);
+  const storyRoot = resolveProjectPath(validateProjectId(channelId), "stories", validateStoryId(storyId));
+  const resolved = resolveProjectPath(validateProjectId(channelId), "stories", validateStoryId(storyId), ...segments);
+  // resolveProjectPath only guards the channel root; story segments must not
+  // climb out of the story dir either (they could reach series.json).
+  if (resolved !== storyRoot && !resolved.startsWith(`${storyRoot}${sep}`)) {
+    throw new Error("Resolved path is outside the story directory.");
+  }
+  return resolved;
+}
+
+/** The channel's stories directory (the parent of every story dir). */
+export function storiesRootPath(channelId: string): string {
+  return resolveProjectPath(validateProjectId(channelId), "stories");
 }
 
 /** Absolute path inside the channel-level story-factory folder (costs, fingerprint index). */
