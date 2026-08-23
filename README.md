@@ -278,9 +278,16 @@ download still succeeds and whatever subtitle format arrived is kept as-is.
 Search is currently explicit for YouTube and Bilibili, with prefixes configurable
 from the Config screen because extractor syntax can change as yt-dlp evolves.
 The Sources screen can locally filter search results by include/exclude words,
-maximum view count, and "hide likely official" before you choose a result to
-track. The triage badge is metadata-only and intentionally conservative; scoring
-after tracking is still the deeper review-worth check.
+maximum view count, and "hide short clips" before you choose a result to track.
+
+The triage badge rates how workable a result is as review material — promotional
+cuts, clips too short to carry story, and results with metadata too thin to judge.
+It deliberately does not rank by how likely a rights holder is to enforce:
+popularity does not weaken fair use, and a rights holder posting their own work
+does not strengthen it. A badge built on those signals would steer you toward
+whoever is least likely to object, which is target selection rather than review
+judgement. An official channel is labelled as what it is — the best place to
+verify a source. Scoring after tracking is still the deeper review-worth check.
 
 Downloads and scoring run as background jobs against
 `GET /api/sources/<id>/events`. Sources live in `./sources`, a sibling of

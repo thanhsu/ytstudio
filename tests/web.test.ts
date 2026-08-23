@@ -280,7 +280,7 @@ test("the sources screen can filter and triage keyword search results", async ()
   assert.match(script, /Include keywords/);
   assert.match(script, /Exclude keywords/);
   assert.match(script, /Max views/);
-  assert.match(script, /Hide likely official/);
+  assert.match(script, /Hide short clips/);
   assert.match(script, /sourceSearchFilters\.query/);
   assert.match(script, /sourceSearchFilters\.platform/);
   assert.match(script, /sourceSearchFilters\.limit/);
@@ -288,11 +288,25 @@ test("the sources screen can filter and triage keyword search results", async ()
   assert.match(script, /filterSourceSearchResults/);
   assert.match(script, /triageSourceSearchResult/);
   assert.match(script, /review-friendly/);
-  assert.match(script, /likely official/);
+  assert.match(script, /official channel/);
   assert.match(styles, /\.source-triage/);
   assert.match(styles, /\.source-triage-risk/);
-}
-);
+});
+
+test("search triage rates review suitability, never how likely a rights holder is to enforce", async () => {
+  const script = await readFile("src/web/app.js", "utf8");
+
+  // Popularity does not weaken fair use and a rights holder posting their own
+  // work does not strengthen it, so neither may drive the badge.
+  assert.doesNotMatch(script, /too hot/);
+  assert.doesNotMatch(script, /enforcement/);
+  assert.doesNotMatch(script, /viewCount\) > 500000/);
+  assert.doesNotMatch(script, /hideLikelyOfficial/);
+  // An official channel is where the source can be verified, not a warning.
+  assert.match(script, /label: "official channel", risk: "ok"/);
+  assert.match(script, /label: "short clip", risk: "warn"/);
+  assert.match(script, /label: "thin metadata", risk: "warn"/);
+});
 
 test("the sources screen exposes editable Bilibili query expansion", async () => {
   const script = await readFile("src/web/app.js", "utf8");

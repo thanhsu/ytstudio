@@ -2714,7 +2714,7 @@ async function renderSources() {
     field("Include keywords", "includeKeywords", appState.sourceSearchFilters.includeKeywords ?? "", "text", "episode, recap"),
     field("Exclude keywords", "excludeKeywords", appState.sourceSearchFilters.excludeKeywords ?? "", "text", "official, trailer"),
     field("Max views", "maxViews", String(appState.sourceSearchFilters.maxViews || ""), "number"),
-    checkboxField("Hide likely official", "hideLikelyOfficial", appState.sourceSearchFilters.hideLikelyOfficial === true),
+    checkboxField("Hide short clips", "hideShortClips", appState.sourceSearchFilters.hideShortClips === true),
     expandedQueries,
     sourceSearchToolbar(),
   );
@@ -2836,7 +2836,7 @@ async function searchSources(values) {
       includeKeywords: values.includeKeywords,
       excludeKeywords: values.excludeKeywords,
       maxViews: Number(values.maxViews) > 0 ? values.maxViews : "",
-      hideLikelyOfficial: values.hideLikelyOfficial === true,
+      hideShortClips: values.hideShortClips === true,
       expandBilibiliQuery: values.expandBilibiliQuery !== false,
       expandedQueries: queries,
     };
@@ -2914,21 +2914,35 @@ function filterSourceSearchResults(results, filters) {
     if (include.length && !include.some((term) => haystack.includes(term))) return false;
     if (exclude.some((term) => haystack.includes(term))) return false;
     if (Number.isFinite(maxViews) && maxViews > 0 && Number(result.viewCount) > maxViews) return false;
-    if (filters.hideLikelyOfficial === true && triageSourceSearchResult(result).label === "likely official") return false;
+    if (filters.hideShortClips === true && triageSourceSearchResult(result).label === "short clip") return false;
     return true;
   });
 }
 
+/**
+ * Rates how workable a result is as review material, and nothing else.
+ *
+ * It deliberately does not rank by how likely a rights holder is to enforce.
+ * Popularity does not weaken fair use, and a rights holder posting their own
+ * work does not strengthen it — a badge built on those signals would be steering
+ * the operator toward whoever is least likely to object, which is target
+ * selection, not review judgement.
+ */
 function triageSourceSearchResult(result) {
   const haystack = lower(`${result.title} ${result.uploader}`);
-  if (/(official|官方|bilibili|腾讯|youku|iqiyi|trailer|pv|预告)/.test(haystack)) {
-    return { label: "likely official", risk: "risk", reason: "Official-looking channel/title; review use needs extra caution." };
+  const durationSeconds = Number(result.durationSeconds);
+
+  if (/(trailer|teaser|pv|预告|preview)/.test(haystack)) {
+    return { label: "promo material", risk: "warn", reason: "Trailers and teasers are promotional cuts with little story to analyse." };
   }
-  if (Number(result.viewCount) > 500000) {
-    return { label: "too hot", risk: "risk", reason: "High views suggest stronger rights enforcement and competition." };
+  if (durationSeconds > 0 && durationSeconds < 180) {
+    return { label: "short clip", risk: "warn", reason: "Short clips often lack enough story context for a review." };
   }
-  if (Number(result.durationSeconds) > 0 && Number(result.durationSeconds) < 180) {
-    return { label: "short clip", risk: "warn", reason: "Short clips often lack enough story context for a batch review." };
+  if (!durationSeconds || !lower(result.title).trim()) {
+    return { label: "thin metadata", risk: "warn", reason: "Missing duration or title makes this hard to judge before downloading." };
+  }
+  if (/(official|官方|腾讯|youku|iqiyi)/.test(haystack)) {
+    return { label: "official channel", risk: "ok", reason: "Posted by the rights holder, which is the best place to verify the source." };
   }
   return { label: "review-friendly", risk: "ok", reason: "Metadata looks usable for human review triage." };
 }
