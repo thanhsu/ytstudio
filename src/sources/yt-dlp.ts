@@ -39,6 +39,9 @@ export type SourceSearchOptions = YtDlpOptions & {
   platform: SourceSearchPlatform;
   limit: number;
   searchPrefixes?: Partial<Record<SourceSearchPlatform, string>>;
+  /** Extra attempts after the first. Only transient upstream failures are retried. */
+  retries?: number;
+  retryDelayMs?: number;
 };
 
 type YtDlpPayload = {
@@ -132,11 +135,37 @@ export async function searchSourceMetadata(query: string, options: SourceSearchO
   const args = [...(options.ytDlpArgs ?? []), "--dump-json", "--flat-playlist", "--skip-download", target];
   options.onCommand?.(executable, args);
 
-  let stdout: string;
-  try {
-    stdout = (await runProcess(executable, args, { signal: options.signal })).stdout;
-  } catch (error: unknown) {
-    throw new Error(`yt-dlp could not search ${platform} for ${redact(trimmed)}: ${redact(failureDetail(error))}`);
+  const attempts = Math.max(1, Math.floor(options.retries ?? DEFAULT_SEARCH_RETRIES) + 1);
+  const delayMs = options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
+  let stdout = "";
+  let lastDetail = "";
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      stdout = (await runProcess(executable, args, { signal: options.signal })).stdout;
+      lastDetail = "";
+      break;
+    } catch (error: unknown) {
+      if (isAbort(error, options.signal)) {
+        throw error;
+      }
+      lastDetail = failureDetail(error);
+      // Bilibili answers automated search with an intermittent 412, and the same
+      // command succeeds seconds later. Retrying is the only honest handling: the
+      // failure says nothing about the query, and reporting it as a dead end sends
+      // the operator looking for a problem that is not theirs.
+      if (attempt === attempts || !isTransientSearchFailure(lastDetail)) {
+        break;
+      }
+      await pause(delayMs * attempt, options.signal);
+    }
+  }
+
+  if (lastDetail) {
+    const tried = attempts > 1 ? ` after ${attempts} attempts` : "";
+    throw new Error(
+      `yt-dlp could not search ${platform} for ${redact(trimmed)}${tried}: ${redact(lastDetail)}`,
+    );
   }
 
   const payloads = parseSearchPayloads(stdout, trimmed);
@@ -235,6 +264,46 @@ function clampLimit(value: number): number {
   const number = Math.floor(Number(value));
   if (!Number.isFinite(number) || number < 1) return 5;
   return Math.min(number, 25);
+}
+
+const DEFAULT_SEARCH_RETRIES = 2;
+const DEFAULT_RETRY_DELAY_MS = 900;
+
+/**
+ * Whether a failure is worth trying again. Rate limiting, Bilibili's 412
+ * anti-automation response, a server error, and a timeout all clear on their own;
+ * an unsupported URL, a 404, and an age gate never will, and retrying those only
+ * makes the operator wait longer for the same answer.
+ */
+export function isTransientSearchFailure(detail: string): boolean {
+  if (/HTTP Error (412|429|5\d\d)\b/i.test(detail)) return true;
+  if (/\btimed? ?out\b/i.test(detail)) return true;
+  if (/temporarily unavailable|connection reset|connection aborted/i.test(detail)) return true;
+  return false;
+}
+
+async function pause(ms: number, signal?: AbortSignal): Promise<void> {
+  if (ms <= 0) return;
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    function onAbort(): void {
+      clearTimeout(timer);
+      reject(signal?.reason ?? new Error("Aborted"));
+    }
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function isAbort(error: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted) return true;
+  return typeof error === "object" && error !== null && (error as { name?: unknown }).name === "AbortError";
 }
 
 function failureDetail(error: unknown): string {
