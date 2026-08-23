@@ -338,3 +338,19 @@ test("the sources screen shows why a score was given, never the number alone", a
   assert.match(script, /score\.risks/);
   assert.match(script, /score\.angle/);
 });
+
+test("every select option list is pair-shaped, because selectField destructures entries", async () => {
+  const script = await readFile("src/web/app.js", "utf8");
+
+  // selectField does `for (const [value, label] of options)`. An options list of
+  // object literals throws "is not iterable" at render time, and the grep-based
+  // tests in this file cannot see that — this one can.
+  assert.match(script, /for \(const \[optionValue, optionLabel\] of options\)/);
+
+  const lists = script.match(/const [A-Z_]+OPTIONS = \[[\s\S]*?\n\];/g) ?? [];
+  assert.ok(lists.length > 0, "expected at least one options constant to check");
+  for (const list of lists) {
+    const name = list.slice(0, list.indexOf(" ="));
+    assert.doesNotMatch(list, /\{\s*value:/, `${name} must hold [value, label] pairs, not objects`);
+  }
+});

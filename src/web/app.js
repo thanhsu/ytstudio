@@ -2660,11 +2660,13 @@ function setStatus(message) {
 
 loadProjects().catch((error) => setStatus(error.message));
 
+// Pairs, because selectField destructures each entry as [value, label]. An
+// object literal here throws "is not iterable" and takes the whole screen with it.
 const SOURCE_RIGHTS_OPTIONS = [
-  { value: "unknown", label: "Not declared" },
-  { value: "own", label: "I own this footage" },
-  { value: "licensed", label: "I hold a licence" },
-  { value: "third-party-fair-use", label: "Third party, review commentary" },
+  ["unknown", "Not declared"],
+  ["own", "I own this footage"],
+  ["licensed", "I hold a licence"],
+  ["third-party-fair-use", "Third party, review commentary"],
 ];
 
 async function renderSources() {
