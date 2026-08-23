@@ -42,6 +42,7 @@ import { scoreCandidate } from "./sources/score.ts";
 import { listCandidates, resolveSourcePath, type SourceRights } from "./sources/store.ts";
 import { searchSourceMetadata, type SourceSearchPlatform, type YtDlpOptions } from "./sources/yt-dlp.ts";
 import { exportReviewPackage } from "./export-package.ts";
+import { routeStoryFactory } from "./story-factory/routes.ts";
 import { ProjectJobManager, type JobKind, type JobOperation } from "./jobs.ts";
 import { extractAudioForAsr, importMedia } from "./media-ingest.ts";
 import { projectsRoot, sourcesRoot } from "./fs.ts";
@@ -330,6 +331,23 @@ async function routeRequest(
   if (seriesMatch) {
     const seriesId = validateProjectId(seriesMatch[1]);
     const rest = seriesMatch[2] ?? "";
+    // The AI story factory owns these sub-namespaces. Its module receives the
+    // server-private helpers as tools, so they stay private here.
+    if (rest === "story-channel" || rest === "stories" || rest.startsWith("stories/") || rest.startsWith("voice-lab/")) {
+      await routeStoryFactory({
+        method,
+        rest,
+        url,
+        channelId: seriesId,
+        tools: {
+          sendJson: (status, body) => sendJson(response, status, body),
+          sendError: (status, error) => sendError(response, status, error),
+          readBody: () => readJsonBody(request),
+          startChannelJob: (kind, operation) => startProjectJob(response, seriesId, kind, operation),
+        },
+      });
+      return;
+    }
     if (method === "GET" && rest === "") {
       sendJson(response, 200, { series: await loadSeriesProject(seriesId) });
       return;
