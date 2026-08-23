@@ -287,18 +287,18 @@ export function renderArtifactRelativePath(projectId: string, outputPath: string
   throw new Error(`Render output path is outside project ${projectId}.`);
 }
 
-function escapeDrawText(value: string): string {
+export function escapeDrawText(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/:/g, "\\:");
 }
 
-function escapeFilterPath(value: string): string {
+export function escapeFilterPath(value: string): string {
   return value.replace(/\\/g, "/").replace(/:/g, "\\:").replace(/'/g, "\\'");
 }
 
-function defaultFontFilePath(): string {
+export function defaultFontFilePath(): string {
   return process.platform === "win32" ? "C:/Windows/Fonts/arial.ttf" : "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
 }
 
-function defaultFontName(): string {
+export function defaultFontName(): string {
   return process.platform === "win32" ? "Arial" : "DejaVu Sans";
 }
