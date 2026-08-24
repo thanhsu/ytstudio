@@ -51,6 +51,7 @@ import {
   synthesizeChunks,
 } from "./tts-chunking.ts";
 import { googleTtsConfigFromStudio } from "./voice-lab.ts";
+import { loadPromptOverrides } from "./prompt-overrides.ts";
 import type {
   BgmPlan,
   ImageManifest,
@@ -271,6 +272,7 @@ async function buildStageContext(channelId: string, storyId: string, deps: Story
     confirmedPaidRequest: deps.confirmedPaidRequest,
     signal: deps.signal,
     update: async (message) => deps.update?.(-1, message),
+    promptOverrides: await loadPromptOverrides(channelId),
   };
 }
 

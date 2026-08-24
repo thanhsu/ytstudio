@@ -3,6 +3,7 @@ import type { ChatMessage } from "../../llm/chat.ts";
 import type { ImageProvider } from "../../images/types.ts";
 import type { TtsProvider } from "../../tts/types.ts";
 import type { StoryPromptContext } from "../prompts/context.ts";
+import type { PromptOverrides } from "../prompt-overrides.ts";
 import { runLlmCall, stageEndpoint, type ChatFn, type LlmCallResult } from "../stage-llm.ts";
 import type { BibleArtifact, StoryChannelConfig, StoryProject, StoryStageId } from "../types.ts";
 
@@ -22,6 +23,7 @@ export type StageContext = {
   confirmedPaidRequest: boolean;
   signal?: AbortSignal;
   update?: (message: string) => Promise<void>;
+  promptOverrides?: PromptOverrides;
 };
 
 export function promptContext(ctx: StageContext): StoryPromptContext {

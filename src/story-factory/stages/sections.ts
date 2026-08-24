@@ -16,6 +16,7 @@ import type {
 } from "../types.ts";
 import { applyBibleUpdates } from "./bible.ts";
 import { llmStage, promptContext, renderBibleContext, type StageContext } from "./context.ts";
+import { resolvePromptVersion } from "../prompt-overrides.ts";
 
 export type ParsedSection = {
   title: string;
@@ -85,7 +86,7 @@ export async function runSectionsStage(
       ctx,
       "sections",
       SECTION_PROMPT_NAME,
-      `${SECTION_PROMPT_VERSION}#${planned.index}`,
+      `${resolvePromptVersion(ctx.promptOverrides, SECTION_PROMPT_NAME, SECTION_PROMPT_VERSION)}#${planned.index}`,
       buildSectionMessages(promptContext(ctx), {
         sectionIndex: planned.index,
         sectionCount: outline.sections.length,
@@ -96,7 +97,7 @@ export async function runSectionsStage(
         bibleContext: renderBibleContext(bible),
         previousTail: previous ? sectionTail(previous.text) : "",
         hookText: hook.hookText,
-      }),
+      }, ctx.promptOverrides),
       parseSection,
     );
     const section: SectionArtifact = {

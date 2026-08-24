@@ -6,6 +6,7 @@ import { buildIdeaMessages, IDEA_PROMPT_NAME, IDEA_PROMPT_VERSION } from "../pro
 import { writeStageArtifact } from "../story-project.ts";
 import type { IdeaArtifact } from "../types.ts";
 import { llmStage, promptContext, type StageContext } from "./context.ts";
+import { resolvePromptVersion } from "../prompt-overrides.ts";
 
 export type ParsedIdea = {
   logline: string;
@@ -42,13 +43,13 @@ export async function runIdeaStage(ctx: StageContext): Promise<IdeaArtifact> {
       ctx,
       "idea",
       IDEA_PROMPT_NAME,
-      IDEA_PROMPT_VERSION,
+      resolvePromptVersion(ctx.promptOverrides, IDEA_PROMPT_NAME, IDEA_PROMPT_VERSION),
       buildIdeaMessages(promptContext(ctx), {
         avoidPremises:
           attempt === 0
             ? avoidPremises
             : [...avoidPremises, `REJECTED as too similar on the last attempt: ${duplicateCheck.nearest[0]?.storyId ?? ""}`],
-      }),
+      }, ctx.promptOverrides),
       parseIdea,
     );
     parsed = result.value;
