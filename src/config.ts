@@ -30,6 +30,11 @@ export type LlmEndpointConfig = {
   paid: boolean;
   temperature: number;
   maxOutputTokens: number;
+  // Which transport carries this endpoint's calls. "openai-compatible" covers
+  // Ollama, LM Studio, OpenAI, DeepSeek, Groq, and OpenRouter; "anthropic" and
+  // "gemini" call those providers' native APIs directly. baseUrl still names
+  // the actual host — this only selects the wire format.
+  provider: "openai-compatible" | "anthropic" | "gemini";
 };
 
 export type StudioConfig = {
@@ -451,6 +456,7 @@ function defaultLlmEndpoint(): LlmEndpointConfig {
     paid: false,
     temperature: 0.8,
     maxOutputTokens: 8000,
+    provider: "openai-compatible",
   };
 }
 
@@ -464,6 +470,7 @@ function llmEndpointValue(value: unknown): LlmEndpointConfig {
     paid: booleanValue(candidate.paid, fallback.paid),
     temperature: rangeValue(candidate.temperature, fallback.temperature, 0, 2),
     maxOutputTokens: numberValue(candidate.maxOutputTokens, fallback.maxOutputTokens),
+    provider: enumValue(candidate.provider, ["openai-compatible", "anthropic", "gemini"], fallback.provider),
   };
 }
 

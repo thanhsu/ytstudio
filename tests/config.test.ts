@@ -157,6 +157,7 @@ test("the story factory, google tts, and images blocks default and normalize", a
     const defaults = await loadStudioConfig();
     assert.equal(defaults.storyFactory.enabled, false);
     assert.equal(defaults.storyFactory.models.planner.baseUrl, "http://127.0.0.1:11434/v1");
+    assert.equal(defaults.storyFactory.models.planner.provider, "openai-compatible");
     assert.equal(defaults.storyFactory.models.writer.paid, false);
     assert.deepEqual(defaults.storyFactory.llmPricing, []);
     assert.equal(defaults.storyFactory.duplicateSimilarityThreshold, 0.6);
@@ -174,7 +175,11 @@ test("the story factory, google tts, and images blocks default and normalize", a
       JSON.stringify({
         storyFactory: {
           enabled: true,
-          models: { writer: { model: "gpt-5-mini", apiKeyEnv: "OPENAI_API_KEY", paid: true } },
+          models: {
+            writer: { model: "gpt-5-mini", apiKeyEnv: "OPENAI_API_KEY", paid: true, provider: "anthropic" },
+            qa: { model: "gemini-2.5-flash", provider: "gemini" },
+            planner: { model: "local-model", provider: "not-a-real-provider" },
+          },
           llmPricing: [
             { modelPattern: "gpt-5-mini", inputUsdPerMTok: 0.25, outputUsdPerMTok: 2 },
             { modelPattern: "", inputUsdPerMTok: 1, outputUsdPerMTok: 1 },
@@ -192,6 +197,10 @@ test("the story factory, google tts, and images blocks default and normalize", a
     assert.equal(loaded.storyFactory.enabled, true);
     assert.equal(loaded.storyFactory.models.writer.model, "gpt-5-mini");
     assert.equal(loaded.storyFactory.models.writer.paid, true);
+    assert.equal(loaded.storyFactory.models.writer.provider, "anthropic");
+    assert.equal(loaded.storyFactory.models.qa.provider, "gemini");
+    // An unrecognized provider falls back rather than surviving, unlike script.provider.
+    assert.equal(loaded.storyFactory.models.planner.provider, "openai-compatible");
     // Malformed pricing rows are dropped; the valid one survives.
     assert.deepEqual(loaded.storyFactory.llmPricing, [
       { modelPattern: "gpt-5-mini", inputUsdPerMTok: 0.25, outputUsdPerMTok: 2 },
