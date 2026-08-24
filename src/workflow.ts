@@ -17,8 +17,9 @@ import {
 import { resolveProjectPath } from "./project-paths.ts";
 import { extractNarration } from "./narration.ts";
 import { probeDuration } from "./media.ts";
-import { evaluateRenderGate, renderDraft, type RenderArtifact, type RenderGateResult } from "./render.ts";
+import { evaluateRenderGate, renderDraft, type RenderArtifact, type RenderGateResult, type RenderVisualSegment } from "./render.ts";
 import { loadVisualMapping } from "./visual-mapping.ts";
+import { DEFAULT_SEGMENT_EFFECTS, validateSegmentEffects } from "./visual-effects.ts";
 import { createPiperProvider } from "./tts/piper.ts";
 import { createOpenAiProvider } from "./tts/openai.ts";
 import { createVietnameseLocalProvider } from "./tts/vietnamese-local.ts";
@@ -312,8 +313,17 @@ export async function renderDraftProject(projectId: string, options: RenderDraft
   const mapping = await loadVisualMapping(projectId);
   const manifest = await loadAssetManifest(projectId);
   const assetsById = new Map(manifest.assets.map((asset) => [asset.id, asset]));
-  const visualSegments = mapping?.segments.map((segment) => {
+  const visualSegments: RenderVisualSegment[] | undefined = mapping?.segments.map((segment) => {
     const asset = segment.assetId ? assetsById.get(segment.assetId) : undefined;
+    // A mapping saved before effects existed normalizes to neutral defaults at
+    // the load boundary (visual-mapping.ts), so `segment.effects` is only ever
+    // absent for a legacy in-memory shape; default here as the same safety net.
+    const effects = segment.effects ?? DEFAULT_SEGMENT_EFFECTS;
+    const effectsValidation = validateSegmentEffects(effects, manifest.assets);
+    if (!effectsValidation.valid) {
+      throw new Error(`Invalid effects for segment ${segment.id}: ${effectsValidation.errors.join(" ")}`);
+    }
+    const watermarkAsset = effects.watermark ? assetsById.get(effects.watermark.assetId) : undefined;
     return {
       sceneId: segment.id,
       startSeconds: segment.startSeconds,
@@ -324,6 +334,8 @@ export async function renderDraftProject(projectId: string, options: RenderDraft
       sourceStartSeconds: segment.sourceStartSeconds,
       sourceDurationSeconds: segment.sourceDurationSeconds,
       muteSourceAudio: segment.muteSourceAudio,
+      effects,
+      watermarkAsset,
     };
   });
 

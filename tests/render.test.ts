@@ -1,14 +1,76 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import {
   renderArtifactRelativePath,
   buildShortsRenderArgs,
+  buildSegmentArgs,
   evaluateRenderGate,
+  renderDraft,
   type RenderGateInput,
   type RenderInput,
+  type RenderVisualSegment,
 } from "../src/render.ts";
+import { DEFAULT_SEGMENT_EFFECTS } from "../src/visual-effects.ts";
+import type { AssetRecord } from "../src/assets.ts";
 import { resolveProjectPath } from "../src/project-paths.ts";
 import { draftRenderOutputPath } from "../src/workflow.ts";
+import { makeFakeExecutable } from "./helpers.ts";
+
+const imageSegment: RenderVisualSegment = {
+  sceneId: "scene-001",
+  startSeconds: 0,
+  endSeconds: 4,
+  assetPath: "projects/sample-project/assets/images/card.png",
+  mediaType: "image",
+  fitMode: "cover",
+  sourceStartSeconds: 0,
+  sourceDurationSeconds: 4,
+  muteSourceAudio: true,
+};
+
+const videoSegment: RenderVisualSegment = {
+  sceneId: "scene-001",
+  startSeconds: 0,
+  endSeconds: 8,
+  assetPath: "projects/sample-project/assets/clips/training.mp4",
+  mediaType: "video",
+  fitMode: "cover",
+  sourceStartSeconds: 3,
+  sourceDurationSeconds: 5,
+  muteSourceAudio: true,
+};
+
+function eligibleLogoAsset(overrides: Partial<AssetRecord> = {}): AssetRecord {
+  return {
+    id: "logo-1",
+    filename: "logo.png",
+    relativePath: "assets/images/logo-1.png",
+    mediaType: "image",
+    mimeType: "image/png",
+    sizeBytes: 1024,
+    rightsConfirmed: true,
+    usagePurpose: "brand watermark",
+    createdAt: "2026-08-24T00:00:00.000Z",
+    role: "logo",
+    rightsStatus: "owned",
+    ...overrides,
+  };
+}
+
+async function fakeFfmpeg(): Promise<string> {
+  return makeFakeExecutable(
+    [
+      'import { mkdir, writeFile } from "node:fs/promises";',
+      'import { dirname } from "node:path";',
+      "const outputPath = process.argv.at(-1);",
+      "await mkdir(dirname(outputPath), { recursive: true });",
+      'await writeFile(outputPath, "video", "utf8");',
+    ].join("\n"),
+  );
+}
 
 function readyRenderInput(): RenderGateInput {
   return {
@@ -170,5 +232,128 @@ test("background video input index follows any mapped scene inputs", () => {
   const filter = args[args.indexOf("-filter_complex") + 1];
 
   assert.match(filter, /\[3:v\]trim=duration=8/);
+});
+
+// --- Task 5: effects integration ---
+
+test("image speed is a no-op and video speed uses a bounded source slice", () => {
+  const imageArgs = buildShortsRenderArgs({
+    ...sampleRenderInput(),
+    visualSegments: [{ ...imageSegment, effects: { ...DEFAULT_SEGMENT_EFFECTS, speed: 2 } }],
+  });
+  assert.doesNotMatch(imageArgs.join(";"), /setpts=PTS\/2/);
+
+  const videoArgs = buildShortsRenderArgs({
+    ...sampleRenderInput(),
+    visualSegments: [{ ...videoSegment, endSeconds: 10, sourceDurationSeconds: 10, effects: { ...DEFAULT_SEGMENT_EFFECTS, speed: 2 } }],
+  });
+  assert.match(videoArgs.join(";"), /-t.*5/);
+  assert.match(videoArgs.join(";"), /setpts=PTS\/2/);
+  assert.match(videoArgs.join(";"), /fill/);
+});
+
+test("neutral default effects leave the existing filter graph intact (allowing only a null passthrough)", () => {
+  const args = buildShortsRenderArgs({
+    ...sampleRenderInput(),
+    visualSegments: [{ ...videoSegment, effects: DEFAULT_SEGMENT_EFFECTS }],
+  });
+  const filter = args[args.indexOf("-filter_complex") + 1];
+  assert.match(filter, /trim=duration=5/);
+  assert.match(filter, /color=c=#111827:s=1080x1920:d=3/);
+  assert.match(filter, /concat=n=2:v=1:a=0/);
+  // At most a harmless identity hop is tolerated for the neutral-effects case.
+  assert.equal((filter.match(/null/g) ?? []).length, 1);
+});
+
+test("video zoom, color, and blur apply between fit/crop and trim, and fades stay inside the clip", () => {
+  const args = buildShortsRenderArgs({
+    ...sampleRenderInput(),
+    visualSegments: [{
+      ...videoSegment,
+      endSeconds: 10,
+      sourceDurationSeconds: 10,
+      effects: { ...DEFAULT_SEGMENT_EFFECTS, blur: 6, transitionIn: "fade", transitionOut: "fade" },
+    }],
+  });
+  const filter = args[args.indexOf("-filter_complex") + 1];
+  assert.match(filter, /scale=[^,]+,crop=1080:1920,setsar=1\[fit0\]/);
+  assert.match(filter, /boxblur=6/);
+  assert.match(filter, /fade=t=in:st=0/);
+  assert.match(filter, /fade=t=out/);
+  const boxblurIndex = filter.indexOf("boxblur=6");
+  const trimIndex = filter.indexOf("trim=duration=5,setpts=PTS-STARTPTS[clip0]");
+  assert.ok(boxblurIndex >= 0 && trimIndex >= 0 && boxblurIndex < trimIndex, "effects must apply before the segment trim");
+});
+
+test("watermark effects overlay a resolved logo asset without an extra ffmpeg input", () => {
+  const logo = eligibleLogoAsset();
+  const args = buildShortsRenderArgs({
+    ...sampleRenderInput(),
+    visualSegments: [{
+      ...imageSegment,
+      effects: {
+        ...DEFAULT_SEGMENT_EFFECTS,
+        watermark: { assetId: logo.id, position: "top-right", scale: 0.12, opacity: 0.2 },
+      },
+      watermarkAsset: logo,
+    }],
+  });
+  const filter = args[args.indexOf("-filter_complex") + 1];
+  assert.match(filter, /movie=/);
+  assert.match(filter, /overlay=W-w-24:24/);
+  // Base (silent+voice) + the segment's own image asset = 3 -i flags; the
+  // watermark logo loads via the movie= filter and adds no extra -i.
+  assert.equal(args.filter((argument) => argument === "-i").length, 3);
+});
+
+test("buildSegmentArgs applies the same effect chain for the per-segment concat path", () => {
+  const args = buildSegmentArgs(
+    { ...videoSegment, endSeconds: 10, sourceDurationSeconds: 10, effects: { ...DEFAULT_SEGMENT_EFFECTS, speed: 2, transitionOut: "fade" } },
+    "segment-000.mp4",
+    1080,
+    1920,
+    "sample-project",
+  );
+  const filter = args[args.indexOf("-filter_complex") + 1];
+  assert.match(args.join(";"), /-t.*5/);
+  assert.match(filter, /setpts=PTS\/2/);
+  assert.match(filter, /fade=t=out/);
+  assert.match(filter, /fill/);
+  assert.equal(args.at(-1), "segment-000.mp4");
+});
+
+test("buildSegmentArgs leaves image speed untouched", () => {
+  const args = buildSegmentArgs(
+    { ...imageSegment, effects: { ...DEFAULT_SEGMENT_EFFECTS, speed: 1.5 } },
+    "segment-000.mp4",
+    1080,
+    1920,
+    "sample-project",
+  );
+  const filter = args[args.indexOf("-filter_complex") + 1];
+  assert.doesNotMatch(filter, /setpts=PTS\//);
+});
+
+test("normalized visual effects change the render artifact source hash", async () => {
+  const previousRoot = process.env.YT_STUDIO_PROJECTS_DIR;
+  const root = await mkdtemp(join(tmpdir(), "yt-render-effects-hash-"));
+  process.env.YT_STUDIO_PROJECTS_DIR = root;
+  try {
+    const shared = {
+      ...sampleRenderInput(),
+      outputPath: join(root, "sample-project", "workspace", "renders", "draft.mp4"),
+      ffmpegPath: process.execPath,
+      ffmpegPrefixArgs: [await fakeFfmpeg()],
+    };
+
+    const first = await renderDraft({ ...shared, visualSegments: [{ ...imageSegment, effects: DEFAULT_SEGMENT_EFFECTS }] });
+    const second = await renderDraft({ ...shared, visualSegments: [{ ...imageSegment, effects: { ...DEFAULT_SEGMENT_EFFECTS, blur: 4 } }] });
+
+    assert.notEqual(first.sourceHash, second.sourceHash);
+  } finally {
+    if (previousRoot === undefined) delete process.env.YT_STUDIO_PROJECTS_DIR;
+    else process.env.YT_STUDIO_PROJECTS_DIR = previousRoot;
+    await rm(root, { recursive: true, force: true });
+  }
 });
 

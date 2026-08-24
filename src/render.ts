@@ -1,9 +1,12 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import type { AssetRecord } from "./assets.ts";
+import { buildFadeFilter, buildSegmentEffectFilter, buildVisualEffectFilter, buildWatermarkOverlayFilter, type EffectDimensions, type MediaType } from "./effects-render.ts";
 import { runProcess } from "./process.ts";
 import { resolveProjectPath } from "./project-paths.ts";
 import { setArtifact, sha256, type PipelineStageStatus } from "./project-state.ts";
 import type { ArtifactRecord, VideoFormat } from "./types.ts";
+import { DEFAULT_SEGMENT_EFFECTS, type SegmentEffects } from "./visual-effects.ts";
 
 export type RenderGateStageStatus = PipelineStageStatus | "not-required";
 
@@ -50,6 +53,14 @@ export type RenderVisualSegment = {
   sourceStartSeconds: number;
   sourceDurationSeconds: number;
   muteSourceAudio: boolean;
+  /** Complete normalized effects for this segment. Absent (legacy mapping) is
+   *  treated as `DEFAULT_SEGMENT_EFFECTS` at every use site. */
+  effects?: SegmentEffects;
+  /** The logo asset resolved from the project asset manifest for
+   *  `effects.watermark.assetId`, if a watermark is configured. Resolved by the
+   *  workflow adapter (after validation) because the renderer's pure builders
+   *  don't load the asset manifest themselves. */
+  watermarkAsset?: AssetRecord;
 };
 
 export type RenderArtifact = ArtifactRecord & {
@@ -111,15 +122,31 @@ export function buildShortsRenderArgs(input: RenderInput): string[] {
       continue;
     }
     const inputIndex = nextInputIndex++;
+    const effects = segment.effects ?? DEFAULT_SEGMENT_EFFECTS;
+    const dimensions: EffectDimensions = { width, height };
     if (segment.mediaType === "image") {
       args.push("-loop", "1", "-t", String(sceneDuration), "-i", segment.assetPath);
-      filters.push(`${visualFilter(inputIndex, width, height, segment.fitMode)},trim=duration=${sceneDuration},setpts=PTS-STARTPTS[scene${index}]`);
+      const fitLabel = `[fit${index}]`;
+      const preTrimLabel = `[pre${index}]`;
+      filters.push(`${visualFilter(inputIndex, width, height, segment.fitMode)}${fitLabel}`);
+      const composed = applySegmentEffects(fitLabel, preTrimLabel, effects, dimensions, sceneDuration, "image", input.projectId, segment.watermarkAsset, nextInputIndex, `img${index}`);
+      filters.push(...composed.filters);
+      nextInputIndex = composed.nextInputIndex;
+      filters.push(`${preTrimLabel}trim=duration=${sceneDuration},setpts=PTS-STARTPTS[scene${index}]`);
       visualLabels.push(`[scene${index}]`);
       continue;
     }
-    const clipDuration = Math.min(5, sceneDuration, segment.sourceDurationSeconds);
-    args.push("-ss", String(segment.sourceStartSeconds), "-t", String(clipDuration), "-an", "-i", segment.assetPath);
-    filters.push(`${visualFilter(inputIndex, width, height, segment.fitMode)},trim=duration=${clipDuration},setpts=PTS-STARTPTS[clip${index}]`);
+    const sourceSliceDuration = Math.min(5, sceneDuration, segment.sourceDurationSeconds);
+    const outputSliceDuration = sourceSliceDuration / effects.speed;
+    const clipDuration = Math.min(outputSliceDuration, sceneDuration);
+    args.push("-ss", String(segment.sourceStartSeconds), "-t", String(sourceSliceDuration), "-an", "-i", segment.assetPath);
+    const fitLabel = `[fit${index}]`;
+    const preTrimLabel = `[pre${index}]`;
+    filters.push(`${visualFilter(inputIndex, width, height, segment.fitMode)}${fitLabel}`);
+    const composed = applySegmentEffects(fitLabel, preTrimLabel, effects, dimensions, clipDuration, "video", input.projectId, segment.watermarkAsset, nextInputIndex, `clip${index}`);
+    filters.push(...composed.filters);
+    nextInputIndex = composed.nextInputIndex;
+    filters.push(`${preTrimLabel}trim=duration=${clipDuration},setpts=PTS-STARTPTS[clip${index}]`);
     const remaining = Math.max(0, sceneDuration - clipDuration);
     if (remaining > 0) {
       filters.push(`color=c=#111827:s=${width}x${height}:d=${remaining}[fill${index}]`);
@@ -224,7 +251,7 @@ async function prepareVisualTimeline(input: RenderInput, ffmpeg: string, signal?
   for (const [index, segment] of (input.visualSegments ?? []).entries()) {
     const segmentPath = join(temporaryDirectory, `segment-${String(index).padStart(3, "0")}.mp4`);
     segmentPaths.push(segmentPath);
-    await runProcess(ffmpeg, [...(input.ffmpegPrefixArgs ?? []), ...buildSegmentArgs(segment, segmentPath, width, height)], { signal });
+    await runProcess(ffmpeg, [...(input.ffmpegPrefixArgs ?? []), ...buildSegmentArgs(segment, segmentPath, width, height, input.projectId)], { signal });
   }
   const concatPath = join(temporaryDirectory, "concat.txt");
   await writeFile(concatPath, segmentPaths.map((_path, index) => `file 'segment-${String(index).padStart(3, "0")}.mp4'`).join("\n") + "\n", "utf8");
@@ -233,22 +260,41 @@ async function prepareVisualTimeline(input: RenderInput, ffmpeg: string, signal?
   return { temporaryDirectory, timelinePath };
 }
 
-function buildSegmentArgs(segment: RenderVisualSegment, outputPath: string, width: number, height: number): string[] {
+export function buildSegmentArgs(segment: RenderVisualSegment, outputPath: string, width: number, height: number, projectId: string): string[] {
   const duration = Math.max(0.04, segment.endSeconds - segment.startSeconds);
   const encoding = ["-map", "[v]", "-an", "-r", "30", "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1", "-pix_fmt", "yuv420p", outputPath];
   if (!segment.assetPath || !segment.mediaType) {
     return ["-y", "-f", "lavfi", "-i", `color=c=#111827:s=${width}x${height}:r=30:d=${duration}`, "-filter_complex", "[0:v]null[v]", ...encoding];
   }
+  const effects = segment.effects ?? DEFAULT_SEGMENT_EFFECTS;
+  const dimensions: EffectDimensions = { width, height };
   if (segment.mediaType === "image") {
-    return ["-y", "-loop", "1", "-t", String(duration), "-i", segment.assetPath, "-filter_complex_threads", "1", "-filter_complex", `${visualFilter(0, width, height, segment.fitMode)},fps=30,trim=duration=${duration},setpts=PTS-STARTPTS[v]`, ...encoding];
+    const fitLabel = "[fit]";
+    const preTrimLabel = "[pre]";
+    const composed = applySegmentEffects(fitLabel, preTrimLabel, effects, dimensions, duration, "image", projectId, segment.watermarkAsset, 1, "seg");
+    const filters = [
+      `${visualFilter(0, width, height, segment.fitMode)},fps=30${fitLabel}`,
+      ...composed.filters,
+      `${preTrimLabel}trim=duration=${duration},setpts=PTS-STARTPTS[v]`,
+    ];
+    return ["-y", "-loop", "1", "-t", String(duration), "-i", segment.assetPath, "-filter_complex_threads", "1", "-filter_complex", filters.join(";"), ...encoding];
   }
-  const clipDuration = Math.min(5, duration, segment.sourceDurationSeconds);
+  const sourceSliceDuration = Math.min(5, duration, segment.sourceDurationSeconds);
+  const outputSliceDuration = sourceSliceDuration / effects.speed;
+  const clipDuration = Math.min(outputSliceDuration, duration);
   const remaining = Math.max(0, duration - clipDuration);
-  const filters = [`${visualFilter(0, width, height, segment.fitMode)},fps=30,trim=duration=${clipDuration},setpts=PTS-STARTPTS[clip]`];
+  const fitLabel = "[fit]";
+  const preTrimLabel = "[pre]";
+  const composed = applySegmentEffects(fitLabel, preTrimLabel, effects, dimensions, clipDuration, "video", projectId, segment.watermarkAsset, 1, "seg");
+  const filters = [
+    `${visualFilter(0, width, height, segment.fitMode)},fps=30${fitLabel}`,
+    ...composed.filters,
+    `${preTrimLabel}trim=duration=${clipDuration},setpts=PTS-STARTPTS[clip]`,
+  ];
   if (remaining > 0) {
     filters.push(`color=c=#111827:s=${width}x${height}:r=30:d=${remaining}[fill]`, "[clip][fill]concat=n=2:v=1:a=0[v]");
   } else filters.push("[clip]null[v]");
-  return ["-y", "-ss", String(segment.sourceStartSeconds), "-t", String(clipDuration), "-an", "-i", segment.assetPath, "-filter_complex_threads", "1", "-filter_complex", filters.join(";"), ...encoding];
+  return ["-y", "-ss", String(segment.sourceStartSeconds), "-t", String(sourceSliceDuration), "-an", "-i", segment.assetPath, "-filter_complex_threads", "1", "-filter_complex", filters.join(";"), ...encoding];
 }
 
 function visualFilter(inputIndex: number, width: number, height: number, fitMode: "cover" | "contain"): string {
@@ -256,6 +302,41 @@ function visualFilter(inputIndex: number, width: number, height: number, fitMode
     return `[${inputIndex}:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=#111827,setsar=1`;
   }
   return `[${inputIndex}:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1`;
+}
+
+/**
+ * Composes the effects chain (speed/zoom/color/blur -> watermark -> fade) for
+ * one segment, positioned between fit/crop and the segment's own
+ * trim/setpts/concat prep. Without a configured watermark this collapses to a
+ * single `buildSegmentEffectFilter` call, which resolves to a bare `null`
+ * passthrough under neutral defaults (the documented legacy-regression
+ * allowance). A configured watermark composes `buildVisualEffectFilter` +
+ * `buildWatermarkOverlayFilter` + `buildFadeFilter`, per those functions' docs.
+ */
+function applySegmentEffects(
+  inputLabel: string,
+  outputLabel: string,
+  effects: SegmentEffects,
+  dimensions: EffectDimensions,
+  duration: number,
+  mediaType: MediaType,
+  projectId: string,
+  watermarkAsset: AssetRecord | undefined,
+  nextInputIndex: number,
+  labelPrefix: string,
+): { filters: string[]; nextInputIndex: number } {
+  if (!effects.watermark) {
+    return { filters: [buildSegmentEffectFilter(inputLabel, outputLabel, effects, dimensions, duration, mediaType)], nextInputIndex };
+  }
+  if (!watermarkAsset) {
+    throw new Error(`Segment effects reference watermark asset ${effects.watermark.assetId}, but no resolved watermark asset was supplied to the renderer.`);
+  }
+  const visualLabel = `[${labelPrefix}fx]`;
+  const watermarkLabel = `[${labelPrefix}wm]`;
+  const visual = buildVisualEffectFilter(inputLabel, visualLabel, effects, dimensions, duration, mediaType);
+  const watermark = buildWatermarkOverlayFilter(visualLabel, watermarkLabel, effects.watermark, projectId, [watermarkAsset], dimensions, duration, nextInputIndex);
+  const fade = buildFadeFilter(watermarkLabel, outputLabel, effects, duration);
+  return { filters: [visual, watermark.filter, fade], nextInputIndex: watermark.nextInputIndex };
 }
 
 export function renderArtifactRelativePath(projectId: string, outputPath: string): string {
