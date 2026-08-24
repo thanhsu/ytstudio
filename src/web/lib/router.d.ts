@@ -18,8 +18,8 @@ export type Route =
 
 export function parseRoute(hash: string): Route;
 
-export function routeHash(route: Route | Record<string, any>): string;
+export function routeHash(route: Route): string;
 
-export function navigate(routeOrHash: Route | Record<string, any> | string): void;
+export function navigate(routeOrHash: Route | string): void;
 
 export function startRouter(onChange: (route: Route) => void): void;

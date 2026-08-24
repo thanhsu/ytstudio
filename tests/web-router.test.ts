@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseRoute, routeHash } from "../src/web/lib/router.js";
+import { parseRoute, routeHash, type Route } from "../src/web/lib/router.js";
 
 test("parseRoute maps hashes to screens", () => {
   assert.deepEqual(parseRoute(""), { screen: "projects" });
@@ -26,7 +26,7 @@ test("parseRoute tolerates junk and legacy hashes", () => {
 });
 
 test("routeHash is the inverse of parseRoute", () => {
-  for (const route of [
+  const routes: Route[] = [
     { screen: "projects" },
     { screen: "sources" },
     { screen: "config" },
@@ -34,7 +34,8 @@ test("routeHash is the inverse of parseRoute", () => {
     { screen: "series", id: "muc-than-ky", phase: "overview" },
     { screen: "channel", id: "es-horror", phase: "edit" },
     { screen: "channel", id: "es-horror", storyId: "story-001" },
-  ]) {
+  ];
+  for (const route of routes) {
     assert.deepEqual(parseRoute(routeHash(route)), route);
   }
 });
