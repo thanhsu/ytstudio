@@ -43,7 +43,7 @@ import { listCandidates, resolveSourcePath, type SourceRights } from "./sources/
 import { searchSourceMetadata, type SourceSearchPlatform, type YtDlpOptions } from "./sources/yt-dlp.ts";
 import { exportReviewPackage } from "./export-package.ts";
 import { routeStoryFactory } from "./story-factory/routes.ts";
-import { ProjectJobManager, type JobKind, type JobOperation } from "./jobs.ts";
+import { compositeOwner, ProjectJobManager, type JobKind, type JobOperation } from "./jobs.ts";
 import { extractAudioForAsr, importMedia } from "./media-ingest.ts";
 import { projectsRoot, sourcesRoot } from "./fs.ts";
 import { loadProjectState } from "./project-state.ts";
@@ -343,7 +343,8 @@ async function routeRequest(
           sendJson: (status, body) => sendJson(response, status, body),
           sendError: (status, error) => sendError(response, status, error),
           readBody: () => readJsonBody(request),
-          startChannelJob: (kind, operation) => startProjectJob(response, seriesId, kind, operation),
+          startChannelJob: (kind, operation, ownerSuffix) =>
+            startProjectJob(response, ownerSuffix ? compositeOwner(seriesId, ownerSuffix) : seriesId, kind, operation),
         },
       });
       return;

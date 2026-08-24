@@ -44,6 +44,21 @@ export type JobOperation = (context: {
 
 export type JobListener = (job: JobRecord) => void;
 
+/**
+ * Composite owner ids let two stories on one channel run jobs concurrently
+ * while still sharing the channel's job persistence and SSE stream. `::` can
+ * never appear inside a plain project or channel id, so "<channelId>::<suffix>"
+ * never collides with one. The suffix may itself contain "::" (e.g. a future
+ * "comp::abc" compilation suffix), so the channel is always the first segment.
+ */
+export function ownerChannel(ownerId: string): string {
+  return ownerId.split("::")[0];
+}
+
+export function compositeOwner(channelId: string, suffix: string): string {
+  return `${channelId}::${suffix}`;
+}
+
 type RunningJob = {
   record: JobRecord;
   controller: AbortController;
@@ -221,13 +236,30 @@ export class ProjectJobManager {
     }
   }
 
+  /**
+   * Jobs for a composite owner persist under the channel's own jobs dir, never
+   * a literal "<channel>::<suffix>" directory, so recovery on startup only
+   * ever has to scan one directory per channel.
+   */
   private jobsDir(projectId: string): string {
-    return join(this.resolveProjectsRoot(), projectId, "workspace", "jobs");
+    return join(this.resolveProjectsRoot(), ownerChannel(projectId), "workspace", "jobs");
   }
 
-  private emit(projectId: string, record: JobRecord): void {
-    for (const listener of this.listeners.get(projectId) ?? []) {
+  /**
+   * Fans events out to listeners on the exact owner and, for a composite
+   * owner, also to listeners on the plain channel id -- so the one per-channel
+   * SSE stream keeps receiving every story job regardless of which story
+   * suffix started it.
+   */
+  private emit(ownerId: string, record: JobRecord): void {
+    for (const listener of this.listeners.get(ownerId) ?? []) {
       listener(cloneJob(record));
+    }
+    const channel = ownerChannel(ownerId);
+    if (channel !== ownerId) {
+      for (const listener of this.listeners.get(channel) ?? []) {
+        listener(cloneJob(record));
+      }
     }
   }
 }

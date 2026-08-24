@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { ProjectJobManager, type JobOperation } from "../src/jobs.ts";
+import { compositeOwner, ownerChannel, ProjectJobManager, type JobOperation } from "../src/jobs.ts";
 
 test("only one mutating job runs per project", async () => {
   const root = await mkdtemp(join(tmpdir(), "yt-jobs-"));
@@ -60,6 +60,82 @@ test("subscribers receive immutable job snapshots", async () => {
 
     assert.ok(snapshots.includes("running"));
     assert.ok(snapshots.includes("succeeded"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("ownerChannel and compositeOwner split and join on the :: separator", () => {
+  assert.equal(ownerChannel("ch::st"), "ch");
+  assert.equal(ownerChannel("ch"), "ch");
+  assert.equal(compositeOwner("ch", "st"), "ch::st");
+});
+
+test("two composite owners on the same channel run jobs concurrently; the same owner still serializes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "yt-jobs-"));
+  const manager = new ProjectJobManager(root);
+  const releases: Array<() => void> = [];
+  const blockingOperation: JobOperation = () =>
+    new Promise((resolve) => {
+      releases.push(() => resolve({ ok: true }));
+    });
+
+  try {
+    await manager.start(compositeOwner("ch", "a"), "story-pipeline", blockingOperation);
+    await manager.start(compositeOwner("ch", "b"), "story-pipeline", blockingOperation);
+
+    await assert.rejects(
+      () => manager.start(compositeOwner("ch", "a"), "story-stage", async () => ({})),
+      /already running/i,
+    );
+
+    releases.forEach((release) => release());
+    await manager.waitForIdle(compositeOwner("ch", "a"));
+    await manager.waitForIdle(compositeOwner("ch", "b"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a channel listener receives events for a composite owner on that channel, and the exact owner still does too", async () => {
+  const root = await mkdtemp(join(tmpdir(), "yt-jobs-"));
+  const manager = new ProjectJobManager(root);
+  const channelSnapshots: string[] = [];
+  const exactSnapshots: string[] = [];
+
+  try {
+    const unsubscribeChannel = manager.subscribe("ch", (job) => channelSnapshots.push(job.status));
+    const unsubscribeExact = manager.subscribe(compositeOwner("ch", "a"), (job) => exactSnapshots.push(job.status));
+
+    await manager.start(compositeOwner("ch", "a"), "story-pipeline", async ({ update }) => {
+      await update(50, "halfway");
+      return { ok: true };
+    });
+    await manager.waitForIdle(compositeOwner("ch", "a"));
+
+    unsubscribeChannel();
+    unsubscribeExact();
+
+    assert.ok(channelSnapshots.includes("running"));
+    assert.ok(channelSnapshots.includes("succeeded"));
+    assert.ok(exactSnapshots.includes("running"));
+    assert.ok(exactSnapshots.includes("succeeded"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("job records for a composite owner persist under the channel's jobs directory", async () => {
+  const root = await mkdtemp(join(tmpdir(), "yt-jobs-"));
+  const manager = new ProjectJobManager(root);
+
+  try {
+    const job = await manager.start(compositeOwner("ch", "a"), "story-pipeline", async () => ({ ok: true }));
+    await manager.waitForIdle(compositeOwner("ch", "a"));
+
+    const dir = join(root, "ch", "workspace", "jobs");
+    const names = await readdir(dir);
+    assert.ok(names.includes(`${job.id}.json`));
   } finally {
     await rm(root, { recursive: true, force: true });
   }

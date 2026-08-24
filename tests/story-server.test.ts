@@ -234,6 +234,41 @@ test("the pipeline runs as a channel job and reports its failure honestly", asyn
   });
 });
 
+test("two stories on one channel run pipeline jobs concurrently; the same story still 409s", async () => {
+  await withServer(async ({ running, headers }) => {
+    await writeStudioConfig(ENABLED_CONFIG);
+    const channel = await loadStoryChannel("es-horror");
+    await createStory(channel, { id: "story-001", title: "t" });
+    await createStory(channel, { id: "story-002", title: "t2" });
+
+    const runPipeline = (storyId: string) =>
+      fetch(`${running.url}/api/series/es-horror/stories/${storyId}/pipeline/run`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ confirmedPaidRequest: true }),
+      });
+
+    const firstStory = await runPipeline("story-001");
+    assert.equal(firstStory.status, 202);
+    const firstJob = (await firstStory.json()).job;
+
+    // A different story on the same channel is a different composite owner,
+    // so it must be free to start its own job concurrently.
+    const secondStory = await runPipeline("story-002");
+    assert.equal(secondStory.status, 202);
+    const secondJob = (await secondStory.json()).job;
+
+    // The same story is still one job at a time.
+    const repeatStory = await runPipeline("story-001");
+    assert.equal(repeatStory.status, 409);
+    assert.equal((await repeatStory.json()).code, "job-already-running");
+
+    // Both stories' jobs persist under the same channel jobs directory.
+    await waitForJob(join("projects", "es-horror", "workspace", "jobs", `${firstJob.id}.json`));
+    await waitForJob(join("projects", "es-horror", "workspace", "jobs", `${secondJob.id}.json`));
+  });
+});
+
 test("voice lab requests are gated and name their missing configuration", async () => {
   await withServer(async ({ running, headers }) => {
     await writeStudioConfig(ENABLED_CONFIG);

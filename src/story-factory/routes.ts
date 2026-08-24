@@ -40,10 +40,16 @@ export type StoryFactoryTools = {
   sendJson: (status: number, body: unknown) => void;
   sendError: (status: number, error: ApiErrorBody) => void;
   readBody: () => Promise<Record<string, unknown>>;
-  startChannelJob: (kind: JobKind, operation: (context: {
-    signal: AbortSignal;
-    update: (progress: number, message: string) => Promise<void>;
-  }) => Promise<unknown>) => Promise<void>;
+  startChannelJob: (
+    kind: JobKind,
+    operation: (context: {
+      signal: AbortSignal;
+      update: (progress: number, message: string) => Promise<void>;
+    }) => Promise<unknown>,
+    // Distinguishes concurrent jobs on the same channel (one per story) while
+    // they still persist and stream under the shared channel owner.
+    ownerSuffix?: string,
+  ) => Promise<void>;
 };
 
 /** Artifacts an operator may edit by hand. Media manifests and QA reports are machine-owned. */
@@ -273,7 +279,7 @@ async function routeStory(options: {
       return outcome.paused
         ? { paused: outcome.paused, status: deriveStoryStatus(outcome.story) }
         : { completed: true, status: deriveStoryStatus(outcome.story) };
-    });
+    }, storyId);
     return;
   }
 
@@ -300,7 +306,7 @@ async function routeStory(options: {
         sectionIndex,
       });
       return { completed: outcome.completed, paused: outcome.paused, status: deriveStoryStatus(outcome.story) };
-    });
+    }, storyId);
     return;
   }
 
@@ -321,7 +327,7 @@ async function routeStory(options: {
         chunkIndex,
       });
       return { completed: outcome.completed, status: deriveStoryStatus(outcome.story) };
-    });
+    }, storyId);
     return;
   }
 
@@ -342,7 +348,7 @@ async function routeStory(options: {
         sceneId,
       });
       return { completed: outcome.completed, status: deriveStoryStatus(outcome.story) };
-    });
+    }, storyId);
     return;
   }
 
