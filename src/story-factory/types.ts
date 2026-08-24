@@ -25,6 +25,7 @@ export const STORY_STAGES = [
   "thumbnail",
   "final-qa",
   "export",
+  "publish",
 ] as const;
 
 export type StoryStageId = (typeof STORY_STAGES)[number];
@@ -413,6 +414,16 @@ export type ExportManifest = {
   tagsPath: string;
   srtPath: string;
   packagedAt: string;
+};
+
+export type PublishArtifact = {
+  version: 1;
+  videoId: string;
+  uploadedAt: string;
+  privacyStatus: "private" | "unlisted" | "public";
+  publishAt?: string;
+  thumbnailSet: boolean;
+  title: string;
 };
 
 export type StoryFingerprints = {

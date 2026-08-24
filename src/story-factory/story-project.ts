@@ -53,6 +53,7 @@ export const STAGE_DEPS: Record<StoryStageId, StoryStageId[]> = {
   thumbnail: ["metadata"],
   "final-qa": ["render", "metadata", "thumbnail"],
   export: ["final-qa"],
+  publish: ["export"],
 };
 
 /** The artifact file each stage writes; the sections stage also writes sections/section-NNN.json. */
@@ -75,6 +76,7 @@ export const STAGE_ARTIFACT_FILES: Record<StoryStageId, string> = {
   metadata: "metadata.json",
   "final-qa": "final-qa.json",
   export: "export.json",
+  publish: "publish.json",
 };
 
 export type CreateStoryInput = {
@@ -263,6 +265,7 @@ export function deriveStoryStatus(story: StoryProject): StoryStatus {
     return "BUDGET_PAUSED";
   }
   if (runs.some((run) => run.status === "failed")) return "FAILED";
+  if (story.stages.publish?.status === "done") return "PUBLISHED";
   if (story.stages.export?.status === "done") return "READY_TO_PUBLISH";
   if (runs.some((run) => run.status === "done" || run.status === "stale")) return "IN_PROGRESS";
   return "DRAFT";

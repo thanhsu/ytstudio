@@ -75,7 +75,7 @@ import { STORY_STAGES } from "./types.ts";
  * a human click, per the studio's approval rule.
  */
 
-export const PIPELINE_STAGES: StoryStageId[] = STORY_STAGES.filter((stage) => stage !== "export");
+export const PIPELINE_STAGES: StoryStageId[] = STORY_STAGES.filter((stage) => stage !== "export" && stage !== "publish");
 
 export type StoryPipelineDeps = {
   config: StudioConfig;
@@ -152,7 +152,7 @@ export async function runSingleStage(
   deps: StoryPipelineDeps,
   options: SingleStageOptions = {},
 ): Promise<PipelineOutcome> {
-  if (stage === "export") {
+  if (stage === "export" || stage === "publish") {
     throw new Error("Export is packaged through its own endpoint after approvals, never as a pipeline stage.");
   }
   if (options.regenerate) {

@@ -5,7 +5,7 @@ import { readAiLog } from "./ai-log.ts";
 import { loadChannelCosts, loadStoryCost } from "./cost.ts";
 import { exportStoryPackage, StoryApprovalRequiredError } from "./export.ts";
 import { loadStoryChannel, saveStoryChannel, normalizeTtsProfile } from "./channel.ts";
-import { runSingleStage, runStoryPipeline, type StoryPipelineDeps } from "./pipeline.ts";
+import { classifyError, runSingleStage, runStoryPipeline, type StoryPipelineDeps } from "./pipeline.ts";
 import { STAGE_ROLES } from "./stage-llm.ts";
 import {
   approveStoryStage,
@@ -16,6 +16,7 @@ import {
   loadStory,
   readStageArtifact,
   saveStory,
+  saveStageRun,
   updateStory,
   writeStageArtifact,
   STAGE_ARTIFACT_FILES,
@@ -24,7 +25,10 @@ import { storyRelativePath } from "./paths.ts";
 import { editSectionText, listSections, readSection } from "./section-edit.ts";
 import { generateVoiceSample, listVoiceLabVoices } from "./voice-lab.ts";
 import { buildAuthUrl, rememberOAuthState } from "../youtube/oauth.ts";
-import { clearTokens, loadTokens } from "../youtube/token-store.ts";
+import { clearTokens, getFreshAccessToken, loadTokens } from "../youtube/token-store.ts";
+import { uploadVideo, setThumbnail } from "../youtube/upload.ts";
+import { resolveProjectPath } from "../project-paths.ts";
+import { readFile } from "node:fs/promises";
 import { isStoryStageId, type StoryApprovalStage, type StoryProject, type StoryStageId } from "./types.ts";
 
 /**
@@ -375,7 +379,7 @@ async function routeStory(options: {
   const stageRunMatch = /^stages\/([a-z-]+)\/run$/.exec(storyRest);
   if (stageRunMatch && method === "POST") {
     const stage = stageRunMatch[1];
-    if (!isStoryStageId(stage) || stage === "export") {
+    if (!isStoryStageId(stage) || stage === "export" || stage === "publish") {
       tools.sendError(404, { code: "unknown-stage", message: `Unknown runnable stage ${stage}.` });
       return;
     }
@@ -395,6 +399,68 @@ async function routeStory(options: {
         sectionIndex,
       });
       return { completed: outcome.completed, paused: outcome.paused, status: deriveStoryStatus(outcome.story) };
+    }, storyId);
+    return;
+  }
+
+  if (storyRest === "publish" && method === "POST") {
+    if (story.stages.export?.status !== "done") {
+      tools.sendError(409, { code: "approval-required", message: "Publish requires a completed export package first." });
+      return;
+    }
+    if (!await loadTokens(channelId)) {
+      tools.sendError(409, { code: "youtube-not-connected", message: "Connect YouTube for this channel before publishing." });
+      return;
+    }
+    const clientId = process.env[config.youtube.clientIdEnv]?.trim() ?? "";
+    const clientSecret = process.env[config.youtube.clientSecretEnv]?.trim() ?? "";
+    if (!clientId || !clientSecret) {
+      tools.sendError(409, { code: "youtube-not-configured", message: "Configure YouTube client credentials before publishing." });
+      return;
+    }
+    const body = await tools.readBody();
+    const privacyStatus = body.privacyStatus === "public" || body.privacyStatus === "unlisted" ? body.privacyStatus : "private";
+    const publishAt = typeof body.publishAt === "string" && body.publishAt.trim() ? body.publishAt.trim() : undefined;
+    await tools.startChannelJob("story-publish", async ({ signal, update }) => {
+      const current = await loadStory(channelId, storyId);
+      await saveStageRun(channelId, storyId, "publish", { status: "running", startedAt: new Date().toISOString(), lastError: undefined });
+      try {
+        const manifest = await readStageArtifact<import("./types.ts").ExportManifest>(channelId, storyId, "export");
+        if (!manifest) throw new Error("Export manifest is missing.");
+        const token = await getFreshAccessToken(channelId, { clientId, clientSecret });
+        const title = (await readFile(resolveProjectPath(channelId, manifest.titlePath), "utf8")).trim();
+        const description = await readFile(resolveProjectPath(channelId, manifest.descriptionPath), "utf8");
+        const tagsText = await readFile(resolveProjectPath(channelId, manifest.tagsPath), "utf8");
+        const uploaded = await uploadVideo({
+          accessToken: token,
+          filePath: resolveProjectPath(channelId, manifest.videoPath),
+          snippet: { title, description, tags: tagsText.split(",").map((tag) => tag.trim()).filter(Boolean) },
+          status: { privacyStatus, publishAt },
+          signal,
+          update: async (uploadedBytes, totalBytes) => update(totalBytes ? Math.round((uploadedBytes / totalBytes) * 85) : 20, "Uploading video"),
+        });
+        await setThumbnail({ accessToken: token, videoId: uploaded.videoId, filePath: resolveProjectPath(channelId, manifest.thumbnailPath), signal });
+        const artifact = {
+          version: 1 as const,
+          videoId: uploaded.videoId,
+          uploadedAt: new Date().toISOString(),
+          privacyStatus: publishAt ? "private" as const : privacyStatus,
+          ...(publishAt ? { publishAt } : {}),
+          thumbnailSet: true,
+          title,
+        };
+        await writeStageArtifact(channelId, storyId, "publish", artifact);
+        await saveStageRun(channelId, storyId, "publish", { status: "done", finishedAt: new Date().toISOString() });
+        await update(100, "Published to YouTube");
+        return { videoId: uploaded.videoId, status: deriveStoryStatus(current) };
+      } catch (error: unknown) {
+        await saveStageRun(channelId, storyId, "publish", {
+          status: "failed",
+          finishedAt: new Date().toISOString(),
+          lastError: { message: error instanceof Error ? error.message : String(error), classification: classifyError(error) },
+        });
+        throw error;
+      }
     }, storyId);
     return;
   }
