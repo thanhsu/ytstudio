@@ -17,7 +17,8 @@ export type JobKind =
   | "story-export"
   | "story-publish"
   | "compilation-render"
-  | "voiceover-render";
+  | "voiceover-render"
+  | "youtube-publish";
 export type JobStatus = "running" | "succeeded" | "failed" | "cancelled";
 
 export type JobRecord = {

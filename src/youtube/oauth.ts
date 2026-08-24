@@ -1,4 +1,4 @@
-import { redact } from "../redact.ts";
+import { normalizeYouTubeError } from "./errors.ts";
 
 const AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
@@ -82,7 +82,8 @@ async function requestToken(body: URLSearchParams, fetchImpl: OAuthFetch = fetch
       body,
     });
   } catch (error: unknown) {
-    throw new Error(`YouTube OAuth token request failed: ${error instanceof Error ? error.message : String(error)}`);
+    const mapped = normalizeYouTubeError(error);
+    throw new Error(`${mapped.code}: YouTube OAuth token request failed.`);
   }
   const raw = await response.text();
   let payload: Record<string, unknown> = {};
@@ -92,7 +93,8 @@ async function requestToken(body: URLSearchParams, fetchImpl: OAuthFetch = fetch
     // The redacted text below remains useful when Google returns non-JSON.
   }
   if (!response.ok) {
-    throw new Error(`YouTube OAuth token request failed (${response.status}): ${redact(raw).slice(0, 400)}`);
+    const mapped = normalizeYouTubeError({ response: { status: response.status, body: raw } });
+    throw new Error(`${mapped.code}: ${mapped.message}`);
   }
   const accessToken = typeof payload.access_token === "string" ? payload.access_token : "";
   if (!accessToken) throw new Error("YouTube OAuth token response did not contain access_token.");

@@ -1,4 +1,5 @@
 import { redact } from "../redact.ts";
+import { normalizeYouTubeError, redactedYouTubeError } from "./errors.ts";
 
 const STATS_ENDPOINT = "https://www.googleapis.com/youtube/v3/videos";
 
@@ -9,21 +10,29 @@ export async function fetchVideoStats(options: {
 }): Promise<Map<string, { views: number; likes: number; comments: number }>> {
   if (options.videoIds.length === 0) return new Map();
   const url = `${STATS_ENDPOINT}?part=statistics&id=${encodeURIComponent(options.videoIds.join(","))}`;
-  const response = await (options.fetch ?? fetch)(url, { headers: { authorization: `Bearer ${options.accessToken}` } });
+  let response: Response;
+  try { response = await (options.fetch ?? fetch)(url, { headers: { authorization: `Bearer ${options.accessToken}` } }); }
+  catch (error) { throw redactedYouTubeError(error); }
   if (!response.ok) {
-    throw new Error(`YouTube analytics request failed (${response.status}): ${redact((await response.text())).slice(0, 400)}`);
+    const mapped = normalizeYouTubeError({ response: { status: response.status, body: await response.text() } });
+    throw new Error(`${mapped.code}: ${mapped.message}`);
   }
   const body = await response.json() as { items?: Array<{ id?: unknown; statistics?: Record<string, unknown> }> };
   const result = new Map<string, { views: number; likes: number; comments: number }>();
   for (const item of body.items ?? []) {
     if (typeof item.id !== "string") continue;
-    result.set(item.id, {
-      views: nonNegativeCount(item.statistics?.viewCount),
-      likes: nonNegativeCount(item.statistics?.likeCount),
-      comments: nonNegativeCount(item.statistics?.commentCount),
-    });
+    result.set(item.id, normalizeVideoStats(item.statistics));
   }
   return result;
+}
+
+export function normalizeVideoStats(value: unknown): { views: number; likes: number; comments: number } {
+  const statistics = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  return {
+    views: nonNegativeCount(statistics.viewCount),
+    likes: nonNegativeCount(statistics.likeCount),
+    comments: nonNegativeCount(statistics.commentCount),
+  };
 }
 
 function nonNegativeCount(value: unknown): number {

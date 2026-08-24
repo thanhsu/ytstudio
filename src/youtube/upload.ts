@@ -2,6 +2,7 @@ import { createReadStream } from "node:fs";
 import { stat, readFile } from "node:fs/promises";
 import { Readable, Transform } from "node:stream";
 import { redact } from "../redact.ts";
+import { normalizeYouTubeError, redactedYouTubeError } from "./errors.ts";
 
 const VIDEO_INIT_ENDPOINT = "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status";
 const THUMBNAIL_ENDPOINT = "https://www.googleapis.com/upload/youtube/v3/thumbnails/set";
@@ -18,7 +19,7 @@ export async function uploadVideo(options: {
   const fetchImpl = options.fetch ?? fetch;
   const size = (await stat(options.filePath)).size;
   const status = options.status.publishAt ? { ...options.status, privacyStatus: "private" } : options.status;
-  const initResponse = await fetchImpl(VIDEO_INIT_ENDPOINT, {
+  const initResponse = await safeFetch(fetchImpl, VIDEO_INIT_ENDPOINT, {
     method: "POST",
     headers: {
       authorization: `Bearer ${options.accessToken}`,
@@ -42,7 +43,7 @@ export async function uploadVideo(options: {
     },
   });
   const body = Readable.toWeb(createReadStream(options.filePath).pipe(counter)) as unknown as BodyInit;
-  const uploadResponse = await fetchImpl(location, {
+  const uploadResponse = await safeFetch(fetchImpl, location, {
     method: "PUT",
     headers: { authorization: `Bearer ${options.accessToken}`, "content-length": String(size) },
     body,
@@ -62,7 +63,7 @@ export async function setThumbnail(options: {
   fetch?: typeof fetch;
   signal?: AbortSignal;
 }): Promise<void> {
-  const response = await (options.fetch ?? fetch)(`${THUMBNAIL_ENDPOINT}?videoId=${encodeURIComponent(options.videoId)}`, {
+  const response = await safeFetch(options.fetch ?? fetch, `${THUMBNAIL_ENDPOINT}?videoId=${encodeURIComponent(options.videoId)}`, {
     method: "POST",
     headers: { authorization: `Bearer ${options.accessToken}`, "content-type": "image/png" },
     body: await readFile(options.filePath),
@@ -73,5 +74,11 @@ export async function setThumbnail(options: {
 
 async function apiError(operation: string, response: Response): Promise<Error> {
   const body = await response.text();
-  return new Error(`${operation} failed (${response.status}): ${redact(body).slice(0, 400)}`);
+  const mapped = normalizeYouTubeError({ response: { status: response.status, body } });
+  return new Error(`${mapped.code}: ${mapped.message}`);
+}
+
+async function safeFetch(fetchImpl: typeof fetch, input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  try { return await fetchImpl(input, init); }
+  catch (error) { throw redactedYouTubeError(error); }
 }

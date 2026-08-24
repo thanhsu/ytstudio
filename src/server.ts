@@ -45,6 +45,7 @@ import { listCandidates, resolveSourcePath, type SourceRights } from "./sources/
 import { searchSourceMetadata, type SourceSearchPlatform, type YtDlpOptions } from "./sources/yt-dlp.ts";
 import { exportReviewPackage } from "./export-package.ts";
 import { routeStoryFactory } from "./story-factory/routes.ts";
+import { routeYouTube } from "./youtube/routes.ts";
 import { consumeOAuthState, exchangeCode } from "./youtube/oauth.ts";
 import { saveTokens, storedTokensFromResponse } from "./youtube/token-store.ts";
 import { compositeOwner, ProjectJobManager, type JobKind, type JobOperation } from "./jobs.ts";
@@ -363,9 +364,25 @@ async function routeRequest(
   if (seriesMatch) {
     const seriesId = validateProjectId(seriesMatch[1]);
     const rest = seriesMatch[2] ?? "";
+    if (rest.startsWith("youtube/") || rest === "analytics/refresh") {
+      const handled = await routeYouTube({
+        method,
+        rest,
+        url,
+        seriesId,
+        request,
+        tools: {
+          sendJson: (status, body) => sendJson(response, status, body),
+          sendError: (status, error) => sendError(response, status, error),
+          readBody: () => readJsonBody(request),
+          publishDeps: { jobManager: jobs },
+        },
+      });
+      if (handled) return;
+    }
     // The AI story factory owns these sub-namespaces. Its module receives the
     // server-private helpers as tools, so they stay private here.
-    if (rest === "story-channel" || rest === "stories" || rest.startsWith("stories/") || rest.startsWith("voice-lab/") || rest.startsWith("youtube/") || rest === "analytics/refresh" || rest === "calendar" || rest.startsWith("calendar/") || rest === "compilations" || rest.startsWith("compilations/") || rest === "prompts" || rest.startsWith("prompts/")) {
+    if (rest === "story-channel" || rest === "stories" || rest.startsWith("stories/") || rest.startsWith("voice-lab/") || rest === "calendar" || rest.startsWith("calendar/") || rest === "compilations" || rest.startsWith("compilations/") || rest === "prompts" || rest.startsWith("prompts/")) {
       await routeStoryFactory({
         method,
         rest,
@@ -377,6 +394,10 @@ async function routeRequest(
           readBody: () => readJsonBody(request),
           startChannelJob: (kind, operation, ownerSuffix) =>
             startProjectJob(response, ownerSuffix ? compositeOwner(seriesId, ownerSuffix) : seriesId, kind, operation),
+          startYouTubePublish: async (channelId, input) => {
+            const { startYouTubePublish } = await import("./youtube/publish.ts");
+            return startYouTubePublish(channelId, input, { jobManager: jobs });
+          },
         },
       });
       return;

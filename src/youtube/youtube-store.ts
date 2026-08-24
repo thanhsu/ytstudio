@@ -1,0 +1,41 @@
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { resolveProjectPath } from "../project-paths.ts";
+
+export type SourceKind = "story" | "review" | "compilation";
+export type PrivacyStatus = "public" | "private" | "unlisted";
+export type JobStatus = "queued" | "uploading" | "thumbnail-uploading" | "completed" | "failed" | "cancelled";
+export type YouTubeVideoLink = { version: 1; videoId: string; channelId: string; sourceKind: SourceKind; sourceId: string; exportPath: string; title: string; privacyStatus: PrivacyStatus; publishAt: string | null; createdAt: string; updatedAt: string };
+export type YouTubePublishJob = { version: 1; id: string; channelId: string; sourceKind: SourceKind; sourceId: string; status: JobStatus; requestedPrivacy: PrivacyStatus; requestedPublishAt: string | null; videoId: string | null; progress: number; error: { code: string; message: string; retryable: boolean } | null; createdAt: string; updatedAt: string };
+export type AnalyticsSnapshot = { views: number; likes: number; comments: number; fetchedAt: string };
+export type YouTubeStore = { version: 1; remoteChannelId: string | null; links: YouTubeVideoLink[]; jobs: YouTubePublishJob[]; analytics: Record<string, AnalyticsSnapshot> };
+
+const storePath = (seriesId: string) => resolveProjectPath(seriesId, "workspace", "youtube", "store.json");
+const emptyStore = (): YouTubeStore => ({ version: 1, remoteChannelId: null, links: [], jobs: [], analytics: {} });
+
+export async function loadYouTubeStore(seriesId: string): Promise<YouTubeStore> { try { return normalize(JSON.parse(await readFile(storePath(seriesId), "utf8"))); } catch (error: any) { if (error?.code === "ENOENT") return emptyStore(); throw error; } }
+export async function saveYouTubeStore(seriesId: string, store: YouTubeStore): Promise<void> { const path = storePath(seriesId); await mkdir(resolveProjectPath(seriesId, "workspace", "youtube"), { recursive: true }); const temp = `${path}.tmp-${process.pid}-${Date.now()}`; await writeFile(temp, `${JSON.stringify(normalize(store), null, 2)}\n`, "utf8"); await rename(temp, path); }
+export async function upsertVideoLink(seriesId: string, link: YouTubeVideoLink): Promise<YouTubeStore> { const store = await loadYouTubeStore(seriesId); const index = store.links.findIndex((item) => item.videoId === link.videoId); if (index >= 0) store.links[index] = normalizeLink(link)!; else store.links.push(normalizeLink(link)!); await saveYouTubeStore(seriesId, store); return store; }
+export async function removeVideoLink(seriesId: string, videoId: string): Promise<YouTubeStore> { const store = await loadYouTubeStore(seriesId); store.links = store.links.filter((link) => link.videoId !== videoId); await saveYouTubeStore(seriesId, store); return store; }
+export async function upsertPublishJob(seriesId: string, job: YouTubePublishJob): Promise<YouTubeStore> { const store = await loadYouTubeStore(seriesId); const index = store.jobs.findIndex((item) => item.id === job.id); if (index >= 0) store.jobs[index] = normalizeJob(job)!; else store.jobs.push(normalizeJob(job)!); await saveYouTubeStore(seriesId, store); return store; }
+export async function listPublishJobs(seriesId: string): Promise<YouTubePublishJob[]> { return (await loadYouTubeStore(seriesId)).jobs; }
+export async function getAnalyticsSnapshot(seriesId: string, videoId: string): Promise<AnalyticsSnapshot | null> { return (await loadYouTubeStore(seriesId)).analytics[videoId] ?? null; }
+export async function updateAnalyticsSnapshots(seriesId: string, updates: Record<string, AnalyticsSnapshot>): Promise<YouTubeStore> {
+  const store = await loadYouTubeStore(seriesId);
+  for (const [videoId, snapshot] of Object.entries(updates)) {
+    const normalized = normalizeAnalytics(snapshot);
+    if (normalized) store.analytics[videoId] = normalized;
+  }
+  await saveYouTubeStore(seriesId, store);
+  return store;
+}
+
+function normalize(value: any): YouTubeStore { const result = emptyStore(); if (!value || typeof value !== "object") return result; result.remoteChannelId = typeof value.remoteChannelId === "string" && /^UC[\w-]+$/.test(value.remoteChannelId) ? value.remoteChannelId : null; result.links = Array.isArray(value.links) ? value.links.map(normalizeLink).filter(Boolean) as YouTubeVideoLink[] : []; result.jobs = Array.isArray(value.jobs) ? value.jobs.map(normalizeJob).filter(Boolean) as YouTubePublishJob[] : []; if (value.analytics && typeof value.analytics === "object") for (const [id, snapshot] of Object.entries(value.analytics)) { const normalized = normalizeAnalytics(snapshot); if (normalized) result.analytics[id] = normalized; } return result; }
+function normalizeLink(value: any): YouTubeVideoLink | null { if (!value || typeof value.videoId !== "string" || typeof value.channelId !== "string" || !/^UC[\w-]+$/.test(value.channelId) || !isSource(value.sourceKind) || typeof value.sourceId !== "string") return null; return { version: 1, videoId: value.videoId, channelId: value.channelId, sourceKind: value.sourceKind, sourceId: value.sourceId, exportPath: string(value.exportPath), title: string(value.title), privacyStatus: isPrivacy(value.privacyStatus) ? value.privacyStatus : "private", publishAt: nullableString(value.publishAt), createdAt: string(value.createdAt), updatedAt: string(value.updatedAt) }; }
+function normalizeJob(value: any): YouTubePublishJob | null { if (!value || typeof value.id !== "string" || typeof value.channelId !== "string" || !/^UC[\w-]+$/.test(value.channelId) || !isSource(value.sourceKind) || typeof value.sourceId !== "string") return null; return { version: 1, id: value.id, channelId: value.channelId, sourceKind: value.sourceKind, sourceId: value.sourceId, status: isStatus(value.status) ? value.status : "failed", requestedPrivacy: isPrivacy(value.requestedPrivacy) ? value.requestedPrivacy : "private", requestedPublishAt: nullableString(value.requestedPublishAt), videoId: typeof value.videoId === "string" ? value.videoId : null, progress: number(value.progress), error: value.error && typeof value.error === "object" ? { code: string(value.error.code), message: string(value.error.message), retryable: Boolean(value.error.retryable) } : null, createdAt: string(value.createdAt), updatedAt: string(value.updatedAt) }; }
+function normalizeAnalytics(value: any): AnalyticsSnapshot | null { if (!value || typeof value !== "object" || typeof value.fetchedAt !== "string") return null; return { views: number(value.views), likes: number(value.likes), comments: number(value.comments), fetchedAt: value.fetchedAt }; }
+function isSource(value: unknown): value is SourceKind { return value === "story" || value === "review" || value === "compilation"; }
+function isPrivacy(value: unknown): value is PrivacyStatus { return value === "public" || value === "private" || value === "unlisted"; }
+function isStatus(value: unknown): value is JobStatus { return value === "queued" || value === "uploading" || value === "thumbnail-uploading" || value === "completed" || value === "failed" || value === "cancelled"; }
+function string(value: unknown): string { return typeof value === "string" ? value : ""; }
+function nullableString(value: unknown): string | null { return typeof value === "string" ? value : null; }
+function number(value: unknown): number { const n = Number(value); return Number.isFinite(n) && n >= 0 ? n : 0; }
