@@ -86,7 +86,7 @@ async function refreshProjectView() {
     await mountReviewProject(route);
     return;
   }
-  await selectProjectData(appState.selectedProject);
+  await selectProjectData(appState.selectedProject, { navigateOnFailure: false });
 }
 
 export function renderWorkflowBoard() {
@@ -198,7 +198,13 @@ function bindStageRail() {
 
 // The fetch half of the old selectProject(): loads the snapshot and the edit
 // manifest, opens the event stream, and renders nothing.
-export async function selectProjectData(projectId) {
+//
+// navigateOnFailure defaults to true for the deep-link path (mountReviewProject):
+// a bad project id should bounce the user back to the projects list. The
+// background-refresh path (refreshProjectView, below) passes false: a fetch
+// failure there happens while the user may be on an unrelated screen, and must
+// never force-navigate them off it.
+export async function selectProjectData(projectId, { navigateOnFailure = true } = {}) {
   appState.selectedProject = projectId;
   ensureProjectEventStream(projectId);
   const [response] = await Promise.all([
@@ -208,7 +214,7 @@ export async function selectProjectData(projectId) {
   const data = await response.json();
   if (!response.ok) {
     setStatus(data.message ?? `Project ${projectId} not found.`);
-    navigate("#/projects");
+    if (navigateOnFailure) navigate("#/projects");
     return false;
   }
   appState.projectSnapshot = data;
@@ -605,6 +611,7 @@ function uploadedAssetList(assets) {
     form.append(
       link,
       paragraph(`${asset.mediaType} · ${formatBytes(asset.sizeBytes)}`),
+      ...(asset.sizeWarning ? [assetWarning(asset.sizeWarning)] : []),
       field("Usage purpose", "usagePurpose", asset.usagePurpose, "text", "Explain how this asset supports commentary"),
       checkboxField("Rights confirmed", "rightsConfirmed", asset.rightsConfirmed),
       actionButton("Save asset details", null, "submit", "primary"),
@@ -1144,8 +1151,15 @@ async function uploadAsset(form) {
   const response = await fetch(projectApiUrl("assets"), { method: "POST", body });
   const data = await response.json();
   if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
-  setStatus(`Upload Asset complete: ${data.asset.relativePath}`);
+  const warning = data.asset.sizeWarning ? ` Warning: ${data.asset.sizeWarning}` : "";
+  setStatus(`Upload Asset complete: ${data.asset.relativePath}.${warning}`);
   await refreshProjectView();
+}
+
+function assetWarning(message) {
+  const notice = paragraph(message);
+  notice.className = "asset-warning";
+  return notice;
 }
 
 async function saveAssetMetadata(assetId, form) {
