@@ -257,12 +257,23 @@ function buildImageZoomFilter(zoom: ZoomEffect, dimensions: EffectDimensions, du
   return `zoompan=z='${expression}':d=${frames}:s=${dimensions.width}x${dimensions.height}:fps=${ZOOM_FPS}`;
 }
 
+// A plain `scale=`/`crop=` expression driven by the `t` frame variable requires
+// `eval=frame` to be re-evaluated every frame; without it modern ffmpeg
+// evaluates the size expression once at init and fails outright ("frame
+// variables not valid in init eval_mode"), which used to kill the whole
+// render whenever slow-in/slow-out zoom was applied to a VIDEO segment.
+// zoompan sidesteps the issue entirely (its `z` expression is always
+// evaluated per output frame), so video zoom mirrors the image zoompan idiom
+// below with `d=1` -- each real input frame is emitted once (no looping of a
+// single still frame) at the deterministic `ZOOM_FPS` the rest of the
+// pipeline already assumes.
 function buildVideoZoomFilter(zoom: ZoomEffect, dimensions: EffectDimensions, duration: number): string {
-  const safeDuration = duration > 0 ? duration : 1;
+  const frames = Math.max(1, Math.round(duration * ZOOM_FPS));
+  const denominator = Math.max(frames - 1, 1);
   const start = zoom === "slow-in" ? 1 : 1 + VIDEO_ZOOM_DELTA;
   const sign = zoom === "slow-in" ? "+" : "-";
-  const factorExpression = `${formatNumber(start)}${sign}${formatNumber(VIDEO_ZOOM_DELTA)}*t/${formatNumber(safeDuration)}`;
-  return `scale=w='iw*(${factorExpression})':h='ih*(${factorExpression})',crop=${dimensions.width}:${dimensions.height}`;
+  const expression = `${formatNumber(start)}${sign}${formatNumber(VIDEO_ZOOM_DELTA)}*on/${denominator}`;
+  return `zoompan=z='${expression}':d=1:s=${dimensions.width}x${dimensions.height}:fps=${ZOOM_FPS}`;
 }
 
 function watermarkOverlayPosition(position: WatermarkPosition): string {

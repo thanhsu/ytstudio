@@ -138,10 +138,15 @@ test("zoom slow-in preserves output dimensions for images via zoompan", () => {
   assert.match(filter, /s=1080x1920/);
 });
 
-test("zoom slow-out uses bounded scale/crop motion for video and preserves dimensions", () => {
+test("zoom slow-out uses zoompan motion for video (not init-eval scale/crop) and preserves dimensions", () => {
   const filter = buildSegmentEffectFilter("[v0]", "[v1]", effects({ zoom: "slow-out" }), DIMENSIONS, 8, "video");
-  assert.doesNotMatch(filter, /zoompan/);
-  assert.match(filter, /crop=1080:1920/);
+  // Video zoom must use zoompan (per-frame eval) rather than a scale= size
+  // expression driven by `t`, which ffmpeg evaluates once at init by default
+  // and rejects outright. `d=1` distinguishes the video idiom (emit each real
+  // input frame once) from the image idiom (`d=<held frame count>`).
+  assert.match(filter, /zoompan=z='[^']+':d=1:s=1080x1920:fps=30/);
+  assert.doesNotMatch(filter, /scale=w=/);
+  assert.doesNotMatch(filter, /crop=/);
 });
 
 test("zoom none emits no zoom filter", () => {
@@ -167,13 +172,13 @@ test("chain applies filters in speed, zoom, color, blur, fade order", () => {
     "video",
   );
   const setptsIndex = filter.indexOf("setpts=PTS/1.2");
-  const zoomIndex = filter.indexOf("scale=w=");
+  const zoomIndex = filter.indexOf("zoompan=");
   const eqIndex = filter.indexOf("eq=brightness");
   const blurIndex = filter.indexOf("boxblur=5");
   const fadeIndex = filter.indexOf("fade=t=in");
 
   assert.ok(setptsIndex >= 0, "expected setpts in chain");
-  assert.ok(zoomIndex >= 0, "expected scale-based zoom in chain");
+  assert.ok(zoomIndex >= 0, "expected zoompan-based zoom in chain");
   assert.ok(eqIndex >= 0, "expected eq in chain");
   assert.ok(blurIndex >= 0, "expected boxblur in chain");
   assert.ok(fadeIndex >= 0, "expected fade in chain");
@@ -379,7 +384,7 @@ test("composing zoom, grayscale color, blur, watermark, and fade for one segment
   assert.equal((graph.match(/hue=s=/g) ?? []).length, 1);
   assert.match(graph, /hue=s=0\.4\b/); // 0.8 * (1 - 0.5)
   assert.match(graph, /boxblur=6/);
-  assert.match(graph, /scale=w=/); // video zoom motion
+  assert.match(graph, /zoompan=/); // video zoom motion
   assert.match(graph, /movie=/); // watermark load
   assert.match(graph, /fade=t=in/);
   assert.match(graph, /fade=t=out/);

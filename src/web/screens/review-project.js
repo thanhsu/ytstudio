@@ -856,18 +856,68 @@ function effectsSummary(effects) {
   return parts.join(" · ");
 }
 
+// Native min/max validation never fires because "Save effects" is a plain
+// type="button" (there is no submit to trigger it), and formValues() maps a
+// cleared number input to Number("") === 0 -- a blanked contrast/saturation
+// field would otherwise silently save a LEGAL 0 (black/desaturated output).
+// Each numeric effect field is therefore read from the form here as a raw
+// string: an empty value falls back to the segment's current persisted
+// value (never 0), and an out-of-range or non-finite value is rejected with
+// a field-specific error instead of ever reaching the API.
+const EFFECT_NUMBER_FIELDS = [
+  { name: "speed", label: "Speed", min: 0.5, max: 2, fallback: (effects) => effects.speed },
+  { name: "color.brightness", label: "Brightness", min: -1, max: 1, fallback: (effects) => (effects.color ?? NEUTRAL_SEGMENT_EFFECTS.color).brightness },
+  { name: "color.contrast", label: "Contrast", min: 0, max: 2, fallback: (effects) => (effects.color ?? NEUTRAL_SEGMENT_EFFECTS.color).contrast },
+  { name: "color.saturation", label: "Saturation", min: 0, max: 2, fallback: (effects) => (effects.color ?? NEUTRAL_SEGMENT_EFFECTS.color).saturation },
+  { name: "color.grayscale", label: "Grayscale", min: 0, max: 1, fallback: (effects) => (effects.color ?? NEUTRAL_SEGMENT_EFFECTS.color).grayscale },
+  { name: "blur", label: "Blur", min: 0, max: 40, fallback: (effects) => effects.blur },
+  { name: "watermark.scale", label: "Watermark scale", min: 0.05, max: 0.5, fallback: (effects) => effects.watermark?.scale ?? 0.12 },
+  { name: "watermark.opacity", label: "Watermark opacity", min: 0, max: 1, fallback: (effects) => effects.watermark?.opacity ?? 0.2 },
+];
+
+// Resolves every numeric effect field against the live form: empty input ->
+// the segment's current persisted value; a present but invalid value ->
+// collected as an error (never coerced to 0 or silently clamped).
+function resolveEffectNumberFields(form, currentEffects) {
+  const values = {};
+  const errors = [];
+  for (const fieldDef of EFFECT_NUMBER_FIELDS) {
+    const input = form.elements[fieldDef.name];
+    const raw = typeof input?.value === "string" ? input.value.trim() : "";
+    if (raw === "") {
+      values[fieldDef.name] = fieldDef.fallback(currentEffects);
+      continue;
+    }
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed < fieldDef.min || parsed > fieldDef.max) {
+      errors.push(`${fieldDef.label} must be a number between ${fieldDef.min} and ${fieldDef.max}.`);
+      continue;
+    }
+    values[fieldDef.name] = parsed;
+  }
+  return { values, errors };
+}
+
 // Reassembles the flat, dotted field names from the Effects section (kept
 // flat so they can share the Clip Inspector form without colliding with the
 // existing assetId/fitMode/etc. names) into the nested patch shape the PATCH
 // route expects. An empty watermark asset clears the watermark rather than
-// sending an incomplete object.
-function buildEffectsPatch(values) {
-  const watermarkAssetId = values["watermark.assetId"];
+// sending an incomplete object. Returns null (after reporting a
+// field-specific error via setStatus) when a numeric field fails validation,
+// so the caller can abort the save without calling the API. The server
+// stays authoritative regardless -- this is a UX guard, not a trust boundary.
+function buildEffectsPatch(form, currentEffects) {
+  const { values, errors } = resolveEffectNumberFields(form, currentEffects);
+  if (errors.length > 0) {
+    setStatus(errors.join(" "));
+    return null;
+  }
+  const watermarkAssetId = form.elements["watermark.assetId"]?.value ?? "";
   return {
     speed: values.speed,
-    zoom: values.zoom,
-    transitionIn: values.transitionIn,
-    transitionOut: values.transitionOut,
+    zoom: form.elements.zoom?.value,
+    transitionIn: form.elements.transitionIn?.value,
+    transitionOut: form.elements.transitionOut?.value,
     color: {
       brightness: values["color.brightness"],
       contrast: values["color.contrast"],
@@ -878,7 +928,7 @@ function buildEffectsPatch(values) {
     watermark: watermarkAssetId
       ? {
           assetId: watermarkAssetId,
-          position: values["watermark.position"],
+          position: form.elements["watermark.position"]?.value,
           scale: values["watermark.scale"],
           opacity: values["watermark.opacity"],
         }
@@ -995,7 +1045,9 @@ function renderInspector(segment, assets) {
     field("Watermark scale", "watermark.scale", String(effects.watermark?.scale ?? 0.12), "number", "", "any", "0.05", "0.5"),
     field("Watermark opacity", "watermark.opacity", String(effects.watermark?.opacity ?? 0.2), "number", "", "any", "0", "1"),
     actionButton("Save effects", () => {
-      saveVisualMappingEffects(segment.id, buildEffectsPatch(formValues(form))).catch((error) => setStatus(error.message));
+      const patch = buildEffectsPatch(form, effects);
+      if (!patch) return;
+      saveVisualMappingEffects(segment.id, patch).catch((error) => setStatus(error.message));
     }),
     actionButton("Reset effects", () => {
       resetVisualMappingEffects(segment.id).catch((error) => setStatus(error.message));
@@ -1306,8 +1358,19 @@ async function approveVisualMapping() {
 
 async function saveVisualMappingSegment(sceneId, form) {
   const values = boolFormValues(form);
+  // The Clip Inspector form now shares a single element with the Effects
+  // section, whose fields (speed, "color.brightness", "watermark.assetId",
+  // ...) are not part of the mapping shape. Pick only the mapping fields so
+  // "Save mapping" never leaks effect keys into this PATCH body.
+  const patch = {
+    assetId: values.assetId,
+    fitMode: values.fitMode,
+    sourceStartSeconds: values.sourceStartSeconds,
+    sourceDurationSeconds: values.sourceDurationSeconds,
+    muteSourceAudio: values.muteSourceAudio,
+  };
   const response = await fetch(projectApiUrl(`visual-mapping/segments/${encodeURIComponent(sceneId)}`), {
-    method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(values),
+    method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(patch),
   });
   const data = await response.json();
   if (!response.ok) throw new Error(`${data.code}: ${data.message}`);

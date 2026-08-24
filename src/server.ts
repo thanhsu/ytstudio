@@ -98,7 +98,7 @@ import {
   saveVisualMapping,
   validateVisualMapping,
 } from "./visual-mapping.ts";
-import { DEFAULT_SEGMENT_EFFECTS, patchSegmentEffects, validateSegmentEffects } from "./visual-effects.ts";
+import { DEFAULT_SEGMENT_EFFECTS, patchSegmentEffects, validateSegmentEffects, type SegmentEffects } from "./visual-effects.ts";
 
 export type StudioServerOptions = {
   staticRoot?: string;
@@ -986,7 +986,7 @@ async function routeRequest(
     if (typeof body.muteSourceAudio === "boolean") segment.muteSourceAudio = body.muteSourceAudio;
     const manifest = await loadAssetManifest(projectId);
     if (body.effects !== undefined) {
-      let patchedEffects;
+      let patchedEffects: SegmentEffects;
       try {
         patchedEffects = patchSegmentEffects(segment.effects, body.effects);
       } catch (error: unknown) {
@@ -1074,7 +1074,11 @@ async function routeRequest(
       const asset = await updateAssetMetadata(projectId, assetMetadataMatch[1], {
         usagePurpose,
         rightsConfirmed: body.rightsConfirmed === true,
-        role: body.role === "logo" ? "logo" : undefined,
+        // Symmetric with rightsStatus below: pass any provided string through
+        // unchanged so updateAssetMetadata's own validation rejects a
+        // non-"logo" value with a 400 instead of it being silently coerced to
+        // undefined (leave-unchanged) and returning 200.
+        role: typeof body.role === "string" ? (body.role as "logo") : undefined,
         rightsStatus: typeof body.rightsStatus === "string" ? (body.rightsStatus as AssetRightsStatus) : undefined,
       });
       sendJson(response, 200, { ok: true, asset });

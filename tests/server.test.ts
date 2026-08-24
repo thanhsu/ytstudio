@@ -425,6 +425,28 @@ test("copyright and asset actions run from the studio API", async () => {
       // A validation error here must be a field-specific 400, not a generic 500.
       assert.equal(invalidRole.status, 400);
       assert.match((await invalidRole.json()).message, /rights status/i);
+
+      // Symmetric with rightsStatus above: a non-"logo" role string must also
+      // 400 with a field-specific message, not be silently coerced to
+      // undefined (leave-unchanged) and return 200.
+      const invalidRoleValue = await fetch(
+        `${running.url}/api/projects/sample-project/assets/${encodeURIComponent(body.asset.id)}`,
+        {
+          method: "PATCH",
+          headers: { "content-type": "application/json", origin: running.url },
+          body: JSON.stringify({
+            usagePurpose: "Channel logo",
+            rightsConfirmed: true,
+            role: "narrator",
+          }),
+        },
+      );
+      assert.equal(invalidRoleValue.status, 400);
+      assert.match((await invalidRoleValue.json()).message, /role/i);
+      // The earlier, valid role="logo" update must survive the rejected patch.
+      const snapshotAfterReject = await (await fetch(`${running.url}/api/projects/sample-project`)).json();
+      const persistedAsset = snapshotAfterReject.assetManifest.assets.find((candidate: { id: string }) => candidate.id === body.asset.id);
+      assert.equal(persistedAsset.role, "logo");
     } finally {
       await running.close();
     }

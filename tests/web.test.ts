@@ -429,6 +429,56 @@ test("saving or resetting effects never implies mapping approval, and the monito
   assert.match(script, /not frame-accurate/);
 });
 
+test("Save effects treats a cleared numeric input as unchanged, not 0, and rejects out-of-range values", async () => {
+  const script = await readWebScripts();
+
+  // "Save effects" is a plain type="button" (no submit), so native min/max
+  // never runs, and formValues() maps Number("") to 0 -- a cleared
+  // contrast/saturation field would otherwise silently save a legal 0
+  // (black/desaturated output). The fix reads each numeric effect field as a
+  // raw string and falls back to the segment's current persisted value when
+  // it is blank, instead of coercing blank to zero.
+  assert.match(script, /function resolveEffectNumberFields\(form, currentEffects\)/);
+  assert.match(script, /raw === ""/);
+  assert.match(script, /fallback\(currentEffects\)/);
+  assert.doesNotMatch(script, /values\[fieldDef\.name\] = 0/);
+
+  // Every range from the finding is enforced, not just checked loosely.
+  assert.match(script, /name: "speed",[\s\S]*?min: 0\.5, max: 2/);
+  assert.match(script, /name: "color\.brightness",[\s\S]*?min: -1, max: 1/);
+  assert.match(script, /name: "color\.contrast",[\s\S]*?min: 0, max: 2/);
+  assert.match(script, /name: "color\.saturation",[\s\S]*?min: 0, max: 2/);
+  assert.match(script, /name: "color\.grayscale",[\s\S]*?min: 0, max: 1/);
+  assert.match(script, /name: "blur",[\s\S]*?min: 0, max: 40/);
+  assert.match(script, /name: "watermark\.scale",[\s\S]*?min: 0\.05, max: 0\.5/);
+  assert.match(script, /name: "watermark\.opacity",[\s\S]*?min: 0, max: 1/);
+
+  // A present-but-invalid value is collected as a field-specific error and
+  // buildEffectsPatch returns null so the caller aborts before calling the API.
+  assert.match(script, /Number\.isFinite\(parsed\)/);
+  assert.match(script, /errors\.push\(`\$\{fieldDef\.label\} must be a number between/);
+  assert.match(script, /if \(errors\.length > 0\) \{\s*setStatus\(errors\.join\(" "\)\);\s*return null;/);
+  assert.match(script, /const patch = buildEffectsPatch\(form, effects\);\s*if \(!patch\) return;/);
+});
+
+test("Save mapping sends only mapping fields, never the shared form's effect keys", async () => {
+  const script = await readWebScripts();
+
+  // The Clip Inspector form now shares one element with the Effects section,
+  // so serializing the whole form (formValues/boolFormValues) would leak
+  // speed, "color.brightness", "watermark.assetId", etc. as top-level keys
+  // into this PATCH body. Only the mapping fields must be picked explicitly.
+  const fn = /async function saveVisualMappingSegment\(sceneId, form\) \{[\s\S]*?\n\}/.exec(script)?.[0];
+  assert.ok(fn, "expected to find saveVisualMappingSegment");
+  assert.match(fn!, /assetId: values\.assetId/);
+  assert.match(fn!, /fitMode: values\.fitMode/);
+  assert.match(fn!, /sourceStartSeconds: values\.sourceStartSeconds/);
+  assert.match(fn!, /sourceDurationSeconds: values\.sourceDurationSeconds/);
+  assert.match(fn!, /muteSourceAudio: values\.muteSourceAudio/);
+  assert.doesNotMatch(fn!, /body: JSON\.stringify\(values\)/);
+  assert.match(fn!, /body: JSON\.stringify\(patch\)/);
+});
+
 test("the assets UI exposes role and rights-status controls for logo eligibility", async () => {
   const script = await readWebScripts();
   assert.match(script, /ASSET_ROLE_OPTIONS/);

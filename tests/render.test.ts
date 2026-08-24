@@ -444,7 +444,7 @@ test("a segment combining zoom, grayscale color, blur, watermark, and fade produ
   assert.match(filter, /hue=s=0\.45/); // 0.9 * (1 - 0.5)
   assert.doesNotMatch(filter, /hue=s=0\.9\b/);
   assert.match(filter, /boxblur=8/);
-  assert.match(filter, /scale=w=/);
+  assert.match(filter, /zoompan=/);
   assert.match(filter, /movie=/);
   assert.match(filter, /fade=t=in/);
   assert.match(filter, /fade=t=out/);
