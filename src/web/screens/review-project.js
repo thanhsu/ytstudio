@@ -41,7 +41,7 @@ export async function mountReviewProject(route) {
   // A deep link lands here without the boot fetch, and the stage screens read
   // the studio config and the workflow templates.
   if (!appState.config) await refreshAppData();
-  await selectProjectData(route.id);
+  if (!(await selectProjectData(route.id))) return;
   const phase = route.phase ?? "overview";
   const steps = appState.projectSnapshot?.workflow?.steps ?? [];
   const phaseStates = Object.fromEntries(
@@ -53,6 +53,7 @@ export async function mountReviewProject(route) {
     route,
     phaseStates,
     withWorkflowBoard: phase === "overview",
+    withPreview: true,
     onRunTasks: () => runAvailableTasks(),
   });
   if (phase === "overview") {
@@ -62,7 +63,10 @@ export async function mountReviewProject(route) {
   } else {
     renderStageRail(phase);
     if (phaseForStage(appState.activeStage) !== phase) {
-      appState.activeStage = REVIEW_PHASES.find((reviewPhase) => reviewPhase.id === phase).stages[0];
+      const phaseStages = REVIEW_PHASES.find((reviewPhase) => reviewPhase.id === phase).stages;
+      const workflowStages = steps.map((step) => step.stage);
+      const available = phaseStages.filter((stage) => workflowStages.includes(stage));
+      appState.activeStage = available[0] ?? phaseStages[0];
     }
     renderStage();
   }
@@ -201,11 +205,18 @@ export async function selectProjectData(projectId) {
     fetch(`/api/projects/${encodeURIComponent(projectId)}`),
     loadEditManifestState(projectId),
   ]);
-  appState.projectSnapshot = await response.json();
+  const data = await response.json();
+  if (!response.ok) {
+    setStatus(data.message ?? `Project ${projectId} not found.`);
+    navigate("#/projects");
+    return false;
+  }
+  appState.projectSnapshot = data;
   const workflowStages = appState.projectSnapshot.workflow?.steps?.map((step) => step.stage) ?? [];
   if (!workflowStages.includes(appState.activeStage)) {
     appState.activeStage = workflowStages[0] ?? "brief";
   }
+  return true;
 }
 
 export function renderStage() {

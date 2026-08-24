@@ -8,7 +8,6 @@ export const appState = {
   brandKits: {},
   thumbnailBriefs: {},
   selectedSeries: null,
-  selectedSeriesTab: "overview",
   selectedReviewProjectId: null,
   selectedProject: null,
   activeStage: "brief",

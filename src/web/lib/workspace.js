@@ -16,6 +16,7 @@ const WORKSPACE_PHASES = ["overview", "content", "edit", "publish"];
  *   route: Route,                // current route (id + phase)
  *   phaseStates?: Record<string,string>, // phase id -> derivePhaseState value
  *   withWorkflowBoard?: boolean, // overview board (review projects)
+ *   withPreview?: boolean,       // audio/video preview aside (review projects only)
  *   onRunTasks?: () => void,
  * }
  */
@@ -75,19 +76,23 @@ export function mountWorkspace(options) {
     <div id="series-panel"></div>
     <div id="stage-content"></div>`;
 
-  const preview = document.createElement("aside");
-  preview.className = "preview";
-  preview.innerHTML = `
-    <h2>Preview</h2>
-    <audio id="audio-preview" controls></audio>
-    <video id="video-preview" controls></video>`;
-
   workspace.append(phaseBar, board, rail, panel);
-  const layout = document.createElement("div");
-  layout.className = "workspace-layout";
-  layout.append(workspace, preview);
 
-  view.replaceChildren(layout);
+  let root = workspace;
+  if (options.withPreview) {
+    const preview = document.createElement("aside");
+    preview.className = "preview";
+    preview.innerHTML = `
+      <h2>Preview</h2>
+      <audio id="audio-preview" controls></audio>
+      <video id="video-preview" controls></video>`;
+    const layout = document.createElement("div");
+    layout.className = "workspace-layout";
+    layout.append(workspace, preview);
+    root = layout;
+  }
+
+  view.replaceChildren(root);
   bindWorkspaceRefs(view);
-  return layout;
+  return root;
 }

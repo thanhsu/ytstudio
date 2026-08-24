@@ -41,6 +41,12 @@ async function detectStoryChannels() {
   screenState.storyChannelIds = new Set(checks.filter(([, isChannel]) => isChannel).map(([id]) => id));
 }
 
+// A series' episodes each carry their own auto-created review project. Those
+// stay reachable via the series workspace, not as a top-level Review row.
+function seriesEpisodeProjectIds() {
+  return new Set(appState.series.flatMap((series) => series.episodes.map((episode) => episode.episodeProjectId)));
+}
+
 /**
  * One row per openable workspace. GET /api/projects answers with ids only, so a
  * review row carries its id; a series row adds its workflow type. There is no
@@ -48,7 +54,9 @@ async function detectStoryChannels() {
  */
 function rows() {
   const items = [];
+  const hiddenEpisodeProjects = seriesEpisodeProjectIds();
   for (const projectId of appState.projects) {
+    if (hiddenEpisodeProjects.has(projectId)) continue;
     items.push({ type: "review", id: projectId, title: projectId, hash: `#/project/${encodeURIComponent(projectId)}/overview` });
   }
   for (const series of appState.series) {
@@ -128,7 +136,9 @@ function renderProjectRows() {
     return item;
   });
   if (items.length === 0) {
-    items.push(gateNotice("Nothing here yet", "Create a project to start.", "info"));
+    const empty = document.createElement("li");
+    empty.append(gateNotice("Nothing here yet", "Create a project to start.", "info"));
+    items.push(empty);
   }
   rowsList.replaceChildren(...items);
 }

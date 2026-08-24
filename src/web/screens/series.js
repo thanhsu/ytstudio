@@ -151,7 +151,7 @@ function renderSeriesWorkspaceHeader(series) {
 function renderSeriesOverview(series, planForm, episodeTable) {
   return wrapSection(
     "Series Plan",
-    paragraph("Plan the first content run, keep episode titles editable, and then move into Brand Kit, Audio Story, or Batch Review when a production lane is ready."),
+    paragraph("Plan the first content run, keep episode titles editable, then manage episodes and the story bible under Content; brand kit and batch review live under Edit when a production lane is ready."),
     planForm,
     episodeTable,
   );

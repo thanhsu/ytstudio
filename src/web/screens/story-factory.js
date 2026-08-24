@@ -46,6 +46,10 @@ export async function mountChannel(route) {
     await renderStoryDetail(route.id, route.storyId);
     return;
   }
+  // Not viewing a story: clear any stale storyId from a previously open story
+  // detail, or a finished job repaint (or another channel's stale id) paints
+  // the wrong view over this one.
+  storyFactoryState.storyId = null;
   if (phase === "overview") {
     await renderChannelOverview(route.id);
     return;
