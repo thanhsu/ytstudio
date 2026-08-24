@@ -45,8 +45,8 @@ const CONTRAST_RANGE = [0, 2] as const;
 const SATURATION_RANGE = [0, 2] as const;
 const GRAYSCALE_RANGE = [0, 1] as const;
 const BLUR_RANGE = [0, 40] as const;
-const WATERMARK_SCALE_RANGE = [0.05, 0.5] as const;
-const WATERMARK_OPACITY_RANGE = [0, 1] as const;
+export const WATERMARK_SCALE_RANGE = [0.05, 0.5] as const;
+export const WATERMARK_OPACITY_RANGE = [0, 1] as const;
 
 const ZOOM_VALUES: readonly ZoomEffect[] = ["none", "slow-in", "slow-out"];
 const TRANSITION_VALUES: readonly TransitionEffect[] = ["cut", "fade"];

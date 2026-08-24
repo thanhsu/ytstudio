@@ -193,6 +193,20 @@ test("invalid effects throw before generating any filter", () => {
   }, /speed/);
 });
 
+test("buildSegmentEffectFilter refuses to silently drop a configured watermark", () => {
+  const eligible = eligibleLogoAsset();
+  assert.throws(() => {
+    buildSegmentEffectFilter(
+      "[v0]",
+      "[v1]",
+      { ...DEFAULT_SEGMENT_EFFECTS, watermark: { assetId: eligible.id, position: "top-left", scale: 0.12, opacity: 0.2 } },
+      DIMENSIONS,
+      8,
+      "image",
+    );
+  }, /watermark/i);
+});
+
 // --- buildVisualEffectFilter (speed+zoom+color+blur only, for watermark composition) ---
 
 test("buildVisualEffectFilter excludes fade handling", () => {
@@ -263,6 +277,38 @@ test("watermark overlay positions map to the correct fixed 24px margins", () => 
     );
     assert.match(result.filter, expected);
   }
+});
+
+test("watermark overlay throws before generating a filter when scale is out of range", () => {
+  const asset = eligibleLogoAsset();
+  assert.throws(() => {
+    buildWatermarkOverlayFilter(
+      "[v0]",
+      "[v1]",
+      { assetId: "logo-1", position: "top-left", scale: 50, opacity: 0.2 },
+      "sample-project",
+      [asset],
+      DIMENSIONS,
+      8,
+      2,
+    );
+  }, /watermark\.scale/);
+});
+
+test("watermark overlay throws before generating a filter when opacity is out of range", () => {
+  const asset = eligibleLogoAsset();
+  assert.throws(() => {
+    buildWatermarkOverlayFilter(
+      "[v0]",
+      "[v1]",
+      { assetId: "logo-1", position: "top-left", scale: 0.1, opacity: -3 },
+      "sample-project",
+      [asset],
+      DIMENSIONS,
+      8,
+      2,
+    );
+  }, /watermark\.opacity/);
 });
 
 test("watermark overlay throws when the referenced asset is missing", () => {

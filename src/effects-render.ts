@@ -4,6 +4,8 @@ import { escapeFilterPath } from "./render.ts";
 import {
   isEligibleWatermarkAsset,
   validateSegmentEffects,
+  WATERMARK_OPACITY_RANGE,
+  WATERMARK_SCALE_RANGE,
   type SegmentColorEffects,
   type SegmentEffects,
   type SegmentWatermarkEffect,
@@ -50,6 +52,12 @@ const FADE_CONSTANT_SECONDS = 0.5;
  *
  * Applied between fit/crop and trim/concat prep. Throws before generating any
  * filter if `effects` fails `validateSegmentEffects`.
+ *
+ * Throws if `effects.watermark` is set: this entry point has no way to
+ * allocate the extra ffmpeg input a watermark overlay needs, so silently
+ * dropping the watermark would be a footgun. Callers with a configured
+ * watermark must compose `buildVisualEffectFilter` + `buildWatermarkOverlayFilter`
+ * + `buildFadeFilter` instead.
  */
 export function buildSegmentEffectFilter(
   inputLabel: string,
@@ -60,6 +68,11 @@ export function buildSegmentEffectFilter(
   mediaType: MediaType,
 ): string {
   assertValidEffects(effects);
+  if (effects.watermark) {
+    throw new Error(
+      "buildSegmentEffectFilter cannot render a watermark; compose buildVisualEffectFilter + buildWatermarkOverlayFilter + buildFadeFilter instead.",
+    );
+  }
   const steps = [
     ...visualEffectSteps(effects, dimensions, duration, mediaType),
     ...fadeSteps(effects.transitionIn, effects.transitionOut, duration),
@@ -130,6 +143,8 @@ export function buildWatermarkOverlayFilter(
   if (!isEligibleWatermarkAsset(asset)) {
     throw new Error(`watermark.assetId ${watermark.assetId} is not an eligible logo asset for watermarking.`);
   }
+  assertInRange("watermark.scale", watermark.scale, WATERMARK_SCALE_RANGE);
+  assertInRange("watermark.opacity", watermark.opacity, WATERMARK_OPACITY_RANGE);
 
   const logoIndex = nextInputIndex;
   const logoLabel = `[wm${logoIndex}]`;
@@ -153,6 +168,12 @@ function assertValidEffects(effects: SegmentEffects): void {
   const validation = validateSegmentEffects(effects);
   if (!validation.valid) {
     throw new Error(validation.errors.join(" "));
+  }
+}
+
+function assertInRange(field: string, value: number, [min, max]: readonly [number, number]): void {
+  if (!Number.isFinite(value) || value < min || value > max) {
+    throw new Error(`${field} must be between ${min} and ${max}.`);
   }
 }
 
