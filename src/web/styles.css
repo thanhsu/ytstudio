@@ -241,7 +241,7 @@ select:focus-visible {
 }
 
 .breadcrumb-sep {
-  color: #9aa5b1;
+  color: var(--text-muted);
 }
 
 .workspace-layout {
