@@ -18,6 +18,8 @@ export type AssetUpload = {
   usagePurpose?: string;
 };
 
+export type AssetRightsStatus = "owned" | "licensed" | "generated" | "user-confirmed" | "unknown";
+
 export type AssetRecord = {
   id: string;
   filename: string;
@@ -40,6 +42,8 @@ export type AssetRecord = {
   keywords?: string[];
   contextSummary?: string;
   analysisUpdatedAt?: string;
+  role?: "logo";
+  rightsStatus?: AssetRightsStatus;
 };
 
 export type AssetManifest = {
@@ -50,7 +54,11 @@ export type AssetManifest = {
 export type AssetMetadataUpdate = {
   usagePurpose: string;
   rightsConfirmed: boolean;
+  role?: "logo";
+  rightsStatus?: AssetRightsStatus;
 };
+
+const ASSET_RIGHTS_STATUSES: readonly AssetRightsStatus[] = ["owned", "licensed", "generated", "user-confirmed", "unknown"];
 
 export type AssetValidation = {
   valid: boolean;
@@ -116,13 +124,22 @@ export function validateAssetManifest(manifest: AssetManifest): AssetValidation 
 
 export async function loadAssetManifest(projectId: string): Promise<AssetManifest> {
   try {
-    return JSON.parse(await readFile(resolveProjectPath(projectId, MANIFEST_PATH), "utf8")) as AssetManifest;
+    const manifest = JSON.parse(await readFile(resolveProjectPath(projectId, MANIFEST_PATH), "utf8")) as AssetManifest;
+    return { ...manifest, assets: manifest.assets.map(normalizeAssetRights) };
   } catch (error: unknown) {
     if (isNotFound(error)) {
       return { version: 1, assets: [] };
     }
     throw error;
   }
+}
+
+/** Fills in `rightsStatus` for manifests written before rights-status tracking existed. */
+export function normalizeAssetRights(asset: AssetRecord): AssetRecord {
+  if (asset.rightsStatus) {
+    return asset;
+  }
+  return { ...asset, rightsStatus: asset.rightsConfirmed ? "user-confirmed" : "unknown" };
 }
 
 export async function updateAssetMetadata(
@@ -134,6 +151,12 @@ export async function updateAssetMetadata(
   if (!usagePurpose) {
     throw new Error("Asset usage purpose is required.");
   }
+  if (update.role !== undefined && update.role !== "logo") {
+    throw new Error("Asset role must be 'logo' when set.");
+  }
+  if (update.rightsStatus !== undefined && !ASSET_RIGHTS_STATUSES.includes(update.rightsStatus)) {
+    throw new Error(`Asset rights status must be one of: ${ASSET_RIGHTS_STATUSES.join(", ")}.`);
+  }
 
   const manifest = await loadAssetManifest(projectId);
   const asset = manifest.assets.find((candidate) => candidate.id === assetId);
@@ -143,6 +166,12 @@ export async function updateAssetMetadata(
 
   asset.usagePurpose = usagePurpose;
   asset.rightsConfirmed = update.rightsConfirmed === true;
+  if (update.role !== undefined) {
+    asset.role = update.role;
+  }
+  if (update.rightsStatus !== undefined) {
+    asset.rightsStatus = update.rightsStatus;
+  }
   await saveAssetManifest(projectId, manifest);
   await invalidateApproval(projectId, "assets");
   return asset;

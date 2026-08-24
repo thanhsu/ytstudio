@@ -5,9 +5,10 @@ import type { AssetRecord } from "./assets.ts";
 import { resolveProjectPath } from "./project-paths.ts";
 import { parseSrt } from "./srt.ts";
 import { extractAssetKeywords } from "./asset-analysis.ts";
+import { normalizeSegmentEffects, type SegmentEffects } from "./visual-effects.ts";
 
 export type NarrationScene = { id: string; startSeconds: number; endSeconds: number; narration: string; keywords: string[]; intent: "hook" | "context" | "analysis" | "closing" };
-export type VisualMappingSegment = NarrationScene & { assetId: string | null; mediaType?: "image" | "video"; confidence: number; reason: string; fitMode: "cover" | "contain"; sourceStartSeconds: number; sourceDurationSeconds: number; muteSourceAudio: boolean; selectionMode: "automatic" | "manual"; fallback?: "generated-background" };
+export type VisualMappingSegment = NarrationScene & { assetId: string | null; mediaType?: "image" | "video"; confidence: number; reason: string; fitMode: "cover" | "contain"; sourceStartSeconds: number; sourceDurationSeconds: number; muteSourceAudio: boolean; selectionMode: "automatic" | "manual"; fallback?: "generated-background"; effects?: SegmentEffects };
 export type VisualMapping = { version: 1; status: "draft" | "approved" | "stale"; generatedAt: string; inputFingerprint: string; segments: VisualMappingSegment[] };
 
 export function buildNarrationScenes(srt: string): NarrationScene[] {
@@ -51,6 +52,7 @@ export function generateVisualMapping(scenes: NarrationScene[], assets: AssetRec
       muteSourceAudio: true,
       selectionMode: "automatic" as const,
       ...(selected ? {} : { fallback: "generated-background" as const }),
+      effects: normalizeSegmentEffects(undefined),
     };
   });
   const fingerprint = createHash("sha256").update(JSON.stringify({ scenes, assets: eligible.map((asset) => [asset.id, asset.analysisUpdatedAt, asset.usagePurpose, asset.rightsConfirmed]) })).digest("hex");

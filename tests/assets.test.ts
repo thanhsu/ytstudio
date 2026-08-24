@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import {
   loadAssetManifest,
   saveAsset,
+  saveAssetManifest,
   updateAssetMetadata,
   validateAssetManifest,
   type AssetManifest,
@@ -70,6 +71,110 @@ test("saves asset and manifest for confirmed local media", async () => {
 
     assert.match(asset.relativePath, /^assets\/images\/.+\.png$/);
     assert.equal(validateAssetManifest(manifest).valid, true);
+  } finally {
+    process.chdir(previousCwd);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("loadAssetManifest normalizes legacy assets missing a rights status", async () => {
+  const previousCwd = process.cwd();
+  const root = await mkdtemp(join(tmpdir(), "yt-review-studio-"));
+
+  try {
+    process.chdir(root);
+    const manifest: AssetManifest = {
+      version: 1,
+      assets: [
+        { ...sampleAsset, id: "confirmed-1", rightsConfirmed: true },
+        { ...sampleAsset, id: "unconfirmed-1", rightsConfirmed: false },
+      ],
+    };
+    await saveAssetManifest("sample-project", manifest);
+
+    const loaded = await loadAssetManifest("sample-project");
+    assert.equal(loaded.assets.find((asset) => asset.id === "confirmed-1")?.rightsStatus, "user-confirmed");
+    assert.equal(loaded.assets.find((asset) => asset.id === "unconfirmed-1")?.rightsStatus, "unknown");
+  } finally {
+    process.chdir(previousCwd);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("loadAssetManifest keeps an already-set rights status untouched", async () => {
+  const previousCwd = process.cwd();
+  const root = await mkdtemp(join(tmpdir(), "yt-review-studio-"));
+
+  try {
+    process.chdir(root);
+    const manifest: AssetManifest = {
+      version: 1,
+      assets: [{ ...sampleAsset, id: "logo-1", role: "logo", rightsStatus: "licensed" }],
+    };
+    await saveAssetManifest("sample-project", manifest);
+
+    const loaded = await loadAssetManifest("sample-project");
+    assert.equal(loaded.assets[0].role, "logo");
+    assert.equal(loaded.assets[0].rightsStatus, "licensed");
+  } finally {
+    process.chdir(previousCwd);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("updateAssetMetadata sets role and rightsStatus so a logo can be marked watermark-eligible", async () => {
+  const previousCwd = process.cwd();
+  const root = await mkdtemp(join(tmpdir(), "yt-review-studio-"));
+
+  try {
+    process.chdir(root);
+    const asset = await saveAsset("sample-project", {
+      filename: "logo.png",
+      stream: Readable.from(["image"]),
+      mediaType: "image",
+      rightsConfirmed: true,
+      usagePurpose: "Channel logo overlay.",
+    });
+
+    const updated = await updateAssetMetadata("sample-project", asset.id, {
+      usagePurpose: "Channel logo overlay.",
+      rightsConfirmed: true,
+      role: "logo",
+      rightsStatus: "owned",
+    });
+
+    assert.equal(updated.role, "logo");
+    assert.equal(updated.rightsStatus, "owned");
+    assert.equal((await loadAssetManifest("sample-project")).assets[0].rightsStatus, "owned");
+  } finally {
+    process.chdir(previousCwd);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("updateAssetMetadata rejects an unsupported rights status instead of silently accepting it", async () => {
+  const previousCwd = process.cwd();
+  const root = await mkdtemp(join(tmpdir(), "yt-review-studio-"));
+
+  try {
+    process.chdir(root);
+    const asset = await saveAsset("sample-project", {
+      filename: "logo.png",
+      stream: Readable.from(["image"]),
+      mediaType: "image",
+      rightsConfirmed: true,
+      usagePurpose: "Channel logo overlay.",
+    });
+
+    await assert.rejects(
+      () =>
+        updateAssetMetadata("sample-project", asset.id, {
+          usagePurpose: "Channel logo overlay.",
+          rightsConfirmed: true,
+          rightsStatus: "made-up-status" as AssetRecord["rightsStatus"],
+        }),
+      /rights status/i,
+    );
   } finally {
     process.chdir(previousCwd);
     await rm(root, { recursive: true, force: true });
