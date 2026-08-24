@@ -23,17 +23,33 @@ const FADE_SECONDS = 0.5;
 /** Total Ken Burns travel over a segment, as a zoom factor delta. */
 const ZOOM_TRAVEL = 0.13;
 
+/**
+ * Which per-segment fades to bake in. Fade-stitch mode wants both on every
+ * segment (the concat demuxer just glues cuts together); xfade mode wants
+ * fades only at the very start/end of the whole video — the seams in between
+ * are handled by the xfade filter itself, so a segment-level fade there would
+ * fight it and produce a double dip.
+ */
+export type SegmentFadeOptions = { fadeIn: boolean; fadeOut: boolean };
+
+const DEFAULT_SEGMENT_FADES: SegmentFadeOptions = { fadeIn: true, fadeOut: true };
+
 export function buildStorySegmentArgs(
   segment: StorySegment,
   index: number,
   outputPath: string,
   dimensions: StoryRenderDimensions,
+  fades: SegmentFadeOptions = DEFAULT_SEGMENT_FADES,
 ): string[] {
   const duration = Math.max(1, segment.durationSeconds);
   const { width, height } = dimensions;
   const frames = Math.max(2, Math.round(duration * 30));
   const fadeOutStart = Math.max(0, duration - FADE_SECONDS);
-  const fades = `fade=t=in:st=0:d=${FADE_SECONDS},fade=t=out:st=${fadeOutStart}:d=${FADE_SECONDS}`;
+  const fadeParts: string[] = [];
+  if (fades.fadeIn) fadeParts.push(`fade=t=in:st=0:d=${FADE_SECONDS}`);
+  if (fades.fadeOut) fadeParts.push(`fade=t=out:st=${fadeOutStart}:d=${FADE_SECONDS}`);
+  // A trailing comma only when there is something to chain in front of setsar.
+  const fadeChain = fadeParts.length > 0 ? `${fadeParts.join(",")},` : "";
   const encode = [
     "-map",
     "[v]",
@@ -59,7 +75,7 @@ export function buildStorySegmentArgs(
       "-i",
       `color=c=${FALLBACK_COLOR}:s=${width}x${height}:r=30:d=${duration}`,
       "-filter_complex",
-      `[0:v]${fades},setsar=1[v]`,
+      `[0:v]${fadeChain}setsar=1[v]`,
       ...encode,
     ];
   }
@@ -73,7 +89,7 @@ export function buildStorySegmentArgs(
   const filter =
     `[0:v]scale=7680:-2,` +
     `zoompan=z='${zoom}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s=${width}x${height}:fps=30,` +
-    `trim=duration=${duration},setpts=PTS-STARTPTS,${fades},setsar=1[v]`;
+    `trim=duration=${duration},setpts=PTS-STARTPTS,${fadeChain}setsar=1[v]`;
   return [
     "-y",
     "-loop",
@@ -87,6 +103,57 @@ export function buildStorySegmentArgs(
     "-filter_complex",
     filter,
     ...encode,
+  ];
+}
+
+/**
+ * Chains pairwise `xfade` filters across pre-encoded segment files into one
+ * re-encode pass, so the crossfade seams are real dissolves instead of hard
+ * cuts. `segmentDurations` are the segments' actual encoded durations (already
+ * including the caller's +transitionSeconds padding on every segment but the
+ * last), which is what keeps the offsets — and the final video's total
+ * duration — correct. A single segment has nothing to cross-fade with, so it
+ * degenerates to a plain stream copy.
+ */
+export function buildXfadeTimelineArgs(
+  segmentNames: string[],
+  segmentDurations: number[],
+  transitionSeconds: number,
+  outputName: string,
+): string[] {
+  const inputs = segmentNames.flatMap((name) => ["-i", name]);
+  if (segmentNames.length <= 1) {
+    return ["-y", ...inputs, "-c", "copy", outputName];
+  }
+  const filters: string[] = [];
+  let offset = segmentDurations[0] - transitionSeconds;
+  let previousLabel = "0:v";
+  for (let index = 1; index < segmentNames.length; index += 1) {
+    const label = `x${index}`;
+    filters.push(
+      `[${previousLabel}][${index}:v]xfade=transition=fade:duration=${transitionSeconds}:offset=${offset}[${label}]`,
+    );
+    previousLabel = label;
+    if (index < segmentNames.length - 1) {
+      offset = offset + segmentDurations[index] - transitionSeconds;
+    }
+  }
+  return [
+    "-y",
+    ...inputs,
+    "-filter_complex",
+    filters.join(";"),
+    "-map",
+    `[${previousLabel}]`,
+    "-c:v",
+    "libx264",
+    "-preset",
+    "ultrafast",
+    "-pix_fmt",
+    "yuv420p",
+    "-r",
+    "30",
+    outputName,
   ];
 }
 
@@ -148,6 +215,8 @@ export type RenderStoryOptions = {
   ffmpegPrefixArgs?: string[];
   signal?: AbortSignal;
   update?: (completedSegments: number, totalSegments: number) => Promise<void>;
+  /** Defaults to a plain 0.5s fade-stitch — the original, unchanged behavior. */
+  transition?: { kind: "fade" | "xfade"; seconds: number };
 };
 
 export async function renderStoryVideo(options: RenderStoryOptions): Promise<void> {
@@ -157,30 +226,53 @@ export async function renderStoryVideo(options: RenderStoryOptions): Promise<voi
   const dimensions = { width: options.width ?? 1920, height: options.height ?? 1080 };
   const ffmpeg = options.ffmpegPath ?? process.env.FFMPEG_PATH ?? "ffmpeg";
   const prefix = options.ffmpegPrefixArgs ?? [];
+  const transition = options.transition ?? { kind: "fade" as const, seconds: FADE_SECONDS };
+  const useXfade = transition.kind === "xfade";
   await mkdir(dirname(options.outputPath), { recursive: true });
   const temporaryDirectory = join(dirname(options.outputPath), `.story-${Date.now()}`);
   await mkdir(temporaryDirectory, { recursive: true });
   try {
     const names: string[] = [];
+    const encodedDurations: number[] = [];
     for (const [index, segment] of options.segments.entries()) {
       const name = `segment-${String(index).padStart(3, "0")}.mp4`;
       names.push(name);
+      const isLast = index === options.segments.length - 1;
+      // In xfade mode the crossfade eats into the overlap, so every segment
+      // but the last is encoded transitionSeconds longer than its scene
+      // duration — that overlap is what the xfade filter consumes, keeping
+      // the final stitched video the same length as the narration.
+      const encodedSegment = useXfade && !isLast
+        ? { ...segment, durationSeconds: segment.durationSeconds + transition.seconds }
+        : segment;
+      const fades: SegmentFadeOptions = useXfade
+        ? { fadeIn: index === 0, fadeOut: isLast }
+        : DEFAULT_SEGMENT_FADES;
+      encodedDurations.push(Math.max(1, encodedSegment.durationSeconds));
       await runProcess(
         ffmpeg,
-        [...prefix, ...buildStorySegmentArgs(segment, index, join(temporaryDirectory, name), dimensions)],
+        [...prefix, ...buildStorySegmentArgs(encodedSegment, index, join(temporaryDirectory, name), dimensions, fades)],
         { signal: options.signal },
       );
       await options.update?.(index + 1, options.segments.length);
     }
-    const concatPath = join(temporaryDirectory, "concat.txt");
-    // Relative names in the list sidestep Windows drive-letter quoting entirely.
-    await writeFile(concatPath, `${names.map((name) => `file '${name}'`).join("\n")}\n`, "utf8");
     const timelinePath = join(temporaryDirectory, "timeline.mp4");
-    await runProcess(
-      ffmpeg,
-      [...prefix, "-y", "-f", "concat", "-safe", "0", "-i", concatPath, "-c", "copy", timelinePath],
-      { signal: options.signal },
-    );
+    if (useXfade) {
+      await runProcess(
+        ffmpeg,
+        [...prefix, ...buildXfadeTimelineArgs(names, encodedDurations, transition.seconds, "timeline.mp4")],
+        { signal: options.signal, cwd: temporaryDirectory },
+      );
+    } else {
+      const concatPath = join(temporaryDirectory, "concat.txt");
+      // Relative names in the list sidestep Windows drive-letter quoting entirely.
+      await writeFile(concatPath, `${names.map((name) => `file '${name}'`).join("\n")}\n`, "utf8");
+      await runProcess(
+        ffmpeg,
+        [...prefix, "-y", "-f", "concat", "-safe", "0", "-i", concatPath, "-c", "copy", timelinePath],
+        { signal: options.signal },
+      );
+    }
     await runProcess(
       ffmpeg,
       [

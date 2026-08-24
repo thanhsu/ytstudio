@@ -555,6 +555,7 @@ async function runRenderStage(ctx: StageContext): Promise<void> {
     ffmpegPrefixArgs: ctx.ffmpegPrefixArgs,
     signal: ctx.signal,
     update: async (completed, total) => ctx.update?.(`Rendered segment ${completed}/${total}.`),
+    transition: { kind: ctx.config.render.storyTransition, seconds: ctx.config.render.storyTransitionSeconds },
   });
 
   const artifact: RenderStageArtifact = {

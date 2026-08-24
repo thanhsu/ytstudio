@@ -84,6 +84,50 @@ test("studio config carries long-form output dimensions", async () => {
   });
 });
 
+test("studio config defaults story transitions to a plain 0.5s fade", async () => {
+  await withTempCwd(async () => {
+    const config = await loadStudioConfig();
+
+    assert.equal(config.render.storyTransition, "fade");
+    assert.equal(config.render.storyTransitionSeconds, 0.5);
+  });
+});
+
+test("a valid xfade transition setting is saved and reloaded as-is", async () => {
+  await withTempCwd(async () => {
+    const saved = await saveStudioConfig({
+      render: { storyTransition: "xfade", storyTransitionSeconds: 0.75 },
+    });
+    assert.equal(saved.render.storyTransition, "xfade");
+    assert.equal(saved.render.storyTransitionSeconds, 0.75);
+
+    const reloaded = await loadStudioConfig();
+    assert.equal(reloaded.render.storyTransition, "xfade");
+    assert.equal(reloaded.render.storyTransitionSeconds, 0.75);
+  });
+});
+
+test("an unknown transition kind or out-of-range seconds falls back to defaults", async () => {
+  await withTempCwd(async () => {
+    await writeFile(
+      "studio.config.json",
+      JSON.stringify({ render: { storyTransition: "wipe", storyTransitionSeconds: 5 } }),
+      "utf8",
+    );
+    const reloaded = await loadStudioConfig();
+    assert.equal(reloaded.render.storyTransition, "fade");
+    assert.equal(reloaded.render.storyTransitionSeconds, 0.5);
+
+    await writeFile(
+      "studio.config.json",
+      JSON.stringify({ render: { storyTransitionSeconds: 0.05 } }),
+      "utf8",
+    );
+    const tooShort = await loadStudioConfig();
+    assert.equal(tooShort.render.storyTransitionSeconds, 0.5);
+  });
+});
+
 test("studio config carries script model settings", async () => {
   await withTempCwd(async () => {
     const config = await loadStudioConfig();
