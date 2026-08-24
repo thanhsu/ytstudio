@@ -1149,3 +1149,29 @@ test("deleting a source is refused while one of its jobs is running, then allowe
     assert.deepEqual((await (await fetch(`${running.url}/api/sources`)).json()).sources, []);
   });
 });
+
+test("static serving covers nested module files under src/web", async () => {
+  const root = await mkdtemp(join(tmpdir(), "studio-static-"));
+  try {
+    await mkdir(join(root, "src", "web", "lib"), { recursive: true });
+    await writeFile(join(root, "src", "web", "lib", "sample.js"), "export const ok = true;\n");
+
+    const running = await startStudioServer(createStudioServer({ staticRoot: root }), { port: 0 });
+    try {
+      const hit = await fetch(`${running.url}/lib/sample.js`);
+      assert.equal(hit.status, 200);
+      assert.match(hit.headers.get("content-type") ?? "", /text\/javascript/);
+      assert.equal(await hit.text(), "export const ok = true;\n");
+
+      const miss = await fetch(`${running.url}/lib/missing.js`);
+      assert.equal(miss.status, 404);
+
+      const api = await fetch(`${running.url}/api/unknown-route`);
+      assert.equal(api.status, 404);
+    } finally {
+      await running.close();
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

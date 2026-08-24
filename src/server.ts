@@ -235,13 +235,9 @@ async function routeRequest(
   const url = new URL(request.url ?? "/", "http://127.0.0.1");
   const method = request.method ?? "GET";
 
-  if (
-    method === "GET" &&
-    (url.pathname === "/" ||
-      url.pathname === "/styles.css" ||
-      url.pathname === "/app.js" ||
-      url.pathname === "/search-queries.js")
-  ) {
+  // Every API route lives under /api/, so any other GET is a static asset
+  // request served from src/web behind the traversal guard.
+  if (method === "GET" && !url.pathname.startsWith("/api/")) {
     await sendStatic(response, staticRoot, url.pathname);
     return;
   }
