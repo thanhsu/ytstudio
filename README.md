@@ -92,6 +92,7 @@ The studio UI is the primary workflow. It can now:
 - build a translation prompt from the current source subtitle artifact
 - generate voice
 - prepare captions
+- edit visual mapping effects
 - render a draft
 - edit model/tool config
 
@@ -206,6 +207,33 @@ npm run cli -- generate-voice --project tales-herding-gods-qin-mu --provider vie
 
 Set `VIETNAMESE_TTS_PYTHON_PATH` if `python` is not the interpreter that has the
 tool's dependencies installed.
+
+## Visual Mapping and Effects Workflow
+
+After captions are prepared, edit effects on visual-mapping segments before rendering. Open the **Clip Inspector** and select a segment, then open the **Effects** section to apply transformations.
+
+### Supported Effects
+
+- **Speed**: `0.5` to `2.0` for video segments (image segments ignore speed and render at the segment duration). The five-second cap applies to the source slice *before* speed processing; if the output is shorter than the segment duration, the fallback background fills the remainder.
+- **Zoom**: `none`, `slow-in`, or `slow-out`.
+- **Transitions**: `cut` or `fade` at segment boundaries. Fades are black fades lasting 0.5 seconds, capped at half the segment duration and contained within the segment.
+- **Color**: brightness (`-1` to `1`), contrast (`0` to `2`), saturation (`0` to `2`), and grayscale (`0` to `1`). Grayscale reduces saturation multiplicatively: `effectiveSaturation = saturation × (1 - grayscale)`.
+- **Blur**: full-frame blur strength (`0` to `40`).
+- **Watermark**: overlay a logo asset with corner position, scale (`0.05` to `0.5` of video width), opacity (`0` to `1`), and a fixed 24px margin. Only assets with role `logo` and rights status `owned`, `licensed`, or `generated` are eligible.
+
+Segments never overlap; all effect ranges are enforced before render.
+
+### Editing Workflow
+
+1. Select a segment in the Clip Inspector and open **Effects**.
+2. Adjust effect values as needed.
+3. Click **Save effects** to persist changes via PATCH (the mapping remains in draft state).
+4. Saving effects does not auto-approve the mapping; it remains pending re-approval.
+5. Click **Reset effects** to revert to defaults.
+6. After saving, navigate to **Render** and click **Regenerate render draft** to apply effects.
+7. Review the new render draft and click **Re-approve** before proceeding to the final render.
+
+The monitor shows segment composition but is not frame-accurate until a new render draft is regenerated. Regional blur, dissolve transitions, and NVENC are deferred.
 
 ## Subtitle Translation Workflow
 
