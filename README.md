@@ -99,7 +99,7 @@ The CLI remains as a debug and automation fallback, not the main operator path.
 
 ## Studio Config
 
-Use the `Config` button in the local studio to edit model and tool settings:
+Open **Config** from the top navigation to edit model and tool settings:
 
 - script provider, model, base URL, API key env, paid flag, temperature, and
   max output tokens
