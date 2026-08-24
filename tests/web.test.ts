@@ -279,6 +279,8 @@ test("the config screen exposes source search settings", async () => {
   assert.match(script, /sources\.searchPrefixes\.tiktok/);
   assert.match(script, /Douyin search prefix/);
   assert.match(script, /sources\.searchPrefixes\.douyin/);
+  assert.match(script, /Facebook search prefix/);
+  assert.match(script, /sources\.searchPrefixes\.facebook/);
 });
 
 test("the sources screen exposes paste, rights, score, download, and delete", async () => {
@@ -313,6 +315,7 @@ test("the sources screen exposes keyword search before tracking a source", async
   assert.match(script, /bilibili/);
   assert.match(script, /tiktok/);
   assert.match(script, /douyin/);
+  assert.match(script, /facebook/);
   assert.match(script, /URL-only unless search prefix is configured/);
   assert.match(styles, /\.source-search-results/);
   assert.match(styles, /\.source-result-card/);

@@ -193,11 +193,36 @@ test("keyword search builds TikTok and Douyin result URLs when a search provider
   assert.equal(douyin[0].url, "https://www.douyin.com/video/7234567890123456789");
 });
 
+test("keyword search builds Facebook result URLs when a search provider supplies ids", async () => {
+  const executable = await makeFakeExecutable(
+    `console.log(JSON.stringify({ extractor_key: "Facebook", id: "123456789012345", title: "facebook video" }));`,
+  );
+
+  const results = await searchSourceMetadata("muc than ky", {
+    platform: "facebook",
+    limit: 1,
+    ytDlpPath: process.execPath,
+    ytDlpArgs: [executable],
+    searchPrefixes: { facebook: "customfacebook" },
+  });
+
+  assert.equal(results[0].url, "https://www.facebook.com/watch/?v=123456789012345");
+});
+
 test("keyword search explains URL-only platforms when no search prefix is configured", async () => {
   await assert.rejects(
     () =>
       searchSourceMetadata("muc than ky", {
         platform: "tiktok",
+        limit: 5,
+        ytDlpPath: process.execPath,
+      }),
+    /does not have keyword search configured/,
+  );
+  await assert.rejects(
+    () =>
+      searchSourceMetadata("muc than ky", {
+        platform: "facebook",
         limit: 5,
         ytDlpPath: process.execPath,
       }),

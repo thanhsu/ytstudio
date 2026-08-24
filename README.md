@@ -264,7 +264,10 @@ you point it at FFmpeg:
     "searchLimit": 8,
     "searchPrefixes": {
       "youtube": "ytsearch",
-      "bilibili": "bilisearch"
+      "bilibili": "bilisearch",
+      "tiktok": "",
+      "douyin": "",
+      "facebook": ""
     },
     "format": "bv*+ba/b",
     "subtitleLanguages": ["en", "vi"]
@@ -277,6 +280,8 @@ Subtitle conversion to SRT uses the FFmpeg you already configured; without it th
 download still succeeds and whatever subtitle format arrived is kept as-is.
 Search is currently explicit for YouTube and Bilibili, with prefixes configurable
 from the Config screen because extractor syntax can change as yt-dlp evolves.
+TikTok, Douyin, and Facebook are URL-only by default: paste a direct video URL,
+track it, declare rights, then download through the same gate.
 The Sources screen can locally filter search results by include/exclude words,
 maximum view count, and "hide short clips" before you choose a result to track.
 

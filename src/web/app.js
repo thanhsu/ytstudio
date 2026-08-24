@@ -2054,6 +2054,7 @@ function renderConfig() {
       field("Bilibili search prefix", "sources.searchPrefixes.bilibili", config.sources.searchPrefixes.bilibili),
       field("TikTok search prefix", "sources.searchPrefixes.tiktok", config.sources.searchPrefixes.tiktok),
       field("Douyin search prefix", "sources.searchPrefixes.douyin", config.sources.searchPrefixes.douyin),
+      field("Facebook search prefix", "sources.searchPrefixes.facebook", config.sources.searchPrefixes.facebook),
     ]),
     actionButton("Save Config", null, "submit", "primary"),
   );
@@ -2466,6 +2467,7 @@ function sourcePlatformOptions() {
     ["bilibili", "Bilibili"],
     ["tiktok", "TikTok (URL-only unless search prefix is configured)"],
     ["douyin", "Douyin (URL-only unless search prefix is configured)"],
+    ["facebook", "Facebook (URL-only unless search prefix is configured)"],
   ];
 }
 
@@ -3588,4 +3590,3 @@ function voiceLabTable(channelId, values, voices) {
   wrapper.append(table);
   return wrapper;
 }
-

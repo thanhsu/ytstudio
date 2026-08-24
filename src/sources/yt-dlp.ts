@@ -11,7 +11,7 @@ export type SourceMetadata = {
   description: string;
 };
 
-export type SourceSearchPlatform = "youtube" | "bilibili" | "tiktok" | "douyin";
+export type SourceSearchPlatform = "youtube" | "bilibili" | "tiktok" | "douyin" | "facebook";
 
 export type SourceSearchResult = {
   platform: string;
@@ -67,6 +67,7 @@ const DEFAULT_SEARCH_PREFIXES: Record<SourceSearchPlatform, string> = {
   bilibili: "bilisearch",
   tiktok: "",
   douyin: "",
+  facebook: "",
 };
 
 export function requireYtDlpPath(ytDlpPath?: string): string {
@@ -252,11 +253,12 @@ function resultUrl(payload: YtDlpPayload, platform: SourceSearchPlatform, id: st
   if (platform === "bilibili" && id) return `https://www.bilibili.com/video/${encodeURIComponent(id)}`;
   if (platform === "tiktok" && id) return `https://www.tiktok.com/@unknown/video/${encodeURIComponent(id)}`;
   if (platform === "douyin" && id) return `https://www.douyin.com/video/${encodeURIComponent(id)}`;
+  if (platform === "facebook" && id) return `https://www.facebook.com/watch/?v=${encodeURIComponent(id)}`;
   return "";
 }
 
 function searchPlatform(value: SourceSearchPlatform): SourceSearchPlatform {
-  if (value === "youtube" || value === "bilibili" || value === "tiktok" || value === "douyin") return value;
+  if (value === "youtube" || value === "bilibili" || value === "tiktok" || value === "douyin" || value === "facebook") return value;
   throw new Error(`Unsupported source search platform ${JSON.stringify(value)}.`);
 }
 

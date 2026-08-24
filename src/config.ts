@@ -138,13 +138,14 @@ export type StudioConfig = {
     ytDlpArgs: string[];
     format: string;
     subtitleLanguages: string[];
-    defaultSearchPlatform: "youtube" | "bilibili" | "tiktok" | "douyin";
+    defaultSearchPlatform: "youtube" | "bilibili" | "tiktok" | "douyin" | "facebook";
     searchLimit: number;
     searchPrefixes: {
       youtube: string;
       bilibili: string;
       tiktok: string;
       douyin: string;
+      facebook: string;
     };
   };
 };
@@ -249,6 +250,7 @@ export const DEFAULT_STUDIO_CONFIG: StudioConfig = {
       bilibili: "bilisearch",
       tiktok: "",
       douyin: "",
+      facebook: "",
     },
   },
 };
@@ -417,7 +419,7 @@ export function normalizeStudioConfig(value: unknown): StudioConfig {
       ),
       defaultSearchPlatform: enumValue(
         candidate.sources?.defaultSearchPlatform,
-        ["youtube", "bilibili", "tiktok", "douyin"],
+        ["youtube", "bilibili", "tiktok", "douyin", "facebook"],
         DEFAULT_STUDIO_CONFIG.sources.defaultSearchPlatform,
       ),
       searchLimit: rangeValue(candidate.sources?.searchLimit, DEFAULT_STUDIO_CONFIG.sources.searchLimit, 1, 25),
@@ -437,6 +439,10 @@ export function normalizeStudioConfig(value: unknown): StudioConfig {
         douyin: stringValue(
           candidate.sources?.searchPrefixes?.douyin,
           DEFAULT_STUDIO_CONFIG.sources.searchPrefixes.douyin,
+        ),
+        facebook: stringValue(
+          candidate.sources?.searchPrefixes?.facebook,
+          DEFAULT_STUDIO_CONFIG.sources.searchPrefixes.facebook,
         ),
       },
     },

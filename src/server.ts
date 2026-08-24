@@ -1518,7 +1518,7 @@ function recordStringBody(value: unknown): Record<string, string> | undefined {
 }
 
 function sourceSearchPlatformBody(value: unknown, fallback: SourceSearchPlatform): SourceSearchPlatform {
-  if (value === "youtube" || value === "bilibili" || value === "tiktok" || value === "douyin") return value;
+  if (value === "youtube" || value === "bilibili" || value === "tiktok" || value === "douyin" || value === "facebook") return value;
   if (value === undefined || value === null || value === "") return fallback;
   throw new Error(`Unsupported source search platform ${JSON.stringify(value)}.`);
 }

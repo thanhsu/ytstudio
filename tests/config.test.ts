@@ -224,6 +224,7 @@ test("the sources block defaults, and rejects entries that are not usable string
     assert.equal(defaults.sources.searchPrefixes.bilibili, "bilisearch");
     assert.equal(defaults.sources.searchPrefixes.tiktok, "");
     assert.equal(defaults.sources.searchPrefixes.douyin, "");
+    assert.equal(defaults.sources.searchPrefixes.facebook, "");
 
     await writeFile(
       "studio.config.json",
@@ -234,7 +235,7 @@ test("the sources block defaults, and rejects entries that are not usable string
           ytDlpArgs: "nope",
           defaultSearchPlatform: "douyin",
           searchLimit: 12,
-          searchPrefixes: { bilibili: "custombili", youtube: "", tiktok: "customtiktok", douyin: "customdouyin" },
+          searchPrefixes: { bilibili: "custombili", youtube: "", tiktok: "customtiktok", douyin: "customdouyin", facebook: "customfacebook" },
         },
       }),
       "utf8",
@@ -249,6 +250,7 @@ test("the sources block defaults, and rejects entries that are not usable string
     assert.equal(loaded.sources.searchPrefixes.bilibili, "custombili");
     assert.equal(loaded.sources.searchPrefixes.tiktok, "customtiktok");
     assert.equal(loaded.sources.searchPrefixes.douyin, "customdouyin");
+    assert.equal(loaded.sources.searchPrefixes.facebook, "customfacebook");
   } finally {
     process.chdir(previousCwd);
     await rm(root, { recursive: true, force: true });
