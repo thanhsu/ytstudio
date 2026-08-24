@@ -83,7 +83,9 @@ export async function downloadCandidate(id: string, options: DownloadOptions): P
     "--write-subs",
     "--write-auto-subs",
     "--newline",
-    ...(ffmpegPath ? ["--convert-subs", "srt"] : []),
+    // Without --ffmpeg-location a split-format download (bv*+ba) leaves
+    // unmerged video.f<id>.<ext> files behind and still exits 0.
+    ...(ffmpegPath ? ["--ffmpeg-location", ffmpegPath, "--convert-subs", "srt"] : []),
     "-o",
     `${directory}/video.%(ext)s`,
     candidate.canonicalUrl,

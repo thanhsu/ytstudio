@@ -197,3 +197,25 @@ test("subtitle conversion is only requested when a converter is configured", asy
     assert.ok(with_.includes("--convert-subs"));
   });
 });
+
+test("a configured ffmpeg is handed to yt-dlp so split formats can merge", async () => {
+  await withSourcesRoot(async () => {
+    await saveDeclaredCandidate("youtube-abc");
+    const without: string[] = [];
+    const with_: string[] = [];
+
+    await downloadCandidate("youtube-abc", {
+      ...(await downloadOptions()),
+      ffmpegPath: "",
+      onCommand: (_path, args) => without.push(...args),
+    });
+    await downloadCandidate("youtube-abc", {
+      ...(await downloadOptions()),
+      ffmpegPath: "C:/tools/ffmpeg.exe",
+      onCommand: (_path, args) => with_.push(...args),
+    });
+
+    assert.ok(!without.includes("--ffmpeg-location"));
+    assert.equal(with_[with_.indexOf("--ffmpeg-location") + 1], "C:/tools/ffmpeg.exe");
+  });
+});
