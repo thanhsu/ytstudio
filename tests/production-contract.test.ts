@@ -4,6 +4,14 @@ import {
   assertValidProductionProject,
   validateProductionProject,
 } from "../src/production/validate.ts";
+import {
+  normalizeAudioStoryProject,
+  normalizeReviewProject,
+} from "../src/production/adapters.ts";
+import type {
+  AudioStoryProductionInput,
+  ReviewProductionInput,
+} from "../src/production/adapters.ts";
 import type { ProductionProject } from "../src/production/types.ts";
 
 function validProject(): ProductionProject {
@@ -69,6 +77,83 @@ function validProject(): ProductionProject {
   };
 }
 
+function reviewInput(): ReviewProductionInput {
+  const project = validProject();
+  return {
+    projectId: project.projectId,
+    format: project.format,
+    title: project.content.title,
+    summary: project.content.summary,
+    scriptPath: project.content.scriptPath,
+    sourcePaths: project.content.sourcePaths,
+    scriptHash: project.content.sourceHash,
+    narration: project.narration,
+    captions: project.captions,
+    assets: project.assets,
+    timeline: project.timeline,
+    publish: project.publish,
+  };
+}
+
+function audioStoryInput(): AudioStoryProductionInput {
+  return {
+    projectId: "story-demo",
+    format: "longform",
+    title: "The Dawn Train",
+    logline: "A haunted train arrives at dawn.",
+    storyPath: "stories/story-demo/script.txt",
+    narration: {
+      relativePath: "workspace/audio/narration.mp3",
+      format: "mp3",
+      durationSeconds: 12,
+      sourceHash: "story-script-hash",
+    },
+    captions: {
+      relativePath: "workspace/captions/story.srt",
+      format: "srt",
+      cueCount: 2,
+      sourceHash: "story-script-hash",
+    },
+    assets: [
+      {
+        id: "scene-001",
+        relativePath: "workspace/images/scene-001.png",
+        mediaType: "image",
+        role: "story-image",
+        sourceHash: "image-hash",
+        rightsStatus: "generated",
+        usagePurpose: "scene background",
+      },
+    ],
+    segments: [
+      {
+        id: "scene-001",
+        startSeconds: 0,
+        endSeconds: 6,
+        narrationText: "The train arrives.",
+        assetId: "scene-001",
+        fitMode: "cover",
+        muteSourceAudio: true,
+      },
+      {
+        id: "scene-002",
+        startSeconds: 6,
+        endSeconds: 12,
+        narrationText: "Nobody gets off.",
+        fitMode: "cover",
+        muteSourceAudio: true,
+      },
+    ],
+    durationSeconds: 12,
+    publish: {
+      title: "The Dawn Train",
+      description: "An original audio story.",
+      tags: ["horror", "story"],
+      language: "en",
+    },
+  };
+}
+
 test("accepts a valid version-one production project", () => {
   assert.deepEqual(validateProductionProject(validProject()), { valid: true, errors: [] });
 });
@@ -106,4 +191,33 @@ test("allows intentional gaps and assetless generated-background segments", () =
 
 test("assertValidProductionProject throws a readable validation error", () => {
   assert.throws(() => assertValidProductionProject({ version: 2 }), /invalid production project/i);
+});
+
+test("normalizes review input into the shared production contract", () => {
+  const result = normalizeReviewProject(reviewInput());
+  assert.equal(result.workflowType, "review-recap");
+  assert.equal(result.content.sourceHash, "script-hash");
+  assert.equal(result.assets[0].role, "source-clip");
+});
+
+test("normalizes audio story narration and scenes into the shared timeline", () => {
+  const result = normalizeAudioStoryProject(audioStoryInput());
+  assert.equal(result.workflowType, "audio-story");
+  assert.equal(result.content.summary, "A haunted train arrives at dawn.");
+  assert.equal(result.timeline.durationSeconds, 12);
+  assert.equal(result.timeline.segments[0].assetId, "scene-001");
+});
+
+test("changing audio-story inputs changes the content source hash", () => {
+  const first = normalizeAudioStoryProject(audioStoryInput());
+  const second = normalizeAudioStoryProject({ ...audioStoryInput(), logline: "A different train arrives." });
+  assert.notEqual(first.content.sourceHash, second.content.sourceHash);
+});
+
+test("adapters reject invalid output instead of emitting an unsafe contract", () => {
+  const input = reviewInput();
+  assert.throws(
+    () => normalizeReviewProject({ ...input, timeline: { ...input.timeline, durationSeconds: -1 } }),
+    /invalid production project/i,
+  );
 });
