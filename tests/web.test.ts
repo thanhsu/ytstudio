@@ -396,6 +396,47 @@ test("the sources screen shows why a score was given, never the number alone", a
   assert.match(script, /score\.angle/);
 });
 
+test("visual mapping inspector exposes effect controls and uses the mapping PATCH/reset routes", async () => {
+  const script = await readWebScripts();
+  assert.match(script, /Save effects/);
+  assert.match(script, /Reset effects/);
+  assert.match(script, /visual-mapping\/segments/);
+  assert.match(script, /effects\/reset/);
+  assert.match(script, /transitionIn/);
+  assert.match(script, /transitionOut/);
+  assert.doesNotMatch(script, /timeline\/segments/);
+  // Numeric effect inputs carry machine-produced fractional values (speed,
+  // color adjustments, blur, watermark scale/opacity), so step must accept any.
+  assert.match(script, /"speed",[^\n]*"number", "", "any"/);
+  assert.match(script, /"color\.brightness",[^\n]*"number", "", "any"/);
+  assert.match(script, /"blur",[^\n]*"number", "", "any"/);
+});
+
+test("watermark selector filters to eligible logos and timeline shows non-default summaries", async () => {
+  const script = await readWebScripts();
+  assert.match(script, /role.*logo|logo.*role/);
+  assert.match(script, /owned|licensed|generated/);
+  assert.match(script, /effect summary|effects/);
+  // The timeline marks clips whose effects differ from the neutral defaults
+  // with a dedicated class, distinct from the low-confidence marker.
+  assert.match(script, /has-effects/);
+  assert.match(script, /function effectsSummary/);
+});
+
+test("saving or resetting effects never implies mapping approval, and the monitor stays a segment monitor", async () => {
+  const script = await readWebScripts();
+  assert.match(script, /does not approve/);
+  assert.match(script, /not frame-accurate/);
+});
+
+test("the assets UI exposes role and rights-status controls for logo eligibility", async () => {
+  const script = await readWebScripts();
+  assert.match(script, /ASSET_ROLE_OPTIONS/);
+  assert.match(script, /ASSET_RIGHTS_STATUS_OPTIONS/);
+  assert.match(script, /"role",\s*asset\.role/);
+  assert.match(script, /"rightsStatus",\s*asset\.rightsStatus/);
+});
+
 test("every select option list is pair-shaped, because selectField destructures entries", async () => {
   const script = await readWebScripts();
 

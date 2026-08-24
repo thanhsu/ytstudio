@@ -104,7 +104,7 @@ export function gateNotice(title, text, level = "warn") {
   return notice;
 }
 
-export function field(label, name, value, type = "text", placeholder = "", step = "1") {
+export function field(label, name, value, type = "text", placeholder = "", step = "1", min = "0", max) {
   const wrapper = document.createElement("label");
   wrapper.className = "field";
   const caption = document.createElement("span");
@@ -115,8 +115,9 @@ export function field(label, name, value, type = "text", placeholder = "", step 
   input.value = value ?? "";
   input.placeholder = placeholder;
   if (type === "number") {
-    input.min = "0";
+    input.min = min;
     input.step = step;
+    if (max !== undefined) input.max = max;
   }
   wrapper.append(caption, input);
   return wrapper;

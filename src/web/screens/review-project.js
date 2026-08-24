@@ -614,6 +614,11 @@ function uploadedAssetList(assets) {
       ...(asset.sizeWarning ? [assetWarning(asset.sizeWarning)] : []),
       field("Usage purpose", "usagePurpose", asset.usagePurpose, "text", "Explain how this asset supports commentary"),
       checkboxField("Rights confirmed", "rightsConfirmed", asset.rightsConfirmed),
+      // Role/rights-status drive watermark eligibility in the render editor's
+      // Effects section: only role "logo" with owned/licensed/generated rights
+      // is offered as a watermark asset there.
+      selectField("Role", "role", asset.role ?? "", ASSET_ROLE_OPTIONS),
+      selectField("Rights status", "rightsStatus", asset.rightsStatus ?? "unknown", ASSET_RIGHTS_STATUS_OPTIONS),
       actionButton("Save asset details", null, "submit", "primary"),
     );
     list.append(form);
@@ -758,6 +763,153 @@ function renderRender(snapshot) {
   );
 }
 
+// Mirrors DEFAULT_SEGMENT_EFFECTS from src/visual-effects.ts. The web bundle
+// is plain, unbundled ESM served straight to the browser, so it cannot import
+// a server-side .ts module — this neutral baseline is kept in sync by hand
+// and used both to backfill legacy segments and to detect non-default effects.
+const NEUTRAL_SEGMENT_EFFECTS = {
+  version: 1,
+  speed: 1,
+  zoom: "none",
+  transitionIn: "cut",
+  transitionOut: "cut",
+  color: { brightness: 0, contrast: 1, saturation: 1, grayscale: 0 },
+  blur: 0,
+};
+
+const ZOOM_OPTIONS = [
+  ["none", "None"],
+  ["slow-in", "Slow zoom in"],
+  ["slow-out", "Slow zoom out"],
+];
+
+const TRANSITION_OPTIONS = [
+  ["cut", "Cut"],
+  ["fade", "Fade"],
+];
+
+const WATERMARK_POSITION_OPTIONS = [
+  ["top-left", "Top left"],
+  ["top-right", "Top right"],
+  ["bottom-left", "Bottom left"],
+  ["bottom-right", "Bottom right"],
+];
+
+const ASSET_ROLE_OPTIONS = [
+  ["", "No special role"],
+  ["logo", "Logo (eligible for watermarking)"],
+];
+
+const ASSET_RIGHTS_STATUS_OPTIONS = [
+  ["unknown", "Unknown"],
+  ["user-confirmed", "User confirmed"],
+  ["owned", "Owned"],
+  ["licensed", "Licensed"],
+  ["generated", "Generated"],
+];
+
+// Eligibility mirrors isEligibleWatermarkAsset in src/visual-effects.ts: a
+// watermark asset must carry role "logo" and one of these rights statuses.
+// "user-confirmed" and "unknown" are deliberately excluded.
+const ELIGIBLE_WATERMARK_RIGHTS_STATUSES = ["owned", "licensed", "generated"];
+
+function eligibleWatermarkAssets(assets) {
+  return assets.filter((asset) => asset.role === "logo" && ELIGIBLE_WATERMARK_RIGHTS_STATUSES.includes(asset.rightsStatus ?? ""));
+}
+
+// Lists only client-side eligible logo assets, but if the segment's persisted
+// watermark points at an asset outside that list (ineligible role/rights, or
+// deleted entirely) it stays visible as a distinguishable option rather than
+// silently disappearing — server validation is what actually rejects a save.
+function watermarkAssetOptions(assets, watermark) {
+  const eligible = eligibleWatermarkAssets(assets);
+  const options = [["", "No watermark"], ...eligible.map((asset) => [asset.id, asset.filename])];
+  if (watermark?.assetId && !eligible.some((asset) => asset.id === watermark.assetId)) {
+    const current = assets.find((asset) => asset.id === watermark.assetId);
+    options.push([watermark.assetId, current ? `${current.filename} (ineligible logo)` : `Missing asset ${watermark.assetId}`]);
+  }
+  return options;
+}
+
+// A short read-only label for the timeline clip, e.g. "1.25x · zoom-in ·
+// blur". Empty when every value matches NEUTRAL_SEGMENT_EFFECTS, which is
+// also what marks a clip as non-default for the has-effects CSS class.
+function effectsSummary(effects) {
+  const value = effects ?? NEUTRAL_SEGMENT_EFFECTS;
+  const color = value.color ?? NEUTRAL_SEGMENT_EFFECTS.color;
+  const parts = [];
+  if (value.speed !== NEUTRAL_SEGMENT_EFFECTS.speed) parts.push(`${value.speed}x`);
+  if (value.zoom === "slow-in") parts.push("zoom-in");
+  if (value.zoom === "slow-out") parts.push("zoom-out");
+  if (value.transitionIn === "fade") parts.push("fade-in");
+  if (value.transitionOut === "fade") parts.push("fade-out");
+  if (
+    color.brightness !== NEUTRAL_SEGMENT_EFFECTS.color.brightness ||
+    color.contrast !== NEUTRAL_SEGMENT_EFFECTS.color.contrast ||
+    color.saturation !== NEUTRAL_SEGMENT_EFFECTS.color.saturation ||
+    color.grayscale !== NEUTRAL_SEGMENT_EFFECTS.color.grayscale
+  ) {
+    parts.push(color.grayscale > 0 ? "grayscale" : "color");
+  }
+  if (value.blur > NEUTRAL_SEGMENT_EFFECTS.blur) parts.push("blur");
+  if (value.watermark) parts.push("watermark");
+  return parts.join(" · ");
+}
+
+// Reassembles the flat, dotted field names from the Effects section (kept
+// flat so they can share the Clip Inspector form without colliding with the
+// existing assetId/fitMode/etc. names) into the nested patch shape the PATCH
+// route expects. An empty watermark asset clears the watermark rather than
+// sending an incomplete object.
+function buildEffectsPatch(values) {
+  const watermarkAssetId = values["watermark.assetId"];
+  return {
+    speed: values.speed,
+    zoom: values.zoom,
+    transitionIn: values.transitionIn,
+    transitionOut: values.transitionOut,
+    color: {
+      brightness: values["color.brightness"],
+      contrast: values["color.contrast"],
+      saturation: values["color.saturation"],
+      grayscale: values["color.grayscale"],
+    },
+    blur: values.blur,
+    watermark: watermarkAssetId
+      ? {
+          assetId: watermarkAssetId,
+          position: values["watermark.position"],
+          scale: values["watermark.scale"],
+          opacity: values["watermark.opacity"],
+        }
+      : null,
+  };
+}
+
+async function saveVisualMappingEffects(sceneId, effectsPatch) {
+  const response = await fetch(projectApiUrl(`visual-mapping/segments/${encodeURIComponent(sceneId)}`), {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ effects: effectsPatch }),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
+  setStatus(`Saved effects for ${sceneId}. This does not approve the mapping — approve it again before rendering.`);
+  await refreshProjectView();
+}
+
+async function resetVisualMappingEffects(sceneId) {
+  const response = await fetch(projectApiUrl(`visual-mapping/segments/${encodeURIComponent(sceneId)}/effects/reset`), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
+  setStatus(`Reset effects for ${sceneId}. This does not approve the mapping — approve it again before rendering.`);
+  await refreshProjectView();
+}
+
 function renderMonitor(segment, assets) {
   const monitor = document.createElement("section");
   monitor.className = "render-monitor";
@@ -790,11 +942,21 @@ function renderMonitor(segment, assets) {
   const meta = document.createElement("div");
   meta.className = "monitor-meta";
   meta.append(strongText(segment.id), document.createTextNode(`${formatTimecode(segment.startSeconds)} → ${formatTimecode(segment.endSeconds)}`));
-  monitor.append(viewport, meta);
+  const note = paragraph("Source/segment monitor — not frame-accurate. Effects apply only in a rendered draft.");
+  note.className = "monitor-note";
+  monitor.append(viewport, meta, note);
   return monitor;
 }
 
 function renderInspector(segment, assets) {
+  // The server always sends complete normalized effects (Task 1), but a
+  // legacy or partially-loaded segment falls back to the neutral baseline
+  // rather than crashing on undefined fields.
+  const effects = segment.effects ?? NEUTRAL_SEGMENT_EFFECTS;
+  const color = effects.color ?? NEUTRAL_SEGMENT_EFFECTS.color;
+  const watermarkIneligible = !!effects.watermark
+    && !eligibleWatermarkAssets(assets).some((asset) => asset.id === effects.watermark.assetId);
+
   const form = document.createElement("form");
   form.className = "render-inspector";
   form.addEventListener("submit", (event) => {
@@ -814,6 +976,30 @@ function renderInspector(segment, assets) {
     field("Source duration (max 5s for video)", "sourceDurationSeconds", String(segment.sourceDurationSeconds), "number", "", "any"),
     checkboxField("Mute source audio", "muteSourceAudio", segment.muteSourceAudio),
     actionButton("Save mapping", null, "submit", "primary"),
+    sectionTitle("Effects"),
+    paragraph("Effects render only into an exported draft. Saving or resetting effects does not approve the mapping — approve it again before rendering."),
+    field("Speed", "speed", String(effects.speed), "number", "", "any", "0.5", "2"),
+    selectField("Zoom", "zoom", effects.zoom, ZOOM_OPTIONS),
+    selectField("Transition in", "transitionIn", effects.transitionIn, TRANSITION_OPTIONS),
+    selectField("Transition out", "transitionOut", effects.transitionOut, TRANSITION_OPTIONS),
+    field("Brightness", "color.brightness", String(color.brightness), "number", "", "any", "-1", "1"),
+    field("Contrast", "color.contrast", String(color.contrast), "number", "", "any", "0", "2"),
+    field("Saturation", "color.saturation", String(color.saturation), "number", "", "any", "0", "2"),
+    field("Grayscale", "color.grayscale", String(color.grayscale), "number", "", "any", "0", "1"),
+    field("Blur", "blur", String(effects.blur), "number", "", "any", "0", "40"),
+    selectField("Watermark asset", "watermark.assetId", effects.watermark?.assetId ?? "", watermarkAssetOptions(assets, effects.watermark)),
+    ...(watermarkIneligible
+      ? [assetWarning("This clip's saved watermark asset is not an eligible logo (needs role logo and owned/licensed/generated rights). Pick a valid logo or clear the watermark — saving keeps the current value until the server rejects or you change it.")]
+      : []),
+    selectField("Watermark position", "watermark.position", effects.watermark?.position ?? "bottom-right", WATERMARK_POSITION_OPTIONS),
+    field("Watermark scale", "watermark.scale", String(effects.watermark?.scale ?? 0.12), "number", "", "any", "0.05", "0.5"),
+    field("Watermark opacity", "watermark.opacity", String(effects.watermark?.opacity ?? 0.2), "number", "", "any", "0", "1"),
+    actionButton("Save effects", () => {
+      saveVisualMappingEffects(segment.id, buildEffectsPatch(formValues(form))).catch((error) => setStatus(error.message));
+    }),
+    actionButton("Reset effects", () => {
+      resetVisualMappingEffects(segment.id).catch((error) => setStatus(error.message));
+    }),
   );
   return form;
 }
@@ -847,9 +1033,10 @@ function timelineClipTrack(mapping, assets, duration) {
   track.className = "timeline-track timeline-visual-track";
   for (const segment of mapping.segments) {
     const asset = assets.find((candidate) => candidate.id === segment.assetId);
+    const summary = effectsSummary(segment.effects);
     const clip = document.createElement("button");
     clip.type = "button";
-    clip.className = `timeline-clip timeline-${asset?.mediaType ?? "fallback"}${segment.id === appState.selectedMappingSceneId ? " selected" : ""}${segment.confidence < 0.35 ? " low-confidence" : ""}`;
+    clip.className = `timeline-clip timeline-${asset?.mediaType ?? "fallback"}${segment.id === appState.selectedMappingSceneId ? " selected" : ""}${segment.confidence < 0.35 ? " low-confidence" : ""}${summary ? " has-effects" : ""}`;
     clip.style.left = `${(segment.startSeconds / duration) * 100}%`;
     clip.style.width = `${Math.max(2.5, ((segment.endSeconds - segment.startSeconds) / duration) * 100)}%`;
     clip.title = `${segment.id}: ${asset?.filename ?? "Generated background"}`;
@@ -859,6 +1046,15 @@ function timelineClipTrack(mapping, assets, duration) {
     const time = document.createElement("small");
     time.textContent = `${formatSeconds(segment.endSeconds - segment.startSeconds)} · ${Math.round(segment.confidence * 100)}%`;
     clip.append(name, time);
+    // Compact read-only summary, shown only when effects differ from the
+    // neutral defaults (e.g. "1.25x · zoom-in · blur"). The Clip Inspector is
+    // still the place to change values; this is a glance-only indicator.
+    if (summary) {
+      const effectsLabel = document.createElement("small");
+      effectsLabel.className = "timeline-clip-effects";
+      effectsLabel.textContent = summary;
+      clip.append(effectsLabel);
+    }
     clip.addEventListener("click", () => selectMappingScene(segment.id));
     track.append(clip);
   }
@@ -1168,13 +1364,20 @@ async function saveAssetMetadata(assetId, form) {
     throw new Error("Usage purpose is required before saving an asset.");
   }
 
+  const body = {
+    usagePurpose: values.usagePurpose,
+    rightsConfirmed: values.rightsConfirmed,
+    rightsStatus: values.rightsStatus,
+  };
+  // The role select's "No special role" option is empty string, which the
+  // server rejects as a role value — omit it so an asset without a role
+  // simply keeps not having one, instead of sending an invalid patch.
+  if (values.role === "logo") body.role = "logo";
+
   const response = await fetch(projectApiUrl(`assets/${encodeURIComponent(assetId)}`), {
     method: "PATCH",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      usagePurpose: values.usagePurpose,
-      rightsConfirmed: values.rightsConfirmed,
-    }),
+    body: JSON.stringify(body),
   });
   const data = await response.json();
   if (!response.ok) throw new Error(`${data.code}: ${data.message}`);

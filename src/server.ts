@@ -11,6 +11,7 @@ import {
   updateAssetMetadata,
   validateAssetManifest,
   type AssetMediaType,
+  type AssetRightsStatus,
 } from "./assets.ts";
 import { analyzeAsset, recoverInterruptedAnalysis } from "./asset-analysis.ts";
 import {
@@ -1069,11 +1070,20 @@ async function routeRequest(
       });
       return;
     }
-    const asset = await updateAssetMetadata(projectId, assetMetadataMatch[1], {
-      usagePurpose,
-      rightsConfirmed: body.rightsConfirmed === true,
-    });
-    sendJson(response, 200, { ok: true, asset });
+    try {
+      const asset = await updateAssetMetadata(projectId, assetMetadataMatch[1], {
+        usagePurpose,
+        rightsConfirmed: body.rightsConfirmed === true,
+        role: body.role === "logo" ? "logo" : undefined,
+        rightsStatus: typeof body.rightsStatus === "string" ? (body.rightsStatus as AssetRightsStatus) : undefined,
+      });
+      sendJson(response, 200, { ok: true, asset });
+    } catch (error: unknown) {
+      sendError(response, 400, {
+        code: "asset-metadata-invalid",
+        message: error instanceof Error ? error.message : "Asset metadata is invalid.",
+      });
+    }
     return;
   }
 

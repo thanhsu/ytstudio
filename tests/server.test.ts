@@ -388,6 +388,43 @@ test("copyright and asset actions run from the studio API", async () => {
       );
       assert.equal(update.status, 200);
       assert.equal((await update.json()).asset.usagePurpose, "Background behind original review commentary");
+
+      // The Effects UI's watermark eligibility (role "logo" + owned/licensed/
+      // generated rights) is only reachable if this PATCH route actually
+      // forwards role/rightsStatus through to updateAssetMetadata.
+      const markAsLogo = await fetch(
+        `${running.url}/api/projects/sample-project/assets/${encodeURIComponent(body.asset.id)}`,
+        {
+          method: "PATCH",
+          headers: { "content-type": "application/json", origin: running.url },
+          body: JSON.stringify({
+            usagePurpose: "Channel logo",
+            rightsConfirmed: true,
+            role: "logo",
+            rightsStatus: "owned",
+          }),
+        },
+      );
+      assert.equal(markAsLogo.status, 200);
+      const loggedAsset = (await markAsLogo.json()).asset;
+      assert.equal(loggedAsset.role, "logo");
+      assert.equal(loggedAsset.rightsStatus, "owned");
+
+      const invalidRole = await fetch(
+        `${running.url}/api/projects/sample-project/assets/${encodeURIComponent(body.asset.id)}`,
+        {
+          method: "PATCH",
+          headers: { "content-type": "application/json", origin: running.url },
+          body: JSON.stringify({
+            usagePurpose: "Channel logo",
+            rightsConfirmed: true,
+            rightsStatus: "not-a-real-status",
+          }),
+        },
+      );
+      // A validation error here must be a field-specific 400, not a generic 500.
+      assert.equal(invalidRole.status, 400);
+      assert.match((await invalidRole.json()).message, /rights status/i);
     } finally {
       await running.close();
     }

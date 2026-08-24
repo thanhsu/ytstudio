@@ -994,6 +994,14 @@ video {
   position: relative;
 }
 
+.monitor-note {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  background: #111827;
+  color: #64748b;
+  font-size: 0.72rem;
+}
+
 .render-timeline {
   grid-area: timeline;
   position: relative;
@@ -1100,6 +1108,14 @@ video {
 .timeline-clip.selected {
   border-color: #facc15;
   box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.5);
+}
+
+.timeline-clip.has-effects {
+  border-style: dashed;
+}
+
+.timeline-clip-effects {
+  color: #fbbf24;
 }
 
 .timeline-clip.low-confidence::after {
