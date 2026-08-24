@@ -10,6 +10,15 @@ import {
   formValues, boolFormValues, setPathValue, lower, strongText, confidenceMeter,
   formatTimecode, formatSeconds, preBlock, tableCell, seriesLinkButton,
 } from "./lib/dom.js";
+import { bindShell, setStatus, paidVoiceDialog, confirmPaidVoice, paidScriptDialog, confirmPaidScript } from "./lib/shell.js";
+import {
+  bindWorkspaceRefs, projectList, seriesPanel, workflowTitle, workflowDescription,
+  workflowSteps, stageRail, stageTitle, stageContent, audioPreview, videoPreview,
+} from "./lib/refs.js";
+import {
+  appState, JOB_LABELS, ensureProjectEventStream, onJobEvent, reportedAsJob,
+  refreshAppData, projectApiUrl, projectFileUrl,
+} from "./lib/state.js";
 
 const STAGES = [
   "brief",
@@ -55,80 +64,12 @@ const STAGE_PHASES = [
 
 const RUN_AVAILABLE_TASKS_LABEL = "Run available tasks";
 
-const appState = {
-  projects: [],
-  series: [],
-  reviewProjectsBySeries: {},
-  audioStoryWorkspaces: {},
-  brandKits: {},
-  thumbnailBriefs: {},
-  selectedSeries: null,
-  selectedSeriesTab: "overview",
-  selectedReviewProjectId: null,
-  selectedProject: null,
-  activeStage: "brief",
-  projectSnapshot: null,
-  editManifest: null,
-  editExport: null,
-  translationPresets: null,
-  workflowTemplates: null,
-  config: null,
-  selectedMappingSceneId: null,
-  eventStream: null,
-  eventStreamProject: null,
-  activeJob: null,
-  sourceSearchResults: [],
-  sourceSearchFilters: {
-    expandBilibiliQuery: true,
-  },
-};
+bindShell();
+bindWorkspaceRefs();
 
-const JOB_LABELS = {
-  voice: "Voice",
-  render: "Render",
-  asr: "ASR",
-  captions: "Captions",
-  asset: "Asset analysis",
-  script: "Script",
-  "story-pipeline": "Story pipeline",
-  "story-stage": "Story stage",
-  "story-export": "Story export",
-};
-
-/**
- * Slow routes answer with a job instead of a finished artifact, so the studio
- * follows the project event stream for progress rather than holding a request
- * open for the whole render.
- */
-function ensureProjectEventStream(projectId) {
-  if (appState.eventStreamProject === projectId && appState.eventStream) {
-    return;
-  }
-  appState.eventStream?.close();
-  const source = new EventSource(`/api/projects/${encodeURIComponent(projectId)}/events`);
-  source.addEventListener("job", (event) => handleJobEvent(JSON.parse(event.data)));
-  appState.eventStream = source;
-  appState.eventStreamProject = projectId;
-}
-
-function handleJobEvent(job) {
-  const label = JOB_LABELS[job.kind] ?? job.kind;
-  if (job.status === "running") {
-    appState.activeJob = job;
-    setStatus(`${label}: ${job.message} (${job.progress}%)`);
-    return;
-  }
-
-  appState.activeJob = null;
-  if (job.status === "succeeded") {
-    setStatus(`${label} finished.`);
-  } else if (job.status === "cancelled") {
-    setStatus(`${label} cancelled.`);
-  } else {
-    setStatus(`${label} failed: ${job.error ?? "unknown error"}`);
-  }
-  // A finished story job refreshes the open story screen; other screens keep
-  // their existing project refresh.
+// A finished story job refreshes the open story screen; other screens keep
+// their existing project refresh.
+onJobEvent((job) => {
   if (job.kind.startsWith("story-") && storyFactoryState.channelId && storyFactoryState.storyId) {
     void renderStoryDetail(storyFactoryState.channelId, storyFactoryState.storyId).catch((error) => setStatus(error.message));
     return;
@@ -136,36 +77,7 @@ function handleJobEvent(job) {
   if (appState.selectedProject) {
     void selectProject(appState.selectedProject);
   }
-}
-
-/**
- * Returns true when the route accepted the work as a background job, so the
- * caller should wait for the event stream instead of reading an artifact.
- */
-function reportedAsJob(response, data) {
-  if (response.status !== 202) {
-    return false;
-  }
-  const label = JOB_LABELS[data.job?.kind] ?? data.job?.kind ?? "Job";
-  setStatus(`${label} started.`);
-  return true;
-}
-
-const projectList = document.querySelector("#project-list");
-const seriesPanel = document.querySelector("#series-panel");
-const workflowTitle = document.querySelector("#workflow-title");
-const workflowDescription = document.querySelector("#workflow-description");
-const workflowSteps = document.querySelector("#workflow-steps");
-const stageRail = document.querySelector("#stage-rail");
-const stageTitle = document.querySelector("#stage-title");
-const stageContent = document.querySelector("#stage-content");
-const status = document.querySelector("#status");
-const paidVoiceDialog = document.querySelector("#paid-voice-dialog");
-const confirmPaidVoice = document.querySelector("#confirm-paid-voice");
-const paidScriptDialog = document.querySelector("#paid-script-dialog");
-const confirmPaidScript = document.querySelector("#confirm-paid-script");
-const audioPreview = document.querySelector("#audio-preview");
-const videoPreview = document.querySelector("#video-preview");
+});
 
 document.querySelector("#refresh-projects").addEventListener("click", () => loadProjects());
 document.querySelector("#open-sources").addEventListener("click", () => renderSources().catch((error) => setStatus(error.message)));
@@ -181,48 +93,7 @@ bindStageRail();
 
 async function loadProjects() {
   setStatus("Loading projects...");
-  const [projectsResponse, seriesResponse, presetsResponse, workflowsResponse, configResponse] = await Promise.all([
-    fetch("/api/projects"),
-    fetch("/api/series"),
-    fetch("/api/translation-presets"),
-    fetch("/api/workflow-templates"),
-    fetch("/api/config"),
-  ]);
-  const data = await projectsResponse.json();
-  appState.series = (await seriesResponse.json()).series ?? [];
-  appState.translationPresets = await presetsResponse.json();
-  appState.workflowTemplates = await workflowsResponse.json();
-  appState.config = (await configResponse.json()).config;
-  appState.projects = data.projects ?? [];
-  appState.reviewProjectsBySeries = Object.fromEntries(
-    await Promise.all(
-      appState.series.map(async (series) => {
-        const response = await fetch(`/api/series/${encodeURIComponent(series.id)}/review-projects`);
-        return [series.id, (await response.json()).reviewProjects ?? []];
-      }),
-    ),
-  );
-  appState.audioStoryWorkspaces = Object.fromEntries(
-    await Promise.all(
-      appState.series
-        .filter((series) => series.workflowType === "audio-story")
-        .map(async (series) => {
-          const response = await fetch(`/api/series/${encodeURIComponent(series.id)}/audio-story`);
-          return [series.id, (await response.json()).workspace ?? {}];
-        }),
-    ),
-  );
-  appState.brandKits = Object.fromEntries(
-    await Promise.all(
-      appState.series.map(async (series) => {
-        const response = await fetch(`/api/series/${encodeURIComponent(series.id)}/brand-kit`);
-        return [series.id, (await response.json()).brandKit ?? {}];
-      }),
-    ),
-  );
-  if (!appState.selectedSeries && appState.series.length > 0) {
-    appState.selectedSeries = appState.series[0];
-  }
+  await refreshAppData();
   renderStageRail();
   renderProjects();
   if (location.hash === "#sources") {
@@ -2447,14 +2318,6 @@ function sourceSubtitlePath() {
   return appState.projectSnapshot?.state?.artifacts?.["source-subtitles"]?.relativePath ?? "workspace/subtitles/source.asr.srt";
 }
 
-function projectApiUrl(route) {
-  return `/api/projects/${encodeURIComponent(appState.selectedProject)}/${route}`;
-}
-
-function projectFileUrl(relativePath) {
-  return `/api/projects/${encodeURIComponent(appState.selectedProject)}/files/${encodeURIComponent(relativePath)}`;
-}
-
 function parseEpisodeNumbers(value) {
   return String(value)
     .split(/[,\s]+/)
@@ -2494,10 +2357,6 @@ function setActiveStageButton(stage = appState.activeStage) {
   for (const button of stageRail.querySelectorAll("[data-stage]")) {
     button.classList.toggle("selected", button.dataset.stage === stage);
   }
-}
-
-function setStatus(message) {
-  status.textContent = message;
 }
 
 loadProjects().catch((error) => setStatus(error.message));
