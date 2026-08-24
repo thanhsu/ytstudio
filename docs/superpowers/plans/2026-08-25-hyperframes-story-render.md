@@ -40,6 +40,59 @@
 
 ---
 
+### Task 0: Hyperframes Runtime Preflight
+
+**Files:**
+- Modify: `docs/implementation-reports/2026-08-25-hyperframes-story-render.md` only if the implementation report already exists; otherwise record findings in Task 4 notes before code.
+- Test: manual command output captured in the implementation report.
+
+**Interfaces:**
+- Produces: confirmed Hyperframes CLI output path for `hyperframes@0.8.13`
+- Produces: confirmed `runProcess` abort behavior for a direct child process
+
+- [ ] **Step 1: Verify package shape before implementation**
+
+Run:
+
+```bash
+npm view hyperframes@0.8.13 version bin --json
+```
+
+Expected:
+
+```json
+{
+  "version": "0.8.13",
+  "bin": {
+    "hyperframes": "bin/hyperframes.mjs"
+  }
+}
+```
+
+- [ ] **Step 2: Inspect `runProcess` abort wiring**
+
+Read `src/process.ts` and confirm `spawn()` receives the provided `AbortSignal`:
+
+```ts
+const child = spawn(command, args, {
+  signal: options.signal,
+});
+```
+
+If `signal` is absent, add a small test and implementation in Task 4 before relying on render timeouts.
+
+- [ ] **Step 3: Confirm abort leaves no direct child process behind**
+
+In Task 4's failing test, the fake child should write its PID to a file, hang, then the test should abort and assert `process.kill(pid, 0)` fails after a short delay. This proves timeout does not only reject a promise while leaving a direct child running.
+
+- [ ] **Step 4: Confirm real Hyperframes output path**
+
+After Task 1 installs `hyperframes@0.8.13` but before implementing Task 4, create a temporary minimal composition outside `projects/` and run the pinned CLI through `node ./node_modules/hyperframes/bin/hyperframes.mjs render`.
+
+Record the output directory and filename. Use that confirmed value in `hyperframes-renderer.ts` tests and implementation instead of assuming `dist/story.mp4`.
+
+---
+
 ### Task 1: Render Config And Dependency
 
 **Files:**
@@ -164,6 +217,7 @@ git commit -m "feat: add Hyperframes render config"
 - Consumes: scenes with `sceneId`, `startSeconds`, `endSeconds`
 - Consumes: approved text or caption text
 - Produces: `buildVisualPromptArtifact(input): VisualPromptArtifact`
+- Produces: `buildVisualPromptSourceHash(input): string`
 - Produces: `VisualPromptArtifact.cues[]`
 
 - [ ] **Step 1: Write failing visual prompt tests**
@@ -208,6 +262,23 @@ test("cue timing is clamped to narration duration", () => {
     scenes: [{ sceneId: "SC-001", startSeconds: 0, endSeconds: 99 }],
   });
   assert.equal(artifact.cues[0].endSeconds, 12);
+});
+
+test("source hash changes when approved text or scene timing changes", () => {
+  const first = buildVisualPromptSourceHash({
+    naturalizedText: "Never open the red door",
+    scenes: [{ sceneId: "SC-001", startSeconds: 0, endSeconds: 8 }],
+    ttsChunks: [{ index: 0, startSeconds: 0, endSeconds: 8 }],
+    captions: [{ startSeconds: 0, endSeconds: 8, text: "Never open the red door" }],
+  });
+  const second = buildVisualPromptSourceHash({
+    naturalizedText: "Never open the blue door",
+    scenes: [{ sceneId: "SC-001", startSeconds: 0, endSeconds: 8 }],
+    ttsChunks: [{ index: 0, startSeconds: 0, endSeconds: 8 }],
+    captions: [{ startSeconds: 0, endSeconds: 8, text: "Never open the red door" }],
+  });
+  assert.notEqual(first, second);
+  assert.match(first, /^[a-f0-9]{64}$/);
 });
 ```
 
@@ -282,6 +353,8 @@ export function buildVisualPromptArtifact(input: BuildVisualPromptInput): Visual
 
 Keep helpers pure and deterministic.
 
+`buildVisualPromptSourceHash()` must hash canonical JSON containing naturalized text, scene timings, TTS chunk timings, and caption payload. Do not hash generated prompt text; the source hash identifies the approved audio/script inputs.
+
 - [ ] **Step 5: Run focused tests and typecheck**
 
 Run:
@@ -313,6 +386,7 @@ git commit -m "feat: derive story visual prompts from audio text"
 - Consumes: scene image paths, narration path, BGM/SFX, dimensions, duration
 - Produces: `buildHyperframesComposition(input): { html: string; frame: string; manifest: object }`
 - Produces: `escapeHtml(value: string): string`
+- Produces: `detectHyperframesVersion(packageJsonPath): Promise<string | null>`
 
 - [ ] **Step 1: Write failing composition tests**
 
@@ -351,6 +425,7 @@ test("manifest records engine and source hashes", () => {
   const result = buildHyperframesComposition(baseInput({ sourceHash: "hash-1" }));
   assert.equal(result.manifest.engine, "hyperframes");
   assert.equal(result.manifest.sourceHash, "hash-1");
+  assert.equal(result.manifest.hyperframesVersion, "0.8.13");
 });
 ```
 
@@ -384,6 +459,8 @@ Generate HTML with:
   <audio data-start="0" data-duration="12" data-track-index="10" src="assets/narration.m4a"></audio>
 </div>
 ```
+
+Read `node_modules/hyperframes/package.json` when available and pass the version into the manifest. If the package file is absent in tests, use `null` and keep the render path working.
 
 - [ ] **Step 4: Run focused tests and typecheck**
 
@@ -445,7 +522,12 @@ await writeFile(join("dist", "story.mp4"), "video-bytes");
 });
 
 test("renderer aborts a hung Hyperframes process", async () => {
-  const fakeCli = await makeFakeExecutable(`await new Promise(() => {});`);
+  const pidPath = join(root, "pid.txt");
+  const fakeCli = await makeFakeExecutable(`
+import { writeFile } from "node:fs/promises";
+await writeFile(${JSON.stringify(pidPath)}, String(process.pid), "utf8");
+await new Promise(() => {});
+`);
   await assert.rejects(() => renderHyperframesStoryVideo({
     workspacePath: root,
     command: process.execPath,
@@ -454,6 +536,9 @@ test("renderer aborts a hung Hyperframes process", async () => {
     composition: baseComposition(),
     outputFileName: "story.mp4",
   }), /timed out|aborted/i);
+  const pid = Number(await readFile(pidPath, "utf8"));
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.throws(() => process.kill(pid, 0));
 });
 ```
 
@@ -488,7 +573,7 @@ export async function renderHyperframesStoryVideo(options: RenderHyperframesOpti
 }
 ```
 
-If Hyperframes writes to another default output path during smoke testing, update this adapter and tests together; keep the path centralized here.
+Use the real output path discovered in Task 0 Step 4. Keep that path centralized in this adapter so future Hyperframes CLI changes touch one file.
 
 - [ ] **Step 4: Run focused tests and typecheck**
 
@@ -590,6 +675,12 @@ Inside `runRenderStage()`:
 
 ```ts
 if (ctx.config.render.storyEngine === "hyperframes") {
+  const sourceHash = buildVisualPromptSourceHash({
+    naturalizedText: approvedText,
+    scenes: scaledScenes,
+    ttsChunks: tts.chunks.map((chunk) => ({ index: chunk.index, startSeconds: chunk.startSeconds, endSeconds: chunk.endSeconds })),
+    captions,
+  });
   const visualPrompts = buildVisualPromptArtifact({ sourceHash, durationSeconds: actualDuration, text: approvedText, scenes: scaledScenes });
   await writeStageArtifact(ctx.channelId, ctx.storyId, "visual-prompts", visualPrompts);
   const composition = buildHyperframesComposition(...);
@@ -682,7 +773,7 @@ field("Hyperframes args", "render.hyperframesArgs", (config.render.hyperframesAr
 field("Hyperframes timeout minutes", "render.hyperframesTimeoutMinutes", config.render.hyperframesTimeoutMinutes, "number"),
 ```
 
-When saving, split args conservatively on whitespace only in the config UI path.
+When saving, split args conservatively on whitespace only in the config UI path and show this as a known limitation in the field help/status text. The default local CLI path contains no spaces; quoted paths with spaces are intentionally deferred until a stronger parser is added.
 
 - [ ] **Step 4: Add Video tab metadata**
 

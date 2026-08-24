@@ -85,7 +85,7 @@ workspace/render/hyperframes/
   output.mp4
 ```
 
-`manifest.json` records source artifact hashes, engine version if detectable, dimensions, duration, scene timing, and output path. `frame.md` captures the channel visual rules for the generated composition and can later support reusable style profiles.
+`manifest.json` records source artifact hashes, the pinned Hyperframes package version, dimensions, duration, scene timing, and output path. `frame.md` captures the channel visual rules for the generated composition and can later support reusable style profiles.
 
 Asset files may be copied or symlinked only if Windows support is reliable; the first implementation should copy or reference resolved local paths conservatively. The composition must use relative paths where practical so diagnostics and previews remain portable within the story workspace.
 
@@ -113,7 +113,7 @@ All story-derived text inserted into HTML, including captions, scene labels, tit
 
 ## Audio-Derived Visual Prompts
 
-Before Hyperframes composition generation, the pipeline should derive a `visual-prompts.json` artifact from the approved naturalized script, TTS chunk timings, captions, and scenes. This stage is deterministic by default and can later accept an LLM enhancement behind the existing paid-request confirmation pattern.
+Before Hyperframes composition generation, the pipeline should derive a `visual-prompts.json` artifact from the approved naturalized script, TTS chunk timings, captions, and scenes. This stage is deterministic by default and can later accept an LLM enhancement behind the existing paid-request confirmation pattern. Its `sourceHash` is the SHA-256 hash of a canonical JSON payload containing the naturalized text hash, scene timing payload, TTS chunk timing payload, and caption payload used to build the cues.
 
 Initial artifact shape:
 
@@ -238,7 +238,7 @@ Add unit tests for:
 - Visual prompt generation derives scene cues from approved narration/caption content, clamps cue timing to narration duration, and never invents overlay text absent from source content.
 - Hyperframes command construction uses config-owned command/args and does not accept request-owned executable input.
 - Hyperframes command construction works on Windows without spawning `npx` directly.
-- Hyperframes timeout aborts a hung render process.
+- Hyperframes timeout aborts a hung render process and leaves no direct child process behind.
 - Pipeline dispatch calls the Hyperframes renderer only when configured.
 - Render artifact remains compatible with export/final QA expectations and changes its artifact hash when `engine` or `outputSha256` changes.
 - UI exposes engine config and Video tab engine status.
@@ -252,7 +252,7 @@ Add one smoke validation step in the implementation report:
 
 1. Config and type support for `storyEngine`, `hyperframesCommand`, `hyperframesArgs`, and `hyperframesTimeoutMinutes`, plus pinned `hyperframes@0.8.13`.
 2. Audio-derived visual prompt artifact generation.
-3. Pure composition generation and manifest writing.
+3. Pure composition generation and manifest writing, including pinned Hyperframes package-version capture.
 4. Hyperframes CLI adapter with fake-process tests.
 5. Story Factory render-stage dispatch and unchanged downstream `render.json`.
 6. Config UI and Video tab status.
