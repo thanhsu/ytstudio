@@ -232,6 +232,23 @@ export async function updateSeriesProject(seriesId: string, update: UpdateSeries
   return next;
 }
 
+export async function deleteSeriesEpisode(
+  seriesId: string,
+  episodeIdValue: string,
+): Promise<{ series: SeriesProject; removedProjectId: string }> {
+  const series = await loadSeriesProject(seriesId);
+  const index = series.episodes.findIndex((episode) => episode.id === episodeIdValue);
+  if (index === -1) {
+    throw new Error(`Episode not found: ${episodeIdValue}`);
+  }
+  const [removed] = series.episodes.splice(index, 1);
+  const removedProjectId = validateProjectId(removed.episodeProjectId);
+  await rm(join(projectsRoot(), removedProjectId), { recursive: true, force: true });
+  series.updatedAt = new Date().toISOString();
+  await saveSeriesProject(series);
+  return { series, removedProjectId };
+}
+
 export async function deleteSeriesProject(seriesId: string): Promise<{ id: string; removedEpisodeProjects: string[] }> {
   const series = await loadSeriesProject(seriesId);
   const removedEpisodeProjects: string[] = [];
