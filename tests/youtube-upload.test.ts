@@ -65,3 +65,7 @@ test("setThumbnail posts PNG bytes to the YouTube thumbnail endpoint", async () 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("normalizes upload network failures without exposing provider text", async () => {
+  await assert.rejects(() => uploadVideo({ accessToken: "access", filePath: "package.json", snippet: { title: "T", description: "D", tags: [] }, status: { privacyStatus: "private" }, fetch: async () => { throw new Error("socket failed token=sk-secret-value"); } }), (error: unknown) => error instanceof Error && error.message.includes("youtube-upload-failed") && !error.message.includes("sk-secret-value"));
+});
