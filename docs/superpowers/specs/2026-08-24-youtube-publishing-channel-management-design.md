@@ -2,7 +2,9 @@
 
 **Date:** 2026-08-24
 
-**Status:** Design approved; implementation plan pending.
+**Status:** Implemented on `feature/youtube-publishing` (2026-08-24). Plan:
+`docs/superpowers/plans/2026-08-24-youtube-publishing-channel-management.md`;
+review: `docs/superpowers/reviews/2026-08-24-youtube-publishing-channel-management-design-review.md`.
 
 ## Goal
 
