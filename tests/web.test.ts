@@ -1,9 +1,25 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createStudioServer, startStudioServer } from "../src/server.ts";
+
+async function readWebScripts(): Promise<string> {
+  const parts: string[] = [];
+  for (const dir of ["src/web", "src/web/lib", "src/web/screens"]) {
+    let entries: string[] = [];
+    try {
+      entries = await readdir(dir);
+    } catch {
+      continue; // screens/ appears later in the migration
+    }
+    for (const entry of entries.sort()) {
+      if (entry.endsWith(".js")) parts.push(await readFile(join(dir, entry), "utf8"));
+    }
+  }
+  return parts.join("\n");
+}
 
 test("web shell exposes the complete approval pipeline", async () => {
   const html = await readFile("src/web/index.html", "utf8");
@@ -22,7 +38,7 @@ test("web shell and app expose the AI story factory screens", async () => {
   const html = await readFile("src/web/index.html", "utf8");
   assert.match(html, /id="open-story-factory"/);
 
-  const script = await readFile("src/web/app.js", "utf8");
+  const script = await readWebScripts();
   for (const marker of [
     "renderStoryFactory",
     "renderStoryDetail",
@@ -49,7 +65,7 @@ test("web shell and app expose the AI story factory screens", async () => {
 });
 
 test("web app exposes UI controls for media, ASR, captions, and render actions", async () => {
-  const script = await readFile("src/web/app.js", "utf8");
+  const script = await readWebScripts();
 
   for (const route of [
     "media",
@@ -114,7 +130,7 @@ test("web app exposes UI controls for media, ASR, captions, and render actions",
 });
 
 test("translation stage exposes the human subtitle segment editor", async () => {
-  const script = await readFile("src/web/app.js", "utf8");
+  const script = await readWebScripts();
   const styles = await readFile("src/web/styles.css", "utf8");
 
   assert.match(script, /Create Edit Manifest/);
@@ -132,7 +148,7 @@ test("translation stage exposes the human subtitle segment editor", async () => 
 });
 
 test("render stage exposes the subtitle-driven cut", async () => {
-  const script = await readFile("src/web/app.js", "utf8");
+  const script = await readWebScripts();
   const styles = await readFile("src/web/styles.css", "utf8");
 
   assert.match(script, /Render Cut/);
@@ -171,7 +187,7 @@ test("server serves the studio shell without exposing project files", async () =
 });
 
 test("the studio offers an explicit script approval and never auto-approves gates", async () => {
-  const script = await readFile("src/web/app.js", "utf8");
+  const script = await readWebScripts();
 
   assert.match(script, /Approve Script/);
   assert.match(script, /script\/approve/);
@@ -181,14 +197,14 @@ test("the studio offers an explicit script approval and never auto-approves gate
 });
 
 test("the render stage explains which gates still block a draft", async () => {
-  const script = await readFile("src/web/app.js", "utf8");
+  const script = await readWebScripts();
 
   assert.match(script, /renderGate/);
   assert.match(script, /RENDER_GATE_LABELS/);
 });
 
 test("the studio follows job progress over the project event stream", async () => {
-  const script = await readFile("src/web/app.js", "utf8");
+  const script = await readWebScripts();
 
   assert.match(script, /new EventSource/);
   assert.match(script, /addEventListener\("job"/);
@@ -202,7 +218,7 @@ test("the studio follows job progress over the project event stream", async () =
 
 test("the script stage shows the model that produced the script and gates paid generation", async () => {
   const html = await readFile("src/web/index.html", "utf8");
-  const script = await readFile("src/web/app.js", "utf8");
+  const script = await readWebScripts();
 
   assert.match(html, /id="paid-script-dialog"/);
   assert.match(html, /id="confirm-paid-script"/);
@@ -217,7 +233,7 @@ test("the script stage shows the model that produced the script and gates paid g
 });
 
 test("the paid script dialog is raised only for a hosted model, never for the offline template", async () => {
-  const script = await readFile("src/web/app.js", "utf8");
+  const script = await readWebScripts();
 
   assert.match(script, /function paidScriptModelConfigured/);
   assert.match(script, /appState\.config\?\.script\?\.provider === "openai-compatible"/);
@@ -227,7 +243,7 @@ test("the paid script dialog is raised only for a hosted model, never for the of
 });
 
 test("number inputs holding machine-produced fractional values accept any step", async () => {
-  const script = await readFile("src/web/app.js", "utf8");
+  const script = await readWebScripts();
 
   // step defaults to "1", which makes native validation reject a fractional
   // value and silently block the form submit.
@@ -241,7 +257,7 @@ test("number inputs holding machine-produced fractional values accept any step",
 });
 
 test("the config screen lists an unrecognized script provider instead of hiding it", async () => {
-  const script = await readFile("src/web/app.js", "utf8");
+  const script = await readWebScripts();
 
   assert.match(script, /function scriptProviderOptions/);
   assert.match(script, /unrecognized — pick a valid provider/);
@@ -249,7 +265,7 @@ test("the config screen lists an unrecognized script provider instead of hiding 
 });
 
 test("the config screen exposes source search settings", async () => {
-  const script = await readFile("src/web/app.js", "utf8");
+  const script = await readWebScripts();
 
   assert.match(script, /Default source search/);
   assert.match(script, /sources\.defaultSearchPlatform/);
@@ -267,7 +283,7 @@ test("the config screen exposes source search settings", async () => {
 
 test("the sources screen exposes paste, rights, score, download, and delete", async () => {
   const html = await readFile("src/web/index.html", "utf8");
-  const script = await readFile("src/web/app.js", "utf8");
+  const script = await readWebScripts();
   const styles = await readFile("src/web/styles.css", "utf8");
 
   assert.match(html, /id="open-sources"/);
@@ -284,7 +300,7 @@ test("the sources screen exposes paste, rights, score, download, and delete", as
 });
 
 test("the sources screen exposes keyword search before tracking a source", async () => {
-  const script = await readFile("src/web/app.js", "utf8");
+  const script = await readWebScripts();
   const styles = await readFile("src/web/styles.css", "utf8");
 
   assert.match(script, /Search Sources/);
@@ -304,7 +320,7 @@ test("the sources screen exposes keyword search before tracking a source", async
 });
 
 test("the sources screen can filter and triage keyword search results", async () => {
-  const script = await readFile("src/web/app.js", "utf8");
+  const script = await readWebScripts();
   const styles = await readFile("src/web/styles.css", "utf8");
 
   assert.match(script, /Include keywords/);
@@ -324,7 +340,7 @@ test("the sources screen can filter and triage keyword search results", async ()
 });
 
 test("search triage rates review suitability, never how likely a rights holder is to enforce", async () => {
-  const script = await readFile("src/web/app.js", "utf8");
+  const script = await readWebScripts();
 
   // Popularity does not weaken fair use and a rights holder posting their own
   // work does not strengthen it, so neither may drive the badge.
@@ -339,7 +355,7 @@ test("search triage rates review suitability, never how likely a rights holder i
 });
 
 test("the sources screen exposes editable Bilibili query expansion", async () => {
-  const script = await readFile("src/web/app.js", "utf8");
+  const script = await readWebScripts();
   const styles = await readFile("src/web/styles.css", "utf8");
 
   assert.match(script, /Expand Bilibili\/Douyin query/);
@@ -348,7 +364,7 @@ test("the sources screen exposes editable Bilibili query expansion", async () =>
   // Expansion is generic and lives in search-queries.js. It must not name a show:
   // the first version appended one hardcoded title to every episode query, so
   // searching for anything else quietly returned that title instead.
-  assert.match(script, /from "\.\/search-queries\.js"/);
+  assert.match(script, /search-queries\.js/);
   assert.doesNotMatch(script, /aliases: \["牧神记"/);
   assert.doesNotMatch(script, /`牧神记 第\$\{/);
   assert.match(script, /matchedQuery/);
@@ -359,14 +375,14 @@ test("the sources screen exposes editable Bilibili query expansion", async () =>
 });
 
 test("the sources screen refuses to imply that declaring rights clears a project gate", async () => {
-  const script = await readFile("src/web/app.js", "utf8");
+  const script = await readWebScripts();
 
   assert.match(script, /Declaring rights permits the download only/);
   assert.match(script, /copyright/i);
 });
 
 test("the sources screen shows why a score was given, never the number alone", async () => {
-  const script = await readFile("src/web/app.js", "utf8");
+  const script = await readWebScripts();
 
   assert.match(script, /score\.reason/);
   assert.match(script, /score\.risks/);
@@ -374,7 +390,7 @@ test("the sources screen shows why a score was given, never the number alone", a
 });
 
 test("every select option list is pair-shaped, because selectField destructures entries", async () => {
-  const script = await readFile("src/web/app.js", "utf8");
+  const script = await readWebScripts();
 
   // selectField does `for (const [value, label] of options)`. An options list of
   // object literals throws "is not iterable" at render time, and the grep-based
