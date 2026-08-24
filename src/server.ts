@@ -375,6 +375,7 @@ async function routeRequest(
           sendJson: (status, body) => sendJson(response, status, body),
           sendError: (status, error) => sendError(response, status, error),
           readBody: () => readJsonBody(request),
+          publishDeps: { jobManager: jobs },
         },
       });
       if (handled) return;
@@ -393,6 +394,10 @@ async function routeRequest(
           readBody: () => readJsonBody(request),
           startChannelJob: (kind, operation, ownerSuffix) =>
             startProjectJob(response, ownerSuffix ? compositeOwner(seriesId, ownerSuffix) : seriesId, kind, operation),
+          startYouTubePublish: async (channelId, input) => {
+            const { startYouTubePublish } = await import("./youtube/publish.ts");
+            return startYouTubePublish(channelId, input, { jobManager: jobs });
+          },
         },
       });
       return;

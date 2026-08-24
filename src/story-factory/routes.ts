@@ -27,13 +27,12 @@ import {
 import { storyRelativePath } from "./paths.ts";
 import { editSectionText, listSections, readSection } from "./section-edit.ts";
 import { generateVoiceSample, listVoiceLabVoices } from "./voice-lab.ts";
-import { getFreshAccessToken, loadTokens } from "../youtube/token-store.ts";
-import { uploadVideo, setThumbnail } from "../youtube/upload.ts";
-import { resolveProjectPath } from "../project-paths.ts";
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
+import { resolveProjectPath } from "../project-paths.ts";
 import { createCompilation, exportCompilation, listCompilations, loadCompilation, renderCompilation, runCompilationMetadata } from "./compilation.ts";
 import { isStoryStageId, type StoryApprovalStage, type StoryProject, type StoryStageId } from "./types.ts";
+import { startYouTubePublish, type YouTubePublishInput } from "../youtube/publish.ts";
 
 /**
  * The story-factory HTTP surface, mounted inside the series router:
@@ -62,6 +61,7 @@ export type StoryFactoryTools = {
     // they still persist and stream under the shared channel owner.
     ownerSuffix?: string,
   ) => Promise<void>;
+  startYouTubePublish?: (seriesId: string, input: YouTubePublishInput) => Promise<unknown>;
 };
 
 /** Artifacts an operator may edit by hand. Media manifests and QA reports are machine-owned. */
@@ -476,65 +476,30 @@ async function routeStory(options: {
   }
 
   if (storyRest === "publish" && method === "POST") {
-    if (story.stages.export?.status !== "done") {
-      tools.sendError(409, { code: "approval-required", message: "Publish requires a completed export package first." });
-      return;
-    }
-    if (!await loadTokens(channelId)) {
-      tools.sendError(409, { code: "youtube-not-connected", message: "Connect YouTube for this channel before publishing." });
-      return;
-    }
-    const clientId = process.env[config.youtube.clientIdEnv]?.trim() ?? "";
-    const clientSecret = process.env[config.youtube.clientSecretEnv]?.trim() ?? "";
-    if (!clientId || !clientSecret) {
-      tools.sendError(409, { code: "youtube-not-configured", message: "Configure YouTube client credentials before publishing." });
-      return;
-    }
     const body = await tools.readBody();
-    const privacyStatus = body.privacyStatus === "public" || body.privacyStatus === "unlisted" ? body.privacyStatus : "private";
-    const calendarEntry = body.publishAt ? null : (await loadCalendar(channelId)).entries.find((entry) => entry.storyId === storyId && entry.plannedPublishAt && Date.parse(entry.plannedPublishAt) > Date.now());
-    const publishAt = typeof body.publishAt === "string" && body.publishAt.trim() ? body.publishAt.trim() : calendarEntry?.plannedPublishAt ?? undefined;
-    await tools.startChannelJob("story-publish", async ({ signal, update }) => {
-      const current = await loadStory(channelId, storyId);
-      await saveStageRun(channelId, storyId, "publish", { status: "running", startedAt: new Date().toISOString(), lastError: undefined });
-      try {
-        const manifest = await readStageArtifact<import("./types.ts").ExportManifest>(channelId, storyId, "export");
-        if (!manifest) throw new Error("Export manifest is missing.");
-        const token = await getFreshAccessToken(channelId, { clientId, clientSecret });
-        const title = (await readFile(resolveProjectPath(channelId, manifest.titlePath), "utf8")).trim();
-        const description = await readFile(resolveProjectPath(channelId, manifest.descriptionPath), "utf8");
-        const tagsText = await readFile(resolveProjectPath(channelId, manifest.tagsPath), "utf8");
-        const uploaded = await uploadVideo({
-          accessToken: token,
-          filePath: resolveProjectPath(channelId, manifest.videoPath),
-          snippet: { title, description, tags: tagsText.split(",").map((tag) => tag.trim()).filter(Boolean) },
-          status: { privacyStatus, publishAt },
-          signal,
-          update: async (uploadedBytes, totalBytes) => update(totalBytes ? Math.round((uploadedBytes / totalBytes) * 85) : 20, "Uploading video"),
-        });
-        await setThumbnail({ accessToken: token, videoId: uploaded.videoId, filePath: resolveProjectPath(channelId, manifest.thumbnailPath), signal });
-        const artifact = {
-          version: 1 as const,
-          videoId: uploaded.videoId,
-          uploadedAt: new Date().toISOString(),
-          privacyStatus: publishAt ? "private" as const : privacyStatus,
-          ...(publishAt ? { publishAt } : {}),
-          thumbnailSet: true,
-          title,
-        };
-        await writeStageArtifact(channelId, storyId, "publish", artifact);
-        await saveStageRun(channelId, storyId, "publish", { status: "done", finishedAt: new Date().toISOString() });
-        await update(100, "Published to YouTube");
-        return { videoId: uploaded.videoId, status: deriveStoryStatus(current) };
-      } catch (error: unknown) {
-        await saveStageRun(channelId, storyId, "publish", {
-          status: "failed",
-          finishedAt: new Date().toISOString(),
-          lastError: { message: error instanceof Error ? error.message : String(error), classification: classifyError(error) },
-        });
-        throw error;
-      }
-    }, storyId);
+    const input: YouTubePublishInput = {
+      sourceKind: "story",
+      sourceId: storyId,
+      title: typeof body.title === "string" ? body.title : undefined,
+      description: typeof body.description === "string" ? body.description : undefined,
+      tags: Array.isArray(body.tags) ? body.tags.map(String) : undefined,
+      thumbnailPath: typeof body.thumbnailPath === "string" ? body.thumbnailPath : undefined,
+      exportPath: typeof body.exportPath === "string" ? body.exportPath : undefined,
+      privacyStatus: body.privacyStatus as YouTubePublishInput["privacyStatus"],
+      publishAt: typeof body.publishAt === "string" ? body.publishAt : undefined,
+    };
+    try {
+      const job = await (tools.startYouTubePublish ?? ((series, publishInput) => startYouTubePublish(series, publishInput)))(channelId, input);
+      tools.sendJson(202, { ok: true, job });
+    } catch (error: unknown) {
+      const typed = error as { code?: string; action?: string; matrix?: unknown };
+      tools.sendError(typed.code === "source-not-found" ? 404 : 409, {
+        code: typed.code ?? "youtube-publish-failed",
+        message: error instanceof Error ? error.message : "YouTube publish failed.",
+        ...(typed.action ? { action: typed.action } : {}),
+        ...(typed.matrix ? { details: { matrix: typed.matrix } } : {}),
+      });
+    }
     return;
   }
 

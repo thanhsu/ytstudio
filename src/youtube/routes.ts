@@ -8,6 +8,7 @@ import { assertRemoteChannelId, getChannelProfile } from "./channel.ts";
 import { deleteRemoteVideo, getRemoteVideo, listRemoteVideos, updateRemoteVideo, validateMetadata, type VideoMetadata } from "./videos.ts";
 import { fetchVideoStats } from "./analytics.ts";
 import { loadYouTubeStore, removeVideoLink, saveYouTubeStore } from "./youtube-store.ts";
+import { cancelYouTubePublish, startYouTubePublish, type YouTubePublishDeps } from "./publish.ts";
 
 export type YouTubeRouteError = { code: string; message: string; action?: string; details?: unknown };
 
@@ -16,6 +17,7 @@ export type YouTubeRouteTools = {
   sendError: (status: number, error: YouTubeRouteError) => void;
   readBody: () => Promise<Record<string, unknown>>;
   fetch?: typeof fetch;
+  publishDeps?: YouTubePublishDeps;
 };
 
 export async function routeYouTube(options: {
@@ -123,13 +125,48 @@ export async function routeYouTube(options: {
       return true;
     }
 
+    if (route === "publish" && method === "GET") {
+      tools.sendJson(200, { ok: true, jobs: await loadYouTubeStore(seriesId).then((store) => store.jobs) });
+      return true;
+    }
+    const publishJobMatch = /^publish\/([^/]+)$/.exec(route);
+    if (publishJobMatch && method === "GET") {
+      const job = (await loadYouTubeStore(seriesId)).jobs.find((candidate) => candidate.id === publishJobMatch[1]);
+      if (!job) { tools.sendError(404, { code: "youtube-job-not-found", message: "Publish job not found." }); return true; }
+      tools.sendJson(200, { ok: true, job });
+      return true;
+    }
+    const cancelMatch = /^publish\/([^/]+)\/cancel$/.exec(route);
+    if (cancelMatch && method === "POST") {
+      const job = await cancelYouTubePublish(seriesId, cancelMatch[1], tools.publishDeps);
+      tools.sendJson(200, { ok: true, job });
+      return true;
+    }
+    if (route === "publish" && method === "POST") {
+      const body = await tools.readBody();
+      const job = await startYouTubePublish(seriesId, {
+        sourceKind: body.sourceKind as "story" | "review" | "compilation",
+        sourceId: typeof body.sourceId === "string" ? body.sourceId : "",
+        exportPath: typeof body.exportPath === "string" ? body.exportPath : undefined,
+        title: typeof body.title === "string" ? body.title : undefined,
+        description: typeof body.description === "string" ? body.description : undefined,
+        tags: Array.isArray(body.tags) ? body.tags.map(String) : undefined,
+        thumbnailPath: typeof body.thumbnailPath === "string" ? body.thumbnailPath : undefined,
+        privacyStatus: body.privacyStatus as "public" | "private" | "unlisted" | undefined,
+        publishAt: typeof body.publishAt === "string" ? body.publishAt : undefined,
+      }, tools.publishDeps);
+      tools.sendJson(202, { ok: true, job });
+      return true;
+    }
+
     tools.sendError(404, { code: "not-found", message: "YouTube route not found." });
     return true;
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "YouTube request failed.";
     const code = message.split(":", 1)[0] || "youtube-request-failed";
-    const status = code === "youtube-invalid-metadata" || code === "youtube-confirmation-required" ? 400 : code === "youtube-channel-mismatch" ? 409 : code === "youtube-video-not-found" ? 404 : code === "youtube-not-connected" ? 409 : 502;
-    tools.sendError(status, { code, message: message.includes(":") ? message.slice(message.indexOf(":") + 1).trim() : message });
+    const status = code === "youtube-invalid-metadata" || code === "youtube-metadata-invalid" || code === "youtube-confirmation-required" ? 400 : code === "source-not-found" || code === "youtube-job-not-found" || code === "youtube-video-not-found" ? 404 : code === "youtube-approval-required" || code === "youtube-export-missing" || code === "youtube-channel-mismatch" || code === "youtube-not-connected" || code === "youtube-publish-running" ? 409 : 502;
+    const typed = error as { action?: string; matrix?: unknown };
+    tools.sendError(status, { code, message: message.includes(":") ? message.slice(message.indexOf(":") + 1).trim() : message, ...(typed.action ? { action: typed.action } : {}), ...(typed.matrix ? { details: { matrix: typed.matrix } } : {}) });
     return true;
   }
 }
