@@ -315,8 +315,12 @@ test("the sources screen exposes editable Bilibili query expansion", async () =>
   assert.match(script, /Expand Bilibili\/Douyin query/);
   assert.match(script, /Expanded queries/);
   assert.match(script, /buildSourceSearchQueries/);
-  assert.match(script, /牧神记/);
-  assert.match(script, /Tales of Herding Gods/);
+  // Expansion is generic and lives in search-queries.js. It must not name a show:
+  // the first version appended one hardcoded title to every episode query, so
+  // searching for anything else quietly returned that title instead.
+  assert.match(script, /from "\.\/search-queries\.js"/);
+  assert.doesNotMatch(script, /aliases: \["牧神记"/);
+  assert.doesNotMatch(script, /`牧神记 第\$\{/);
   assert.match(script, /matchedQuery/);
   assert.match(script, /dedupeSourceSearchResults/);
   assert.match(script, /Promise\.all/);

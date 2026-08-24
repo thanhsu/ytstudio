@@ -1,3 +1,5 @@
+import { buildSourceSearchQueries, lines, unique } from "./search-queries.js";
+
 const STAGES = [
   "brief",
   "script",
@@ -2608,12 +2610,6 @@ function parseEpisodeNumbers(value) {
     .filter((number) => Number.isInteger(number) && number > 0);
 }
 
-function lines(value) {
-  return String(value ?? "")
-    .split(/\r?\n|,/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
 
 function lower(value) {
   return String(value ?? "").toLowerCase();
@@ -2640,9 +2636,6 @@ function translationTargetLabels() {
   return (appState.translationPresets?.presets ?? []).map((preset) => preset.label);
 }
 
-function unique(values) {
-  return [...new Set(values)];
-}
 
 function seriesEpisodeProjectIds() {
   return new Set(appState.series.flatMap((series) => series.episodes.map((episode) => episode.episodeProjectId)));
@@ -2859,40 +2852,6 @@ async function searchSources(values) {
   } catch (error) {
     setStatus(error.message);
   }
-}
-
-function buildSourceSearchQueries(values, options = {}) {
-  const edited = lines(values.expandedQueries);
-  if (!options.ignoreEditedQueryList && edited.length) return unique(edited).slice(0, 6);
-
-  const query = String(values.query ?? "").trim();
-  if (!query) return [];
-  if (!["bilibili", "douyin"].includes(values.platform) || values.expandBilibiliQuery === false) return [query];
-
-  const aliases = expandSourceAliases(query);
-  return unique([query, ...aliases]).slice(0, 6);
-}
-
-function expandSourceAliases(query) {
-  const normalized = lower(query);
-  const candidates = [];
-  const knownTitles = [
-    {
-      tests: ["mục thần ký", "muc than ky", "tales of herding gods", "牧神记"],
-      aliases: ["牧神记", "Tales of Herding Gods", "牧神记 解说"],
-    },
-  ];
-  for (const title of knownTitles) {
-    if (title.tests.some((term) => normalized.includes(term))) {
-      candidates.push(...title.aliases);
-    }
-  }
-
-  const episode = normalized.match(/(?:tập|tap|ep|episode|第)\s*0*(\d{1,4})/);
-  if (episode) {
-    candidates.push(`牧神记 第${episode[1]}集`, `牧神记 ${episode[1].padStart(2, "0")}`);
-  }
-  return candidates;
 }
 
 function dedupeSourceSearchResults(results) {

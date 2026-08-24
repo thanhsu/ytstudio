@@ -234,7 +234,13 @@ async function routeRequest(
   const url = new URL(request.url ?? "/", "http://127.0.0.1");
   const method = request.method ?? "GET";
 
-  if (method === "GET" && (url.pathname === "/" || url.pathname === "/styles.css" || url.pathname === "/app.js")) {
+  if (
+    method === "GET" &&
+    (url.pathname === "/" ||
+      url.pathname === "/styles.css" ||
+      url.pathname === "/app.js" ||
+      url.pathname === "/search-queries.js")
+  ) {
     await sendStatic(response, staticRoot, url.pathname);
     return;
   }
