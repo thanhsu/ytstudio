@@ -140,6 +140,11 @@ export type StudioConfig = {
     storyTransition: "fade" | "xfade";
     storyTransitionSeconds: number;
   };
+  youtube: {
+    clientIdEnv: string;
+    clientSecretEnv: string;
+    scopes: string[];
+  };
   sources: {
     ytDlpPath: string;
     // Prepended to every invocation. Configuration is operator-owned, which is why
@@ -249,6 +254,14 @@ export const DEFAULT_STUDIO_CONFIG: StudioConfig = {
     longformHeight: 1080,
     storyTransition: "fade",
     storyTransitionSeconds: 0.5,
+  },
+  youtube: {
+    clientIdEnv: "YOUTUBE_CLIENT_ID",
+    clientSecretEnv: "YOUTUBE_CLIENT_SECRET",
+    scopes: [
+      "https://www.googleapis.com/auth/youtube.upload",
+      "https://www.googleapis.com/auth/youtube.readonly",
+    ],
   },
   sources: {
     ytDlpPath: "",
@@ -431,6 +444,11 @@ export function normalizeStudioConfig(value: unknown): StudioConfig {
         0.1,
         2,
       ),
+    },
+    youtube: {
+      clientIdEnv: stringValue(candidate.youtube?.clientIdEnv, DEFAULT_STUDIO_CONFIG.youtube.clientIdEnv),
+      clientSecretEnv: stringValue(candidate.youtube?.clientSecretEnv, DEFAULT_STUDIO_CONFIG.youtube.clientSecretEnv),
+      scopes: stringArrayValue(candidate.youtube?.scopes, DEFAULT_STUDIO_CONFIG.youtube.scopes),
     },
     sources: {
       ytDlpPath: stringValue(candidate.sources?.ytDlpPath, ""),

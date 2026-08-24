@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { JobKind } from "../jobs.ts";
 import { loadStudioConfig, type StudioConfig } from "../config.ts";
 import { readAiLog } from "./ai-log.ts";
@@ -22,6 +23,8 @@ import {
 import { storyRelativePath } from "./paths.ts";
 import { editSectionText, listSections, readSection } from "./section-edit.ts";
 import { generateVoiceSample, listVoiceLabVoices } from "./voice-lab.ts";
+import { buildAuthUrl, rememberOAuthState } from "../youtube/oauth.ts";
+import { clearTokens, loadTokens } from "../youtube/token-store.ts";
 import { isStoryStageId, type StoryApprovalStage, type StoryProject, type StoryStageId } from "./types.ts";
 
 /**
@@ -86,6 +89,44 @@ export async function routeStoryFactory(options: {
       tools.sendJson(200, { ok: true, storyChannel: await saveStoryChannel(channelId, body) });
       return;
     }
+  }
+
+  if (rest === "youtube/status" && method === "GET") {
+    const tokens = await loadTokens(channelId);
+    const configured = Boolean(process.env[config.youtube.clientIdEnv]?.trim() && process.env[config.youtube.clientSecretEnv]?.trim());
+    tools.sendJson(200, {
+      ok: true,
+      connected: Boolean(tokens),
+      ...(tokens ? { scope: tokens.scope, connectedAt: tokens.connectedAt } : {}),
+      configured,
+    });
+    return;
+  }
+
+  if (rest === "youtube/connect" && method === "POST") {
+    const clientId = process.env[config.youtube.clientIdEnv]?.trim() ?? "";
+    if (!clientId || !process.env[config.youtube.clientSecretEnv]?.trim()) {
+      tools.sendError(409, { code: "youtube-not-configured", message: "Configure both YouTube client ID and client secret environment variables first." });
+      return;
+    }
+    const body = await tools.readBody();
+    const redirectBaseUrl = typeof body.redirectBaseUrl === "string" && body.redirectBaseUrl.trim()
+      ? body.redirectBaseUrl.trim().replace(/\/+$/, "")
+      : "http://127.0.0.1:3000";
+    const redirectUri = `${redirectBaseUrl}/api/youtube/oauth/callback`;
+    const state = `${channelId}.${randomUUID()}`;
+    rememberOAuthState(state, channelId);
+    tools.sendJson(200, {
+      ok: true,
+      authUrl: buildAuthUrl({ clientId, redirectUri, scopes: config.youtube.scopes, state }),
+    });
+    return;
+  }
+
+  if (rest === "youtube/disconnect" && method === "POST") {
+    await clearTokens(channelId);
+    tools.sendJson(200, { ok: true, connected: false });
+    return;
   }
 
   if (rest === "stories") {

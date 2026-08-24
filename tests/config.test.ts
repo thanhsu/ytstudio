@@ -260,6 +260,28 @@ test("the story factory, google tts, and images blocks default and normalize", a
   });
 });
 
+test("YouTube OAuth config defaults and normalizes operator fields", async () => {
+  await withTempCwd(async () => {
+    const defaults = await loadStudioConfig();
+    assert.equal(defaults.youtube.clientIdEnv, "YOUTUBE_CLIENT_ID");
+    assert.equal(defaults.youtube.clientSecretEnv, "YOUTUBE_CLIENT_SECRET");
+    assert.deepEqual(defaults.youtube.scopes, [
+      "https://www.googleapis.com/auth/youtube.upload",
+      "https://www.googleapis.com/auth/youtube.readonly",
+    ]);
+
+    await writeFile("studio.config.json", JSON.stringify({ youtube: {
+      clientIdEnv: "CUSTOM_CLIENT",
+      clientSecretEnv: "CUSTOM_SECRET",
+      scopes: ["scope-one", "", 5],
+    } }), "utf8");
+    const loaded = await loadStudioConfig();
+    assert.equal(loaded.youtube.clientIdEnv, "CUSTOM_CLIENT");
+    assert.equal(loaded.youtube.clientSecretEnv, "CUSTOM_SECRET");
+    assert.deepEqual(loaded.youtube.scopes, ["scope-one"]);
+  });
+});
+
 test("the sources block defaults, and rejects entries that are not usable strings", async () => {
   const previousCwd = process.cwd();
   const root = await mkdtemp(join(tmpdir(), "yt-config-sources-"));

@@ -1,4 +1,5 @@
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
+import { randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { basename, extname, join, resolve, sep } from "node:path";
@@ -43,6 +44,8 @@ import { listCandidates, resolveSourcePath, type SourceRights } from "./sources/
 import { searchSourceMetadata, type SourceSearchPlatform, type YtDlpOptions } from "./sources/yt-dlp.ts";
 import { exportReviewPackage } from "./export-package.ts";
 import { routeStoryFactory } from "./story-factory/routes.ts";
+import { consumeOAuthState, exchangeCode } from "./youtube/oauth.ts";
+import { saveTokens, storedTokensFromResponse } from "./youtube/token-store.ts";
 import { compositeOwner, ProjectJobManager, type JobKind, type JobOperation } from "./jobs.ts";
 import { extractAudioForAsr, importMedia } from "./media-ingest.ts";
 import { projectsRoot, sourcesRoot } from "./fs.ts";
@@ -323,13 +326,40 @@ async function routeRequest(
     return;
   }
 
+  if (method === "GET" && url.pathname === "/api/youtube/oauth/callback") {
+    const code = url.searchParams.get("code")?.trim() ?? "";
+    const state = url.searchParams.get("state")?.trim() ?? "";
+    const channelId = state ? consumeOAuthState(state) : null;
+    if (!channelId || !code) {
+      sendError(response, 400, { code: "youtube-oauth-state-invalid", message: "The YouTube OAuth state or code is missing or expired." });
+      return;
+    }
+    const config = await loadStudioConfig();
+    const clientId = process.env[config.youtube.clientIdEnv]?.trim() ?? "";
+    const clientSecret = process.env[config.youtube.clientSecretEnv]?.trim() ?? "";
+    if (!clientId || !clientSecret) {
+      sendError(response, 409, { code: "youtube-not-configured", message: "YouTube OAuth client credentials are not configured." });
+      return;
+    }
+    const redirectBaseUrl = url.origin;
+    const token = await exchangeCode({
+      clientId,
+      clientSecret,
+      redirectUri: `${redirectBaseUrl}/api/youtube/oauth/callback`,
+      code,
+    });
+    await saveTokens(channelId, storedTokensFromResponse(token));
+    sendHtml(response, 200, "YouTube connected — you can close this tab.");
+    return;
+  }
+
   const seriesMatch = /^\/api\/series\/([a-z0-9-]+)(?:\/(.+))?$/.exec(url.pathname);
   if (seriesMatch) {
     const seriesId = validateProjectId(seriesMatch[1]);
     const rest = seriesMatch[2] ?? "";
     // The AI story factory owns these sub-namespaces. Its module receives the
     // server-private helpers as tools, so they stay private here.
-    if (rest === "story-channel" || rest === "stories" || rest.startsWith("stories/") || rest.startsWith("voice-lab/")) {
+    if (rest === "story-channel" || rest === "stories" || rest.startsWith("stories/") || rest.startsWith("voice-lab/") || rest.startsWith("youtube/")) {
       await routeStoryFactory({
         method,
         rest,
@@ -1585,6 +1615,11 @@ function sendJson(response: ServerResponse, status: number, body: unknown): void
     "cache-control": "no-store",
   });
   response.end(`${JSON.stringify(body)}\n`);
+}
+
+function sendHtml(response: ServerResponse, status: number, body: string): void {
+  response.writeHead(status, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+  response.end(`<!doctype html><title>YouTube</title><p>${body}</p>\n`);
 }
 
 function sendError(response: ServerResponse, status: number, error: ApiError): void {
