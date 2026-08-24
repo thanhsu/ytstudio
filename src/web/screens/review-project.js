@@ -30,17 +30,6 @@ onJobEvent((job) => {
   }
 });
 
-// Groups the 12 pipeline stages into visible production phases. Every stage
-// button above still carries its own data-stage and click handler; this only
-// changes how they are clustered on the rail.
-const STAGE_PHASES = [
-  { label: "Plan", stages: ["brief", "script"] },
-  { label: "Source", stages: ["media", "asr", "subtitles", "translation"] },
-  { label: "Produce", stages: ["voice", "captions", "assets"] },
-  { label: "Compliance", stages: ["copyright"] },
-  { label: "Output", stages: ["render", "export"] },
-];
-
 const RUN_AVAILABLE_TASKS_LABEL = "Run available tasks";
 
 /**
@@ -71,7 +60,7 @@ export async function mountReviewProject(route) {
     stageTitle.textContent = "Overview";
     stageContent.replaceChildren();
   } else {
-    renderStageRail();
+    renderStageRail(phase);
     if (phaseForStage(appState.activeStage) !== phase) {
       appState.activeStage = REVIEW_PHASES.find((reviewPhase) => reviewPhase.id === phase).stages[0];
     }
@@ -158,26 +147,15 @@ function workflowTemplateCards() {
   });
 }
 
-export function renderStageRail() {
+// Scoped to the active phase: inside a phase the rail shows only that
+// phase's stages, filtered to the ones the project's workflow template
+// actually uses.
+export function renderStageRail(phaseId) {
   const workflow = appState.projectSnapshot?.workflow;
-  const stages = workflow ? unique(workflow.steps.map((step) => step.stage)) : STAGES;
-  const stageSet = new Set(stages);
-  const grouped = new Set();
-  const items = [];
-
-  for (const phase of STAGE_PHASES) {
-    const phaseStages = phase.stages.filter((stage) => stageSet.has(stage));
-    if (phaseStages.length === 0) continue;
-    phaseStages.forEach((stage) => grouped.add(stage));
-    items.push(stagePhaseItem(phase.label, phaseStages));
-  }
-
-  const ungrouped = stages.filter((stage) => !grouped.has(stage));
-  if (ungrouped.length > 0) {
-    items.push(stagePhaseItem("Other", ungrouped));
-  }
-
-  stageRail.replaceChildren(...items);
+  const workflowStages = workflow ? unique(workflow.steps.map((step) => step.stage)) : STAGES;
+  const phase = REVIEW_PHASES.find((entry) => entry.id === phaseId);
+  const stages = (phase ? phase.stages : STAGES).filter((stage) => workflowStages.includes(stage));
+  stageRail.replaceChildren(stagePhaseItem(phase?.label ?? "Stages", stages));
   bindStageRail();
   setActiveStageButton();
 }
