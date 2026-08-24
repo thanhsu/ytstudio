@@ -120,7 +120,7 @@ No DB migrations — file-based; all new files are versioned (`version: 1`) with
 ## Phases
 
 - **Phase 1 (done)**: everything above.
-- **Phase 2**: YouTube OAuth + Data API upload; analytics snapshots (24h/72h/7d/28d); ContentPerformanceProfile + feedback into the idea generator (70/30 proven/exploration); CompilationProject (4–6 stories, reusing narration/images); scheduling + budget calendars; native Anthropic/Gemini chat adapters; xfade transitions; SFX events; prompt-management UI; per-section HTTP editing; parallel jobs per channel (composite owner ids).
+- **Phase 2**: YouTube OAuth + Data API upload; analytics snapshots (24h/72h/7d/28d); ContentPerformanceProfile + feedback into the idea generator (70/30 proven/exploration); CompilationProject (4–6 stories, reusing narration/images); scheduling + budget calendars; native Anthropic/Gemini chat adapters; xfade transitions; SFX events; prompt-management UI; per-section HTTP editing; parallel jobs per channel (composite owner ids). Backend and the core local-first UI are now implemented; YouTube credentials, upload, analytics refresh, calendar entries, compilation render, and final publish remain explicit operator actions.
 - **Phase 3**: autonomous mode, multi-language localization projects, title/thumbnail experiments, ROI-based generation.
 
 ## Risks and accepted limitations

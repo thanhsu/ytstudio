@@ -331,6 +331,13 @@ and you upload the packaged files through YouTube Studio.
 
 Design record: `docs/ai-audio-story-factory-design.md`.
 
+Phase 2 backend now includes per-channel YouTube OAuth/token refresh, resumable
+video upload with scheduled privacy handling, pull-based analytics snapshots,
+performance feedback for idea generation, prompt overrides, per-section script
+editing, publishing calendars with monthly budget caps, and zero-cost
+compilation of finished story renders. Publishing and analytics refresh remain
+human-triggered actions in the local studio.
+
 ### Enable and configure
 
 1. Open Config and turn on **Story Factory**. Set the three model roles

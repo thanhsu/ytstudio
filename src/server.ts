@@ -359,7 +359,7 @@ async function routeRequest(
     const rest = seriesMatch[2] ?? "";
     // The AI story factory owns these sub-namespaces. Its module receives the
     // server-private helpers as tools, so they stay private here.
-    if (rest === "story-channel" || rest === "stories" || rest.startsWith("stories/") || rest.startsWith("voice-lab/") || rest.startsWith("youtube/") || rest === "analytics/refresh" || rest === "calendar" || rest.startsWith("calendar/") || rest === "compilations" || rest.startsWith("compilations/")) {
+    if (rest === "story-channel" || rest === "stories" || rest.startsWith("stories/") || rest.startsWith("voice-lab/") || rest.startsWith("youtube/") || rest === "analytics/refresh" || rest === "calendar" || rest.startsWith("calendar/") || rest === "compilations" || rest.startsWith("compilations/") || rest === "prompts" || rest.startsWith("prompts/")) {
       await routeStoryFactory({
         method,
         rest,

@@ -2940,7 +2940,7 @@ const storyFactoryState = { channelId: null, storyId: null, statusFilter: "" };
 
 const STORY_STAGE_LIST = [
   "idea", "hook", "outline", "bible", "sections", "continuity-qa", "naturalize", "originality-qa",
-  "tts-normalize", "tts", "scenes", "images", "bgm", "render", "metadata", "thumbnail", "final-qa", "export",
+  "tts-normalize", "tts", "scenes", "images", "bgm", "render", "metadata", "thumbnail", "final-qa", "export", "publish",
 ];
 const STORY_STATUS_LEVELS = {
   DRAFT: "neutral", IN_PROGRESS: "progress", GENERATING: "progress", AWAITING_APPROVAL: "warn",
@@ -2951,7 +2951,7 @@ const EDITABLE_STORY_STAGES = new Set(["idea", "hook", "outline", "bible", "natu
 const STORY_TABS = [
   ["overview", "Overview"], ["idea", "Idea"], ["hook", "Hook"], ["outline", "Outline"], ["bible", "Bible"],
   ["script", "Script"], ["audio", "Audio"], ["scenes", "Scenes"], ["images", "Images"], ["video", "Video"],
-  ["thumbnail", "Thumbnail"], ["metadata", "Metadata"], ["ai-log", "AI Logs"], ["cost", "Cost"],
+  ["thumbnail", "Thumbnail"], ["metadata", "Metadata"], ["publish", "Publish & Analytics"], ["ai-log", "AI Logs"], ["cost", "Cost"],
 ];
 
 async function renderStoryFactory() {
@@ -2998,6 +2998,9 @@ async function renderStoryFactory() {
     channelSelect,
     statusFilter,
     actionButton("Channel Settings", () => renderStoryChannelSettings(channelId).catch((error) => setStatus(error.message))),
+    actionButton("Prompts", () => renderPromptSettings(channelId).catch((error) => setStatus(error.message))),
+    actionButton("Calendar", () => renderStoryCalendar(channelId).catch((error) => setStatus(error.message))),
+    actionButton("Compilations", () => renderCompilations(channelId).catch((error) => setStatus(error.message))),
     actionButton("Voice Lab", () => renderVoiceLab(channelId).catch((error) => setStatus(error.message))),
   );
 
@@ -3111,14 +3114,62 @@ async function renderStoryDetail(channelId, storyId, tab = "overview") {
 
 async function renderStoryTab(channelId, storyId, tab, detail) {
   if (tab === "overview") return renderStoryOverview(channelId, storyId, detail);
-  if (tab === "script") return renderStoryArtifactView(channelId, storyId, "sections", detail, (artifact) => [preBlock(artifact.fullText)]);
+  if (tab === "script") return renderStorySectionsTab(channelId, storyId);
   if (tab === "audio") return renderStoryAudioTab(channelId, storyId);
   if (tab === "images") return renderStoryImagesTab(channelId, storyId);
   if (tab === "video") return renderStoryVideoTab(channelId, storyId);
   if (tab === "thumbnail") return renderStoryThumbnailTab(channelId, storyId);
+  if (tab === "publish") return renderStoryPublishTab(channelId, storyId);
   if (tab === "ai-log") return renderStoryAiLogTab(channelId, storyId);
   if (tab === "cost") return renderStoryCostTab(channelId, storyId);
   return renderStoryArtifactView(channelId, storyId, tab, detail);
+}
+
+async function renderStorySectionsTab(channelId, storyId) {
+  const data = await fetchJsonOrNull(storyApiUrl(channelId, `stories/${encodeURIComponent(storyId)}/sections`));
+  if (!data || !data.sections?.length) return [wrapSection("Script", paragraph("No sections yet. Run the sections stage first."))];
+  const sections = [];
+  for (const summary of data.sections) {
+    const detail = await fetchJsonOrNull(storyApiUrl(channelId, `stories/${encodeURIComponent(storyId)}/sections/${summary.index}`));
+    if (!detail?.section) continue;
+    const editor = document.createElement("textarea");
+    editor.className = "artifact-editor";
+    editor.rows = 10;
+    editor.value = detail.section.text;
+    const save = actionButton("Save section", () => {
+      putJson(storyApiUrl(channelId, `stories/${encodeURIComponent(storyId)}/sections/${summary.index}`), { text: editor.value })
+        .then((result) => setStatus(`Section ${summary.index} saved. Stale stages: ${result.invalidated.join(", ") || "none"}.`))
+        .catch((error) => setStatus(error.message));
+    }, "button", "primary");
+    sections.push(wrapSection(`Section ${summary.index}: ${summary.title}`, paragraph(`${summary.wordCount} words`), editor, save));
+  }
+  return sections;
+}
+
+async function renderStoryPublishTab(channelId, storyId) {
+  const publish = await fetchJsonOrNull(storyApiUrl(channelId, `stories/${encodeURIComponent(storyId)}/artifacts/publish`));
+  const analytics = await fetchJsonOrNull(storyApiUrl(channelId, `stories/${encodeURIComponent(storyId)}/analytics`));
+  const form = document.createElement("form");
+  form.className = "form-grid compact-form";
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const values = formValues(form);
+    postJson(storyApiUrl(channelId, `stories/${encodeURIComponent(storyId)}/publish`), { privacyStatus: values.privacyStatus, publishAt: values.publishAt || undefined })
+      .then(() => setStatus("YouTube publish job started."))
+      .catch((error) => setStatus(error.message));
+  });
+  form.replaceChildren(
+    selectField("Privacy", "privacyStatus", "private", [["private", "Private"], ["unlisted", "Unlisted"], ["public", "Public"]]),
+    field("Schedule (optional)", "publishAt", "", "datetime-local"),
+    actionButton("Publish to YouTube", null, "submit", "primary"),
+  );
+  const snapshot = analytics?.analytics?.snapshots ?? [];
+  const table = document.createElement("table");
+  table.className = "story-table";
+  table.innerHTML = "<tr><th>Bucket</th><th>Age</th><th>Views</th><th>Likes</th><th>Comments</th></tr>";
+  for (const row of snapshot) table.insertAdjacentHTML("beforeend", `<tr><td>${row.bucket}</td><td>${row.ageHours}h</td><td>${row.views}</td><td>${row.likes}</td><td>${row.comments}</td></tr>`);
+  const refresh = actionButton("Refresh channel analytics", () => postJson(storyApiUrl(channelId, "analytics/refresh"), {}).then(() => renderStoryDetail(channelId, storyId, "publish")).catch((error) => setStatus(error.message)));
+  return [wrapSection("YouTube", publish?.artifact ? preBlock(JSON.stringify(publish.artifact, null, 2)) : paragraph("No publish record yet."), form), wrapSection("Analytics snapshots", table, refresh)];
 }
 
 function renderStoryOverview(channelId, storyId, detail) {
@@ -3484,6 +3535,53 @@ async function renderStoryChannelSettings(channelId) {
     wrapSection(`Channel: ${channelId}`, form),
   );
   setStatus("Channel settings loaded.");
+}
+
+async function renderPromptSettings(channelId) {
+  stageTitle.textContent = "Story Prompt Management";
+  seriesPanel.replaceChildren();
+  const data = await fetchJsonOrNull(storyApiUrl(channelId, "prompts"));
+  const sections = (data?.prompts ?? []).map((prompt) => {
+    const editor = document.createElement("textarea");
+    editor.className = "artifact-editor";
+    editor.rows = 8;
+    editor.value = prompt.override ?? "";
+    const save = actionButton("Save override", () => putJson(storyApiUrl(channelId, `prompts/${encodeURIComponent(prompt.name)}`), { system: editor.value }).then(() => setStatus(`${prompt.name} saved.`)).catch((error) => setStatus(error.message)), "button", "primary");
+    return wrapSection(`${prompt.name} (${prompt.version})`, paragraph(`Default template variables: ${(prompt.variables ?? []).join(", ")}`), editor, save);
+  });
+  stageContent.replaceChildren(actionButton("Back to Story Factory", () => renderStoryFactory().catch((error) => setStatus(error.message))), ...sections);
+}
+
+async function renderStoryCalendar(channelId) {
+  stageTitle.textContent = "Story Calendar";
+  seriesPanel.replaceChildren();
+  const data = await fetchJsonOrNull(storyApiUrl(channelId, "calendar"));
+  const form = document.createElement("form");
+  form.className = "form-grid compact-form";
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const values = formValues(form);
+    postJson(storyApiUrl(channelId, "calendar"), { date: values.date, storyId: values.storyId || null, plannedPublishAt: values.plannedPublishAt || null, note: values.note || "" }).then(() => renderStoryCalendar(channelId)).catch((error) => setStatus(error.message));
+  });
+  form.replaceChildren(field("Date", "date", "", "date"), field("Story id", "storyId", ""), field("Planned publish", "plannedPublishAt", "", "datetime-local"), field("Note", "note", ""), actionButton("Add calendar entry", null, "submit", "primary"));
+  const list = (data?.calendar?.entries ?? []).map((entry) => paragraph(`${entry.date} — ${entry.storyId || "unassigned"} — ${entry.plannedPublishAt || "no publish time"} — ${entry.note || ""}`));
+  stageContent.replaceChildren(actionButton("Back to Story Factory", () => renderStoryFactory().catch((error) => setStatus(error.message))), wrapSection("Add entry", form), wrapSection("Entries", ...list));
+}
+
+async function renderCompilations(channelId) {
+  stageTitle.textContent = "Compilations";
+  seriesPanel.replaceChildren();
+  const data = await fetchJsonOrNull(storyApiUrl(channelId, "compilations"));
+  const form = document.createElement("form");
+  form.className = "form-grid compact-form";
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const values = formValues(form);
+    postJson(storyApiUrl(channelId, "compilations"), { id: values.id, title: values.title, storyIds: lines(values.storyIds) }).then(() => renderCompilations(channelId)).catch((error) => setStatus(error.message));
+  });
+  form.replaceChildren(field("Compilation id", "id", "comp-001"), field("Title", "title", ""), textareaField("Rendered story ids (one per line)", "storyIds", "story-001\nstory-002\nstory-003\nstory-004"), actionButton("Create compilation", null, "submit", "primary"));
+  const rows = (data?.compilations ?? []).map((entry) => paragraph(`${entry.id}: ${entry.title} (${entry.storyIds.length} stories)`));
+  stageContent.replaceChildren(actionButton("Back to Story Factory", () => renderStoryFactory().catch((error) => setStatus(error.message))), wrapSection("Create", form), wrapSection("Existing", ...rows));
 }
 
 async function renderVoiceLab(channelId) {

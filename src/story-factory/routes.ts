@@ -4,6 +4,7 @@ import { loadStudioConfig, type StudioConfig } from "../config.ts";
 import { readAiLog } from "./ai-log.ts";
 import { loadAnalytics, refreshChannelAnalytics } from "./analytics.ts";
 import { deleteCalendarEntry, loadCalendar, upsertCalendarEntry } from "./calendar.ts";
+import { loadPromptOverrides, savePromptOverride, PROMPT_CATALOG } from "./prompt-overrides.ts";
 import { loadChannelCosts, loadStoryCost } from "./cost.ts";
 import { exportStoryPackage, StoryApprovalRequiredError } from "./export.ts";
 import { loadStoryChannel, saveStoryChannel, normalizeTtsProfile } from "./channel.ts";
@@ -98,6 +99,28 @@ export async function routeStoryFactory(options: {
       tools.sendJson(200, { ok: true, storyChannel: await saveStoryChannel(channelId, body) });
       return;
     }
+  }
+
+  if (rest === "prompts" && method === "GET") {
+    const overrides = await loadPromptOverrides(channelId);
+    tools.sendJson(200, { ok: true, prompts: PROMPT_CATALOG.map((prompt) => ({ ...prompt, override: overrides.entries[prompt.name]?.system ?? null, overrideVersion: overrides.entries[prompt.name]?.updatedAt ?? null })) });
+    return;
+  }
+  const promptMatch = /^prompts\/([^/]+)$/.exec(rest);
+  if (promptMatch && method === "PUT") {
+    const name = decodeURIComponent(promptMatch[1]);
+    if (!PROMPT_CATALOG.some((prompt) => prompt.name === name)) {
+      tools.sendError(404, { code: "unknown-prompt", message: `Unknown prompt ${name}.` });
+      return;
+    }
+    const body = await tools.readBody();
+    try {
+      const overrides = await savePromptOverride(channelId, name, typeof body.system === "string" ? body.system : "");
+      tools.sendJson(200, { ok: true, prompts: overrides });
+    } catch (error: unknown) {
+      tools.sendError(400, { code: "prompt-invalid", message: error instanceof Error ? error.message : String(error) });
+    }
+    return;
   }
 
   if (rest === "compilations" && method === "GET") {
