@@ -306,6 +306,65 @@ test("watermark effects overlay a resolved logo asset without an extra ffmpeg in
   assert.equal(args.filter((argument) => argument === "-i").length, 3);
 });
 
+test("a watermarked segment does not corrupt the ffmpeg input index of a later segment", () => {
+  const logo = eligibleLogoAsset();
+  const secondAssetPath = "projects/sample-project/assets/clips/second.mp4";
+  const args = buildShortsRenderArgs({
+    ...sampleRenderInput(),
+    visualSegments: [
+      {
+        ...imageSegment,
+        effects: {
+          ...DEFAULT_SEGMENT_EFFECTS,
+          watermark: { assetId: logo.id, position: "top-left", scale: 0.12, opacity: 0.2 },
+        },
+        watermarkAsset: logo,
+      },
+      {
+        sceneId: "scene-002",
+        startSeconds: 4,
+        endSeconds: 9,
+        assetPath: secondAssetPath,
+        mediaType: "video",
+        fitMode: "cover",
+        sourceStartSeconds: 0,
+        sourceDurationSeconds: 5,
+        muteSourceAudio: true,
+      },
+    ],
+  });
+  // Real -i order: 0 = silent base, 1 = voice, 2 = watermarked image asset,
+  // 3 = the second segment's video asset (4 -i flags total). The watermark's
+  // internal movie= filter label must not shift this numbering.
+  assert.equal(args.filter((argument) => argument === "-i").length, 4);
+  assert.equal(args[args.indexOf(secondAssetPath) - 1], "-i"); // sanity: the second segment's asset is a real -i input
+  const filter = args[args.indexOf("-filter_complex") + 1];
+  assert.match(filter, /\[3:v\]scale=/);
+  assert.doesNotMatch(filter, /\[4:v\]/);
+});
+
+test("a watermarked segment does not corrupt the backgroundVideoPath ffmpeg input index", () => {
+  const logo = eligibleLogoAsset();
+  const args = buildShortsRenderArgs({
+    ...sampleRenderInput(),
+    visualSegments: [{
+      ...imageSegment,
+      effects: {
+        ...DEFAULT_SEGMENT_EFFECTS,
+        watermark: { assetId: logo.id, position: "top-left", scale: 0.12, opacity: 0.2 },
+      },
+      watermarkAsset: logo,
+    }],
+    backgroundVideoPath: "projects/sample-project/workspace/renders/timeline.mp4",
+  });
+  // Real -i order: 0 = silent base, 1 = voice, 2 = watermarked image asset,
+  // 3 = the background video. The watermark's internal movie= filter label
+  // must not shift this numbering.
+  const filter = args[args.indexOf("-filter_complex") + 1];
+  assert.match(filter, /\[3:v\]trim=duration=8/);
+  assert.doesNotMatch(filter, /\[4:v\]/);
+});
+
 test("buildSegmentArgs applies the same effect chain for the per-segment concat path", () => {
   const args = buildSegmentArgs(
     { ...videoSegment, endSeconds: 10, sourceDurationSeconds: 10, effects: { ...DEFAULT_SEGMENT_EFFECTS, speed: 2, transitionOut: "fade" } },

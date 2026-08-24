@@ -114,6 +114,12 @@ export function buildShortsRenderArgs(input: RenderInput): string[] {
   // FFmpeg input 0 is the silent base and input 1 is the voice track, so mapped
   // scenes claim indexes from 2 upward and anything appended later must follow.
   let nextInputIndex = 2;
+  // A watermark's `movie=` filter never consumes a real ffmpeg -i (see
+  // buildWatermarkOverlayFilter's `args: []`); it only needs a unique filter
+  // *label*, not a stream index. That label counter is tracked independently
+  // so it can never shift `nextInputIndex` and desynchronize it from the real
+  // -i ordinals that later segments and `backgroundVideoPath` depend on.
+  let nextWatermarkLabelIndex = 0;
   for (const [index, segment] of (input.visualSegments ?? []).entries()) {
     const sceneDuration = Math.max(0, segment.endSeconds - segment.startSeconds);
     if (!segment.assetPath || !segment.mediaType) {
@@ -129,9 +135,9 @@ export function buildShortsRenderArgs(input: RenderInput): string[] {
       const fitLabel = `[fit${index}]`;
       const preTrimLabel = `[pre${index}]`;
       filters.push(`${visualFilter(inputIndex, width, height, segment.fitMode)}${fitLabel}`);
-      const composed = applySegmentEffects(fitLabel, preTrimLabel, effects, dimensions, sceneDuration, "image", input.projectId, segment.watermarkAsset, nextInputIndex, `img${index}`);
+      const composed = applySegmentEffects(fitLabel, preTrimLabel, effects, dimensions, sceneDuration, "image", input.projectId, segment.watermarkAsset, nextWatermarkLabelIndex, `img${index}`);
       filters.push(...composed.filters);
-      nextInputIndex = composed.nextInputIndex;
+      nextWatermarkLabelIndex = composed.nextInputIndex;
       filters.push(`${preTrimLabel}trim=duration=${sceneDuration},setpts=PTS-STARTPTS[scene${index}]`);
       visualLabels.push(`[scene${index}]`);
       continue;
@@ -143,9 +149,9 @@ export function buildShortsRenderArgs(input: RenderInput): string[] {
     const fitLabel = `[fit${index}]`;
     const preTrimLabel = `[pre${index}]`;
     filters.push(`${visualFilter(inputIndex, width, height, segment.fitMode)}${fitLabel}`);
-    const composed = applySegmentEffects(fitLabel, preTrimLabel, effects, dimensions, clipDuration, "video", input.projectId, segment.watermarkAsset, nextInputIndex, `clip${index}`);
+    const composed = applySegmentEffects(fitLabel, preTrimLabel, effects, dimensions, clipDuration, "video", input.projectId, segment.watermarkAsset, nextWatermarkLabelIndex, `clip${index}`);
     filters.push(...composed.filters);
-    nextInputIndex = composed.nextInputIndex;
+    nextWatermarkLabelIndex = composed.nextInputIndex;
     filters.push(`${preTrimLabel}trim=duration=${clipDuration},setpts=PTS-STARTPTS[clip${index}]`);
     const remaining = Math.max(0, sceneDuration - clipDuration);
     if (remaining > 0) {
@@ -268,6 +274,10 @@ export function buildSegmentArgs(segment: RenderVisualSegment, outputPath: strin
   }
   const effects = segment.effects ?? DEFAULT_SEGMENT_EFFECTS;
   const dimensions: EffectDimensions = { width, height };
+  // Each invocation is an isolated ffmpeg process with exactly one real -i
+  // (index 0, hardcoded below), so the watermark label counter passed to
+  // applySegmentEffects is just a seed for unique filter labels -- it is
+  // never derived from, nor fed back into, a real ffmpeg -i ordinal.
   if (segment.mediaType === "image") {
     const fitLabel = "[fit]";
     const preTrimLabel = "[pre]";
