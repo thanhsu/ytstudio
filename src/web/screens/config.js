@@ -3,11 +3,14 @@ import {
   selectField, field, checkboxField, textareaField, actionButton,
   sectionTitle, readinessPill, setPathValue,
 } from "../lib/dom.js";
-import { setStatus } from "../lib/shell.js";
-import { stageTitle, stageContent } from "../lib/refs.js";
-import { appState } from "../lib/state.js";
-import { setActiveStageButton, targetOptions } from "./review-project.js";
+import { setStatus, view, setBreadcrumb, setActiveNav } from "../lib/shell.js";
+import { appState, refreshAppData } from "../lib/state.js";
+import { targetOptions } from "./review-project.js";
 import { sourcePlatformOptions } from "./sources.js";
+
+// The container this screen paints into. mountConfig() creates it; saving
+// re-renders into the same node.
+let configHost = null;
 
 // A hand-edited studio.config.json can hold a provider the studio will refuse to
 // use. It is listed as it is rather than dropped, so the screen never shows a
@@ -23,11 +26,23 @@ function scriptProviderOptions(current) {
   return options;
 }
 
-export function renderConfig() {
+// Top-level screen entry point: owns its own container under #view.
+export async function mountConfig() {
+  setActiveNav("config");
+  setBreadcrumb([{ label: "Config" }]);
+  const host = document.createElement("section");
+  host.className = "screen config-screen";
+  view.replaceChildren(host);
+  if (!appState.config) {
+    await refreshAppData();
+  }
+  renderConfig(host);
+}
+
+export function renderConfig(container = configHost) {
+  configHost = container;
   const config = appState.config;
   if (!config) return;
-  stageTitle.textContent = "Config";
-  setActiveStageButton("config");
   const form = document.createElement("form");
   form.className = "config-form";
   form.addEventListener("submit", (event) => {
@@ -180,7 +195,9 @@ export function renderConfig() {
     ]),
     actionButton("Save Config", null, "submit", "primary"),
   );
-  stageContent.replaceChildren(form);
+  const heading = document.createElement("h2");
+  heading.textContent = "Config";
+  configHost.replaceChildren(heading, form);
   setStatus("Config loaded. Secrets stay in environment variables, not in this file.");
 }
 

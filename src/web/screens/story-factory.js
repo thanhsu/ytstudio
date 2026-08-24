@@ -7,15 +7,87 @@ import {
 } from "../lib/dom.js";
 import { setStatus } from "../lib/shell.js";
 import { seriesPanel, stageTitle, stageContent } from "../lib/refs.js";
-import { appState, JOB_LABELS, ensureProjectEventStream, onJobEvent } from "../lib/state.js";
-import { setActiveStageButton } from "./review-project.js";
+import { appState, JOB_LABELS, ensureProjectEventStream, onJobEvent, refreshAppData } from "../lib/state.js";
+import { mountWorkspace } from "../lib/workspace.js";
+import { navigate, parseRoute } from "../lib/router.js";
+import { PHASE_LABELS } from "../lib/phases.js";
 
 // =============================== AI Story Factory ===============================
-// Full-screen screens (the renderSources pattern): dashboard, story detail,
-// channel settings, and the voice lab. All state lives in storyFactoryState so
-// job events can refresh the open screen.
+// The story channel workspace: the phase bar carries Overview (channel settings,
+// prompts, calendar, compilations, voice lab), Content (all stories and story
+// detail), Edit (stories still in production), and Publish (finished stories).
+// All state lives in storyFactoryState so job events can refresh the open view.
 
-const storyFactoryState = { channelId: null, storyId: null, statusFilter: "" };
+const storyFactoryState = { channelId: null, storyId: null, statusFilter: "", phaseStatuses: null };
+
+// Stories still in production versus stories that reached the publishing lane.
+const EDIT_PHASE_STATUSES = ["DRAFT", "IN_PROGRESS", "GENERATING", "AWAITING_APPROVAL", "FAILED", "BUDGET_PAUSED"];
+const PUBLISH_PHASE_STATUSES = ["READY_TO_PUBLISH", "PUBLISHED"];
+
+// The route the channel workspace is currently showing, so a mutation can
+// repaint the same phase without going through the hash.
+let channelRoute = null;
+
+/**
+ * Tier-2 entry point for a story channel. The channel is the route id, so the
+ * old channel picker is gone; the phase bar selects what the panel shows.
+ */
+export async function mountChannel(route) {
+  channelRoute = route;
+  storyFactoryState.channelId = route.id;
+  // A deep link lands here without the boot fetch.
+  if (!appState.config) {
+    await refreshAppData();
+  }
+  const series = appState.series.find((candidate) => candidate.id === route.id);
+  const phase = route.storyId ? "content" : (route.phase ?? "overview");
+  mountWorkspace({ screen: "channel", title: series?.title || route.id, route: { ...route, phase } });
+  if (route.storyId) {
+    await renderStoryDetail(route.id, route.storyId);
+    return;
+  }
+  if (phase === "overview") {
+    await renderChannelOverview(route.id);
+    return;
+  }
+  storyFactoryState.phaseStatuses = phase === "edit" ? EDIT_PHASE_STATUSES : phase === "publish" ? PUBLISH_PHASE_STATUSES : null;
+  await renderStoryFactory();
+}
+
+// Repaints the open channel workspace after a mutation.
+function refreshChannelScreen() {
+  if (!channelRoute) return;
+  void mountChannel(channelRoute).catch((error) => setStatus(error.message));
+}
+
+function channelBackButton() {
+  return actionButton("Back to channel", () => refreshChannelScreen());
+}
+
+async function renderChannelOverview(channelId) {
+  const data = await fetchJsonOrNull(storyApiUrl(channelId, "story-channel"));
+  const channel = data?.storyChannel ?? {};
+  stageTitle.textContent = PHASE_LABELS.overview;
+  seriesPanel.replaceChildren();
+  stageContent.replaceChildren(
+    wrapSection("Channel", channelBadgeRow(channel), channelToolRow(channelId)),
+    renderStoryChannelSettings(channelId, channel),
+  );
+  setStatus(`Channel ${channelId} loaded.`);
+}
+
+function channelToolRow(channelId) {
+  const row = document.createElement("div");
+  row.className = "form-grid compact-form";
+  row.append(
+    actionButton("Prompts", () => renderPromptSettings(channelId).catch((error) => setStatus(error.message))),
+    actionButton("Calendar", () => renderStoryCalendar(channelId).catch((error) => setStatus(error.message))),
+    actionButton("Compilations", () => renderCompilations(channelId).catch((error) => setStatus(error.message))),
+    actionButton("Voice Lab", () => renderVoiceLab(channelId).catch((error) => setStatus(error.message))),
+    actionButton("Stories", () => navigate({ screen: "channel", id: channelId, phase: "content" })),
+  );
+  return row;
+}
 
 const STORY_STAGE_LIST = [
   "idea", "hook", "outline", "bible", "sections", "continuity-qa", "naturalize", "originality-qa",
@@ -34,13 +106,8 @@ const STORY_TABS = [
 ];
 
 export async function renderStoryFactory() {
-  stageTitle.textContent = "Story Factory";
-  setActiveStageButton("story-factory");
   seriesPanel.replaceChildren();
   storyFactoryState.storyId = null;
-  if (!storyFactoryState.channelId && appState.series.length > 0) {
-    storyFactoryState.channelId = appState.series[0].id;
-  }
   const channelId = storyFactoryState.channelId;
   if (!channelId) {
     stageContent.replaceChildren(
@@ -49,22 +116,23 @@ export async function renderStoryFactory() {
     setStatus("Create a series to host the story channel.");
     return;
   }
+  const phaseStatuses = storyFactoryState.phaseStatuses;
+  stageTitle.textContent = phaseStatuses === EDIT_PHASE_STATUSES
+    ? PHASE_LABELS.edit
+    : phaseStatuses === PUBLISH_PHASE_STATUSES
+      ? PHASE_LABELS.publish
+      : "Stories";
   setStatus("Loading stories...");
   const [storiesData, channelData] = await Promise.all([
     fetchJsonOrNull(storyApiUrl(channelId, "stories")),
     fetchJsonOrNull(storyApiUrl(channelId, "story-channel")),
   ]);
-  const stories = storiesData?.stories ?? [];
+  const stories = (storiesData?.stories ?? []).filter((story) => !phaseStatuses || phaseStatuses.includes(story.status));
   const channel = channelData?.storyChannel ?? {};
 
   const pickerForm = document.createElement("form");
   pickerForm.className = "form-grid compact-form";
   pickerForm.addEventListener("submit", (event) => event.preventDefault());
-  const channelSelect = selectField("Channel", "channelId", channelId, appState.series.map((series) => [series.id, series.title || series.id]));
-  channelSelect.querySelector("select").addEventListener("change", (event) => {
-    storyFactoryState.channelId = event.target.value;
-    renderStoryFactory().catch((error) => setStatus(error.message));
-  });
   const statusFilter = selectField("Status filter", "statusFilter", storyFactoryState.statusFilter, [
     ["", "All"],
     ...Object.keys(STORY_STATUS_LEVELS).map((value) => [value, value]),
@@ -74,12 +142,8 @@ export async function renderStoryFactory() {
     renderStoryFactory().catch((error) => setStatus(error.message));
   });
   pickerForm.replaceChildren(
-    channelSelect,
     statusFilter,
-    actionButton("Channel Settings", () => renderStoryChannelSettings(channelId).catch((error) => setStatus(error.message))),
-    actionButton("Prompts", () => renderPromptSettings(channelId).catch((error) => setStatus(error.message))),
-    actionButton("Calendar", () => renderStoryCalendar(channelId).catch((error) => setStatus(error.message))),
-    actionButton("Compilations", () => renderCompilations(channelId).catch((error) => setStatus(error.message))),
+    actionButton("Channel Settings", () => navigate({ screen: "channel", id: channelId, phase: "overview" })),
     actionButton("Voice Lab", () => renderVoiceLab(channelId).catch((error) => setStatus(error.message))),
   );
 
@@ -125,7 +189,7 @@ export async function renderStoryFactory() {
   for (const story of visible) {
     const row = document.createElement("tr");
     const titleCell = document.createElement("td");
-    titleCell.append(actionButton(story.title || story.id, () => renderStoryDetail(channelId, story.id).catch((error) => setStatus(error.message))));
+    titleCell.append(actionButton(story.title || story.id, () => navigate({ screen: "channel", id: channelId, storyId: story.id })));
     const statusCell = document.createElement("td");
     statusCell.append(readinessPill(STORY_STATUS_LEVELS[story.status] ?? "neutral", story.status));
     row.append(
@@ -174,7 +238,6 @@ export async function renderStoryDetail(channelId, storyId, tab = "overview") {
     return renderStoryFactory();
   }
   stageTitle.textContent = `${detail.story.title} - ${detail.status}`;
-  setActiveStageButton("story-factory");
   seriesPanel.replaceChildren();
 
   const tabs = document.createElement("nav");
@@ -184,7 +247,7 @@ export async function renderStoryDetail(channelId, storyId, tab = "overview") {
     if (id === tab) button.classList.add("selected");
     tabs.append(button);
   }
-  const back = actionButton("Back to stories", () => renderStoryFactory().catch((error) => setStatus(error.message)));
+  const back = actionButton("Back to stories", () => navigate({ screen: "channel", id: channelId, phase: "content" }));
 
   const body = await renderStoryTab(channelId, storyId, tab, detail);
   stageContent.replaceChildren(back, tabs, ...body);
@@ -537,12 +600,8 @@ async function renderStoryCostTab(channelId, storyId) {
   ];
 }
 
-async function renderStoryChannelSettings(channelId) {
-  stageTitle.textContent = "Story Channel Settings";
-  setActiveStageButton("story-factory");
-  seriesPanel.replaceChildren();
-  const data = await fetchJsonOrNull(storyApiUrl(channelId, "story-channel"));
-  const channel = data?.storyChannel ?? {};
+// Returns the channel settings section for the Overview phase to host.
+function renderStoryChannelSettings(channelId, channel) {
   const form = document.createElement("form");
   form.className = "form-grid";
   form.addEventListener("submit", (event) => {
@@ -586,7 +645,7 @@ async function renderStoryChannelSettings(channelId) {
     })
       .then(() => {
         setStatus("Channel settings saved.");
-        return renderStoryFactory();
+        refreshChannelScreen();
       })
       .catch((error) => setStatus(error.message));
   });
@@ -615,11 +674,7 @@ async function renderStoryChannelSettings(channelId) {
     field("Max cost per story (USD)", "maxCostPerStoryUsd", String(channel.budget?.maxCostPerStoryUsd ?? 5), "number", "", "any"),
     actionButton("Save Channel Settings", null, "submit", "primary"),
   );
-  stageContent.replaceChildren(
-    actionButton("Back to stories", () => renderStoryFactory().catch((error) => setStatus(error.message))),
-    wrapSection(`Channel: ${channelId}`, form),
-  );
-  setStatus("Channel settings loaded.");
+  return wrapSection(`Channel: ${channelId}`, form);
 }
 
 async function renderPromptSettings(channelId) {
@@ -634,7 +689,7 @@ async function renderPromptSettings(channelId) {
     const save = actionButton("Save override", () => putJson(storyApiUrl(channelId, `prompts/${encodeURIComponent(prompt.name)}`), { system: editor.value }).then(() => setStatus(`${prompt.name} saved.`)).catch((error) => setStatus(error.message)), "button", "primary");
     return wrapSection(`${prompt.name} (${prompt.version})`, paragraph(`Default template variables: ${(prompt.variables ?? []).join(", ")}`), editor, save);
   });
-  stageContent.replaceChildren(actionButton("Back to Story Factory", () => renderStoryFactory().catch((error) => setStatus(error.message))), ...sections);
+  stageContent.replaceChildren(channelBackButton(), ...sections);
 }
 
 async function renderStoryCalendar(channelId) {
@@ -650,7 +705,7 @@ async function renderStoryCalendar(channelId) {
   });
   form.replaceChildren(field("Date", "date", "", "date"), field("Story id", "storyId", ""), field("Planned publish", "plannedPublishAt", "", "datetime-local"), field("Note", "note", ""), actionButton("Add calendar entry", null, "submit", "primary"));
   const list = (data?.calendar?.entries ?? []).map((entry) => paragraph(`${entry.date} — ${entry.storyId || "unassigned"} — ${entry.plannedPublishAt || "no publish time"} — ${entry.note || ""}`));
-  stageContent.replaceChildren(actionButton("Back to Story Factory", () => renderStoryFactory().catch((error) => setStatus(error.message))), wrapSection("Add entry", form), wrapSection("Entries", ...list));
+  stageContent.replaceChildren(channelBackButton(), wrapSection("Add entry", form), wrapSection("Entries", ...list));
 }
 
 async function renderCompilations(channelId) {
@@ -666,12 +721,11 @@ async function renderCompilations(channelId) {
   });
   form.replaceChildren(field("Compilation id", "id", "comp-001"), field("Title", "title", ""), textareaField("Rendered story ids (one per line)", "storyIds", "story-001\nstory-002\nstory-003\nstory-004"), actionButton("Create compilation", null, "submit", "primary"));
   const rows = (data?.compilations ?? []).map((entry) => paragraph(`${entry.id}: ${entry.title} (${entry.storyIds.length} stories)`));
-  stageContent.replaceChildren(actionButton("Back to Story Factory", () => renderStoryFactory().catch((error) => setStatus(error.message))), wrapSection("Create", form), wrapSection("Existing", ...rows));
+  stageContent.replaceChildren(channelBackButton(), wrapSection("Create", form), wrapSection("Existing", ...rows));
 }
 
 async function renderVoiceLab(channelId) {
   stageTitle.textContent = "TTS Voice Lab";
-  setActiveStageButton("story-factory");
   seriesPanel.replaceChildren();
   const channelData = await fetchJsonOrNull(storyApiUrl(channelId, "story-channel"));
   const channel = channelData?.storyChannel ?? {};
@@ -699,7 +753,7 @@ async function renderVoiceLab(channelId) {
   });
 
   stageContent.replaceChildren(
-    actionButton("Back to stories", () => renderStoryFactory().catch((error) => setStatus(error.message))),
+    channelBackButton(),
     wrapSection(
       "Voice Lab",
       paragraph("Compare Google voices reading the same sample, then set the channel narrator. Samples are cached, so replaying a voice is free."),
@@ -776,6 +830,9 @@ function voiceLabTable(channelId, values, voices) {
 
 onJobEvent((job) => {
   if (!job.kind.startsWith("story-")) return;
+  // Only repaint while a story is actually on screen: a finished background job
+  // must not draw into a workspace the browser has already left.
+  if (parseRoute(location.hash).screen !== "channel") return;
   if (storyFactoryState.channelId && storyFactoryState.storyId) {
     void renderStoryDetail(storyFactoryState.channelId, storyFactoryState.storyId).catch((error) => setStatus(error.message));
   }

@@ -4,10 +4,12 @@ import {
   paragraph, wrapSection, gateNotice, field, textareaField, checkboxField,
   selectField, actionButton, formValues, boolFormValues, lower,
 } from "../lib/dom.js";
-import { setStatus } from "../lib/shell.js";
-import { stageTitle, seriesPanel, stageContent } from "../lib/refs.js";
+import { setStatus, view, setBreadcrumb, setActiveNav } from "../lib/shell.js";
 import { appState } from "../lib/state.js";
-import { setActiveStageButton } from "./review-project.js";
+
+// The container this screen paints into. mountSources() creates it; the screen's
+// own re-renders keep writing to the same node.
+let sourcesHost = null;
 
 export function sourcePlatformOptions() {
   return [
@@ -28,10 +30,18 @@ const SOURCE_RIGHTS_OPTIONS = [
   ["third-party-fair-use", "Third party, review commentary"],
 ];
 
-export async function renderSources() {
-  stageTitle.textContent = "Sources";
-  setActiveStageButton("sources");
-  seriesPanel.replaceChildren();
+// Top-level screen entry point: owns its own container under #view.
+export async function mountSources() {
+  setActiveNav("sources");
+  setBreadcrumb([{ label: "Sources" }]);
+  const host = document.createElement("section");
+  host.className = "screen sources-screen";
+  view.replaceChildren(host);
+  await renderSources(host);
+}
+
+export async function renderSources(container = sourcesHost) {
+  sourcesHost = container;
   setStatus("Loading sources...");
 
   let sources = [];
@@ -94,7 +104,11 @@ export async function renderSources() {
   );
   boundary.className = "source-boundary";
 
-  stageContent.replaceChildren(
+  const heading = document.createElement("h2");
+  heading.textContent = "Sources";
+
+  sourcesHost.replaceChildren(
+    heading,
     gateNotice(
       "Discovery only",
       "Searching and tracking a candidate does not grant reuse permission. Declaring rights permits the download only — a project still needs its own approved copyright check before it can render.",

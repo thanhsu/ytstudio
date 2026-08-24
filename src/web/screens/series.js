@@ -2,36 +2,115 @@ import { lines } from "../search-queries.js";
 import { reviewProjectApiUrl, seriesFileUrl } from "../lib/api.js";
 import {
   summaryGrid, wrapSection, inlineInput,
-  uploadField, fileField, paragraph, sectionTitle, readinessPill, gateNotice,
+  uploadField, fileField, paragraph, sectionTitle, gateNotice,
   field, textareaField, selectField, actionButton,
   formValues, boolFormValues, seriesLinkButton,
 } from "../lib/dom.js";
 import { setStatus } from "../lib/shell.js";
 import { seriesPanel, stageTitle, stageContent } from "../lib/refs.js";
 import { appState, refreshAppData } from "../lib/state.js";
-import {
-  selectProject, renderProjects, renderStageRail, workflowTypeOptions, setActiveStageButton,
-} from "./review-project.js";
+import { mountWorkspace } from "../lib/workspace.js";
+import { navigate } from "../lib/router.js";
+import { PHASE_LABELS } from "../lib/phases.js";
+import { workflowTypeOptions } from "./review-project.js";
 
-export function renderSeriesManager() {
-  stageTitle.textContent = "Series Manager";
-  setActiveStageButton("series");
-  seriesPanel.replaceChildren();
-  stageContent.replaceChildren(
-    paragraph("Manage a show-level project, generate editable episode/video plans, then perform detailed workflow per episode."),
-    renderCreateSeriesForm(),
-    renderSeriesList(),
-    appState.selectedSeries ? renderSeriesDetail(appState.selectedSeries) : paragraph("Select or create a series to manage episodes."),
-  );
-  setStatus("Series Manager loaded.");
+// The route the workspace is currently showing, so a mutation can repaint the
+// same phase without going through the hash.
+let seriesRoute = null;
+
+/**
+ * Tier-2 entry point for a series project. Overview shows the series summary;
+ * Content holds the episode plan, the episode table, and the story bible;
+ * Edit holds batch review, brand kit, and thumbnail briefs; Publish lists the
+ * batch and audio-story outputs.
+ */
+export async function mountSeries(route) {
+  seriesRoute = route;
+  // A deep link lands here without the boot fetch.
+  if (!appState.config) {
+    await refreshAppData();
+  }
+  const series = appState.series.find((candidate) => candidate.id === route.id);
+  if (!series) {
+    throw new Error(`Series ${route.id} not found.`);
+  }
+  appState.selectedSeries = series;
+  const phase = route.phase ?? "overview";
+  mountWorkspace({ screen: "series", title: series.title || series.id, route });
+  stageTitle.textContent = PHASE_LABELS[phase];
+  seriesPanel.replaceChildren(renderSeriesWorkspaceHeader(series));
+  stageContent.replaceChildren(...seriesPhaseContent(series, phase));
+  setStatus(`${series.title || series.id}: ${PHASE_LABELS[phase]}.`);
 }
 
-function renderCreateSeriesForm() {
+function seriesPhaseContent(series, phase) {
+  if (phase === "content") {
+    return [renderSeriesOverview(series, seriesPlanForm(series), seriesEpisodeTable(series)), renderAudioStoryPanel(series)];
+  }
+  if (phase === "edit") {
+    return [renderBatchReviewPanel(series), renderBrandKitPanel(series)];
+  }
+  if (phase === "publish") {
+    return [renderSeriesOutputs(series), renderAudioStoryOutputLinks(series, appState.audioStoryWorkspaces[series.id] ?? {})];
+  }
+  return [
+    paragraph("Manage a show-level project, generate editable episode/video plans, then perform detailed workflow per episode."),
+    paragraph("Content plans episodes and the story bible. Edit holds batch reviews and the brand kit. Publish collects the finished outputs."),
+  ];
+}
+
+function seriesPlanForm(series) {
+  const planForm = document.createElement("form");
+  planForm.className = "form-grid compact-form";
+  planForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    generateSeriesEpisodePlan(series.id, formValues(planForm)).catch((error) => setStatus(error.message));
+  });
+  planForm.replaceChildren(
+    field("Count", "count", "20", "number"),
+    field("Start episode", "startEpisode", String(series.episodes.length + 1), "number"),
+    actionButton("Generate episode plan", null, "submit", "primary"),
+  );
+  return planForm;
+}
+
+function seriesEpisodeTable(series) {
+  const table = document.createElement("div");
+  table.className = "episode-table";
+  table.append(episodeHeader());
+  for (const episode of series.episodes) {
+    table.append(renderEpisodeRow(series.id, episode));
+  }
+  return table;
+}
+
+function renderSeriesOutputs(series) {
+  const batches = appState.reviewProjectsBySeries[series.id] ?? [];
+  if (batches.length === 0) {
+    return wrapSection("Batch outputs", paragraph("No batch review projects yet."));
+  }
+  return wrapSection(
+    "Batch outputs",
+    ...batches.flatMap((batch) => [sectionTitle(`${batch.sourceRange} - ${batch.status}`), renderBatchOutputLinks(series.id, batch)]),
+  );
+}
+
+// Repaints the open series workspace after a mutation.
+function refreshSeriesScreen() {
+  if (!seriesRoute) return;
+  void mountSeries(seriesRoute).catch((error) => setStatus(error.message));
+}
+
+/**
+ * The create-series form on its own, for hosts that own their layout (the
+ * projects management screen). onCreated receives the new series id.
+ */
+export function renderCreateSeriesForm(onCreated) {
   const form = document.createElement("form");
   form.className = "form-grid";
   form.addEventListener("submit", (event) => {
     event.preventDefault();
-    createSeries(form).catch((error) => setStatus(error.message));
+    createSeries(form, onCreated).catch((error) => setStatus(error.message));
   });
   form.replaceChildren(
     field("Series id", "id", "", "text", "muc-than-ky"),
@@ -45,66 +124,6 @@ function renderCreateSeriesForm() {
     actionButton("Create Series", null, "submit", "primary"),
   );
   return wrapSection("New series", form);
-}
-
-function renderSeriesList() {
-  const list = document.createElement("div");
-  list.className = "series-list";
-  if (appState.series.length === 0) {
-    list.append(paragraph("No series projects yet."));
-    return wrapSection("Series", list);
-  }
-  for (const series of appState.series) {
-    const button = actionButton(`${series.title} (${series.episodes.length})`, () => {
-      appState.selectedSeries = series;
-      appState.selectedSeriesTab = defaultSeriesTab(series);
-      appState.selectedReviewProjectId = null;
-      renderSeriesManager();
-    });
-    if (appState.selectedSeries?.id === series.id) button.classList.add("selected");
-    list.append(button);
-  }
-  return wrapSection("Series", list);
-}
-
-function renderSeriesDetail(series) {
-  const selectedTab = appState.selectedSeriesTab || defaultSeriesTab(series);
-  const planForm = document.createElement("form");
-  planForm.className = "form-grid compact-form";
-  planForm.addEventListener("submit", (event) => {
-    event.preventDefault();
-    generateSeriesEpisodePlan(series.id, formValues(planForm)).catch((error) => setStatus(error.message));
-  });
-  planForm.replaceChildren(
-    field("Count", "count", "20", "number"),
-    field("Start episode", "startEpisode", String(series.episodes.length + 1), "number"),
-    actionButton("Generate episode plan", null, "submit", "primary"),
-  );
-
-  const table = document.createElement("div");
-  table.className = "episode-table";
-  table.append(episodeHeader());
-  for (const episode of series.episodes) {
-    table.append(renderEpisodeRow(series.id, episode));
-  }
-
-  const panel = {
-    overview: () => renderSeriesOverview(series, planForm, table),
-    brand: () => renderBrandKitPanel(series),
-    audio: () => renderAudioStoryPanel(series),
-    batch: () => renderBatchReviewPanel(series),
-  }[selectedTab] ?? (() => renderSeriesOverview(series, planForm, table));
-
-  return wrapSection(
-    `${series.title} - Production Workspace`,
-    renderSeriesWorkspaceHeader(series),
-    renderSeriesWorkspaceTabs(series, selectedTab),
-    panel(),
-  );
-}
-
-function defaultSeriesTab(series) {
-  return series.workflowType === "audio-story" ? "audio" : "overview";
 }
 
 function renderSeriesWorkspaceHeader(series) {
@@ -127,37 +146,6 @@ function renderSeriesWorkspaceHeader(series) {
     ),
   );
   return header;
-}
-
-function renderSeriesWorkspaceTabs(series, selectedTab) {
-  const tabs = document.createElement("div");
-  tabs.className = "workspace-tabs";
-  const batchCount = appState.reviewProjectsBySeries[series.id]?.length ?? 0;
-  const chapterCount = appState.audioStoryWorkspaces[series.id]?.chapters?.length ?? 0;
-  const kit = appState.brandKits[series.id] ?? {};
-  const hasBrandAssets = Boolean(kit.logoRoundPath || kit.logoTextPath || kit.watermarkPath);
-  const tabDefs = [
-    ["overview", "Overview", `${series.episodes.length} episodes`],
-    ["brand", "Brand Kit", hasBrandAssets ? "assets ready" : "needs assets"],
-    ["audio", "Audio Story", `${chapterCount} chapters`],
-    ["batch", "Batch Review", `${batchCount} batches`],
-  ];
-  for (const [id, label, meta] of tabDefs) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = `workspace-tab${selectedTab === id ? " selected" : ""}`;
-    button.dataset.seriesTab = id;
-    const labelElement = document.createElement("span");
-    labelElement.className = "workspace-tab-label";
-    labelElement.textContent = label;
-    button.append(labelElement, readinessPill(selectedTab === id ? "progress" : "neutral", meta));
-    button.addEventListener("click", () => {
-      appState.selectedSeriesTab = id;
-      renderSeriesManager();
-    });
-    tabs.append(button);
-  }
-  return tabs;
 }
 
 function renderSeriesOverview(series, planForm, episodeTable) {
@@ -435,7 +423,7 @@ function renderBatchReviewList(series, batches) {
   for (const batch of batches) {
     const button = actionButton(`${batch.sourceRange} - ${batch.status}`, () => {
       appState.selectedReviewProjectId = batch.id;
-      renderSeriesManager();
+      refreshSeriesScreen();
     });
     if (batch.id === appState.selectedReviewProjectId) button.classList.add("selected");
     list.append(button);
@@ -591,7 +579,7 @@ function episodeActions(episode) {
   return actions;
 }
 
-async function createSeries(form) {
+async function createSeries(form, onCreated) {
   const response = await fetch("/api/series", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -601,11 +589,13 @@ async function createSeries(form) {
   if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
   appState.selectedSeries = data.series;
   await refreshAppData();
-  renderStageRail();
-  renderProjects();
   appState.selectedSeries = appState.series.find((series) => series.id === data.series.id) ?? data.series;
-  renderSeriesManager();
   setStatus(`Created series ${data.series.title}.`);
+  if (onCreated) {
+    await onCreated(data.series.id);
+    return;
+  }
+  navigate({ screen: "series", id: data.series.id, phase: "overview" });
 }
 
 async function generateSeriesEpisodePlan(seriesId, values) {
@@ -618,10 +608,8 @@ async function generateSeriesEpisodePlan(seriesId, values) {
   if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
   appState.selectedSeries = data.series;
   await refreshAppData();
-  renderStageRail();
-  renderProjects();
   appState.selectedSeries = appState.series.find((series) => series.id === data.series.id) ?? data.series;
-  renderSeriesManager();
+  refreshSeriesScreen();
   setStatus(`Generated episode plan for ${data.series.title}.`);
 }
 
@@ -635,10 +623,8 @@ async function updateEpisode(seriesId, episodeId, values) {
   if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
   appState.selectedSeries = data.series;
   await refreshAppData();
-  renderStageRail();
-  renderProjects();
   appState.selectedSeries = appState.series.find((series) => series.id === data.series.id) ?? data.series;
-  renderSeriesManager();
+  refreshSeriesScreen();
   setStatus(`Saved ${data.episode.id}.`);
 }
 
@@ -657,10 +643,8 @@ async function createBatchReview(seriesId, values) {
   if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
   appState.selectedReviewProjectId = data.reviewProject.id;
   await refreshAppData();
-  renderStageRail();
-  renderProjects();
   appState.selectedSeries = appState.series.find((series) => series.id === seriesId) ?? appState.selectedSeries;
-  renderSeriesManager();
+  refreshSeriesScreen();
   setStatus(`Created batch review ${data.reviewProject.sourceRange}.`);
 }
 
@@ -676,7 +660,7 @@ async function saveBrandKitUi(seriesId, values) {
   const data = await response.json();
   if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
   appState.brandKits[seriesId] = data.brandKit;
-  renderSeriesManager();
+  refreshSeriesScreen();
   setStatus("Brand Kit saved.");
 }
 
@@ -695,7 +679,7 @@ async function uploadBrandAssetUi(seriesId, form) {
   const data = await response.json();
   if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
   appState.brandKits[seriesId] = data.brandKit;
-  renderSeriesManager();
+  refreshSeriesScreen();
   setStatus(`Upload Brand Asset complete: ${data.asset.relativePath}`);
 }
 
@@ -708,7 +692,7 @@ async function generateThumbnailBriefUi(seriesId, values) {
   const data = await response.json();
   if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
   appState.thumbnailBriefs[seriesId] = data.thumbnailBrief;
-  renderSeriesManager();
+  refreshSeriesScreen();
   setStatus("Generate Thumbnail Brief complete.");
 }
 
@@ -738,7 +722,7 @@ async function saveStoryBible(seriesId, values) {
   const data = await response.json();
   if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
   appState.audioStoryWorkspaces[seriesId] = data.workspace;
-  renderSeriesManager();
+  refreshSeriesScreen();
   setStatus("Story Bible saved.");
 }
 
@@ -751,7 +735,7 @@ async function generateStoryOutlineUi(seriesId, values) {
   const data = await response.json();
   if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
   appState.audioStoryWorkspaces[seriesId] = data.workspace;
-  renderSeriesManager();
+  refreshSeriesScreen();
   setStatus("Generated Story Outline.");
 }
 
@@ -764,7 +748,7 @@ async function generateStoryChapterUi(seriesId, chapterNumber) {
   const data = await response.json();
   if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
   appState.audioStoryWorkspaces[seriesId] = data.workspace;
-  renderSeriesManager();
+  refreshSeriesScreen();
   setStatus(`Generated Chapter ${data.chapter.chapterNumber}.`);
 }
 
@@ -780,7 +764,7 @@ async function runStoryContinuityUi(seriesId, chapterNumber) {
   const data = await response.json();
   if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
   appState.audioStoryWorkspaces[seriesId] = data.workspace;
-  renderSeriesManager();
+  refreshSeriesScreen();
   setStatus(data.report.blocked ? "Continuity check found a blocker." : "Continuity Check complete.");
 }
 
@@ -793,7 +777,7 @@ async function exportAudioStoryUi(seriesId) {
   const data = await response.json();
   if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
   appState.audioStoryWorkspaces[seriesId] = data.workspace;
-  renderSeriesManager();
+  refreshSeriesScreen();
   setStatus("Export Audio Story complete.");
 }
 
@@ -817,7 +801,7 @@ async function uploadReviewEpisodeFile(seriesId, reviewProjectId, episodeNumber,
     return;
   }
   await refreshSeriesReviewProjects(seriesId);
-  renderSeriesManager();
+  refreshSeriesScreen();
   setStatus(`Imported ${kind} for episode ${episodeNumber}.`);
 }
 
@@ -833,7 +817,7 @@ async function postReviewProjectAction(seriesId, reviewProjectId, route, body, s
     return;
   }
   await refreshSeriesReviewProjects(seriesId);
-  renderSeriesManager();
+  refreshSeriesScreen();
   setStatus(successMessage);
 }
 
@@ -842,9 +826,9 @@ async function refreshSeriesReviewProjects(seriesId) {
   appState.reviewProjectsBySeries[seriesId] = (await response.json()).reviewProjects ?? [];
 }
 
-async function performEpisodeTask(episode) {
-  await selectProject(episode.episodeProjectId);
-  setStatus(`Perform task: opened detailed workflow for ${episode.id}.`);
+function performEpisodeTask(episode) {
+  setStatus(`Perform task: opening detailed workflow for ${episode.id}.`);
+  navigate({ screen: "review-project", id: episode.episodeProjectId, phase: "overview" });
 }
 
 function parseEpisodeNumbers(value) {

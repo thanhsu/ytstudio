@@ -7,70 +7,22 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <header class="topbar">
-      <div>
+    <header class="topnav">
+      <div class="topnav-brand">
         <h1>YT Review Studio</h1>
-        <p>Local production pipeline for original review videos.</p>
+        <p>Local production pipeline for original videos.</p>
       </div>
-      <div class="topbar-actions">
-        <button id="open-sources" type="button">Sources</button>
-        <button id="open-series" type="button">Series</button>
-        <button id="open-story-factory" type="button">Story Factory</button>
-        <button id="new-project" type="button">New Project</button>
-        <button id="open-config" type="button">Config</button>
-        <button id="refresh-projects" type="button">Refresh</button>
-      </div>
+      <nav class="topnav-links" aria-label="Main">
+        <a href="#/projects" data-nav="projects">Projects</a>
+        <a href="#/sources" data-nav="sources">Sources</a>
+        <a href="#/config" data-nav="config">Config</a>
+      </nav>
+      <div id="status" class="status" aria-live="polite">Loading studio...</div>
     </header>
 
-    <main class="layout">
-      <aside class="sidebar" aria-label="Projects">
-        <h2>Projects</h2>
-        <ul id="project-list" class="project-list"></ul>
-      </aside>
+    <nav id="breadcrumb" class="breadcrumb" aria-label="Breadcrumb"></nav>
 
-      <section class="workspace">
-        <section id="workflow-board" class="workflow-board" aria-label="Workflow">
-          <div class="workflow-header">
-            <div>
-              <h2 id="workflow-title">Workflow</h2>
-              <p id="workflow-description">Select a project to load its step-by-step flow.</p>
-            </div>
-            <button id="run-ready-tasks" type="button">Run available tasks</button>
-          </div>
-          <ol id="workflow-steps" class="workflow-steps"></ol>
-        </section>
-
-        <nav aria-label="Pipeline stages">
-          <ol id="stage-rail" class="stage-rail">
-            <li><button type="button" data-stage="brief">Brief</button></li>
-            <li><button type="button" data-stage="script">Script</button></li>
-            <li><button type="button" data-stage="media">Media</button></li>
-            <li><button type="button" data-stage="asr">ASR/OCR</button></li>
-            <li><button type="button" data-stage="subtitles">Subtitles</button></li>
-            <li><button type="button" data-stage="translation">Translation</button></li>
-            <li><button type="button" data-stage="voice">Voice</button></li>
-            <li><button type="button" data-stage="captions">Captions</button></li>
-            <li><button type="button" data-stage="assets">Assets</button></li>
-            <li><button type="button" data-stage="copyright">Copyright</button></li>
-            <li><button type="button" data-stage="render">Render</button></li>
-            <li><button type="button" data-stage="export">Export</button></li>
-          </ol>
-        </nav>
-
-        <section class="panel" aria-labelledby="stage-title">
-          <h2 id="stage-title">Brief</h2>
-          <div id="series-panel"></div>
-          <div id="stage-content"></div>
-        </section>
-      </section>
-
-      <aside class="preview" aria-label="Preview">
-        <h2>Preview</h2>
-        <audio id="audio-preview" controls></audio>
-        <video id="video-preview" controls></video>
-        <div id="status" class="status" aria-live="polite">Loading studio...</div>
-      </aside>
-    </main>
+    <main id="view" class="view"></main>
 
     <dialog id="paid-voice-dialog">
       <form method="dialog">
@@ -94,6 +46,6 @@
       </form>
     </dialog>
 
-    <script src="/app.js" type="module"></script>
+    <script src="/main.js" type="module"></script>
   </body>
 </html>

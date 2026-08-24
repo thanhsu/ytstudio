@@ -7,22 +7,26 @@ import {
 } from "../lib/dom.js";
 import { setStatus, paidVoiceDialog, paidScriptDialog } from "../lib/shell.js";
 import {
-  projectList, seriesPanel, workflowTitle, workflowDescription, workflowSteps,
+  seriesPanel, workflowTitle, workflowDescription, workflowSteps,
   stageRail, stageTitle, stageContent, audioPreview, videoPreview,
 } from "../lib/refs.js";
 import {
   appState, onJobEvent, ensureProjectEventStream, reportedAsJob,
   refreshAppData, projectApiUrl, projectFileUrl,
 } from "../lib/state.js";
-import { STAGES, STAGE_TITLES, APPROVAL_STEP_IDS } from "../lib/phases.js";
+import {
+  STAGES, STAGE_TITLES, APPROVAL_STEP_IDS, REVIEW_PHASES, derivePhaseState, phaseForStage,
+} from "../lib/phases.js";
+import { mountWorkspace } from "../lib/workspace.js";
+import { navigate, parseRoute } from "../lib/router.js";
 
 // A finished review job (voice, render, ASR, captions, asset analysis, script)
-// refreshes the open project. Story jobs are handled by app.js until the story
-// factory screen moves out in a later task.
+// refreshes the open project. Story jobs belong to the story factory screen,
+// which subscribes separately.
 onJobEvent((job) => {
   if (job.kind.startsWith("story-")) return;
   if (appState.selectedProject) {
-    void selectProject(appState.selectedProject);
+    void refreshProjectView().catch((error) => setStatus(error.message));
   }
 });
 
@@ -39,21 +43,57 @@ const STAGE_PHASES = [
 
 const RUN_AVAILABLE_TASKS_LABEL = "Run available tasks";
 
-export function renderProjects() {
-  const hiddenEpisodeProjects = seriesEpisodeProjectIds();
-  const visibleProjects = appState.projects.filter((id) => !hiddenEpisodeProjects.has(id) || id === appState.selectedProject);
-  projectList.replaceChildren(
-    ...visibleProjects.map((id) => {
-      const item = document.createElement("li");
-      const button = document.createElement("button");
-      button.type = "button";
-      button.textContent = id;
-      button.className = id === appState.selectedProject ? "selected" : "";
-      button.addEventListener("click", () => selectProject(id));
-      item.append(button);
-      return item;
-    }),
+/**
+ * Tier-2 entry point: builds the workspace chrome for one review project and
+ * fills the phase the route asks for. Overview carries the workflow board;
+ * every other phase renders the stage rail and the active stage.
+ */
+export async function mountReviewProject(route) {
+  // A deep link lands here without the boot fetch, and the stage screens read
+  // the studio config and the workflow templates.
+  if (!appState.config) await refreshAppData();
+  await selectProjectData(route.id);
+  const phase = route.phase ?? "overview";
+  const steps = appState.projectSnapshot?.workflow?.steps ?? [];
+  const phaseStates = Object.fromEntries(
+    REVIEW_PHASES.map((reviewPhase) => [reviewPhase.id, derivePhaseState(reviewPhase.stages, steps)]),
   );
+  mountWorkspace({
+    screen: "review-project",
+    title: route.id,
+    route,
+    phaseStates,
+    withWorkflowBoard: phase === "overview",
+    onRunTasks: () => runAvailableTasks(),
+  });
+  if (phase === "overview") {
+    renderWorkflowBoard();
+    stageTitle.textContent = "Overview";
+    stageContent.replaceChildren();
+  } else {
+    renderStageRail();
+    if (phaseForStage(appState.activeStage) !== phase) {
+      appState.activeStage = REVIEW_PHASES.find((reviewPhase) => reviewPhase.id === phase).stages[0];
+    }
+    renderStage();
+  }
+  renderPreviews(appState.projectSnapshot);
+  setStatus(`Loaded ${route.id}.`);
+}
+
+/**
+ * Re-reads the open project and repaints it. Called after every mutation and by
+ * the job handler: when the browser has since moved off this workspace, only
+ * the data is refreshed so a background job never yanks the screen back.
+ */
+async function refreshProjectView() {
+  if (!appState.selectedProject) return;
+  const route = parseRoute(location.hash);
+  if (route.screen === "review-project" && route.id === appState.selectedProject) {
+    await mountReviewProject(route);
+    return;
+  }
+  await selectProjectData(appState.selectedProject);
 }
 
 export function renderWorkflowBoard() {
@@ -76,9 +116,11 @@ export function renderWorkflowBoard() {
       const button = document.createElement("button");
       button.type = "button";
       button.className = step.stage === appState.activeStage ? "selected" : "";
+      // The board lives on Overview, which carries no stages of its own, so a
+      // step opens the phase that owns it rather than painting into this panel.
       button.addEventListener("click", () => {
         appState.activeStage = step.stage;
-        renderStage();
+        navigate({ screen: "review-project", id: appState.selectedProject, phase: phaseForStage(step.stage) });
       });
 
       const badge = document.createElement("span");
@@ -163,7 +205,7 @@ function stagePhaseItem(label, stages) {
   return item;
 }
 
-export function bindStageRail() {
+function bindStageRail() {
   for (const button of stageRail.querySelectorAll("[data-stage]")) {
     button.addEventListener("click", () => {
       appState.activeStage = button.dataset.stage;
@@ -172,7 +214,9 @@ export function bindStageRail() {
   }
 }
 
-export async function selectProject(projectId) {
+// The fetch half of the old selectProject(): loads the snapshot and the edit
+// manifest, opens the event stream, and renders nothing.
+export async function selectProjectData(projectId) {
   appState.selectedProject = projectId;
   ensureProjectEventStream(projectId);
   const [response] = await Promise.all([
@@ -184,11 +228,6 @@ export async function selectProject(projectId) {
   if (!workflowStages.includes(appState.activeStage)) {
     appState.activeStage = workflowStages[0] ?? "brief";
   }
-  renderProjects();
-  renderWorkflowBoard();
-  renderStageRail();
-  renderStage();
-  setStatus(`Loaded ${projectId}.`);
 }
 
 export function renderStage() {
@@ -196,7 +235,6 @@ export function renderStage() {
   seriesPanel.replaceChildren();
   const snapshot = appState.projectSnapshot;
   if (!snapshot) {
-    renderCreateProject();
     return;
   }
 
@@ -221,16 +259,17 @@ export function renderStage() {
   renderPreviews(snapshot);
 }
 
-export function renderCreateProject() {
-  stageTitle.textContent = "Create Project";
-  workflowTitle.textContent = "Workflow";
-  workflowDescription.textContent = "Pick the type of video before creating the project.";
-  workflowSteps.replaceChildren(...workflowTemplateCards());
+/**
+ * The create-project form on its own, for hosts that own their layout (the
+ * projects management screen). onCreated receives the new project id; without
+ * it the form opens the new project's workspace, the old inline behavior.
+ */
+export function renderCreateProjectForm(onCreated) {
   const form = document.createElement("form");
   form.className = "form-grid";
   form.addEventListener("submit", (event) => {
     event.preventDefault();
-    createProject(form).catch((error) => setStatus(error.message));
+    createProject(form, onCreated).catch((error) => setStatus(error.message));
   });
   form.replaceChildren(
     field("Project id", "id", "", "text", "muc-than-ky-001"),
@@ -246,14 +285,16 @@ export function renderCreateProject() {
     textareaField("Notes", "notes", ""),
     actionButton("Create Project", null, "submit", "primary"),
   );
-  stageContent.replaceChildren(
+  const wrapper = document.createElement("div");
+  wrapper.className = "create-project";
+  wrapper.append(
     paragraph("Create the working folder and brief from the UI. No command line needed."),
     form,
   );
-  setStatus("Ready to create a new project.");
+  return wrapper;
 }
 
-async function createProject(form) {
+async function createProject(form, onCreated) {
   const response = await fetch("/api/projects", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -261,14 +302,13 @@ async function createProject(form) {
   });
   const data = await response.json();
   if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
-  // Equivalent to the app.js boot orchestrator's loadProjects() for this case:
-  // refresh the fetched state and the project rail, then select the new
-  // project directly rather than routing off location.hash.
   await refreshAppData();
-  renderStageRail();
-  renderProjects();
-  await selectProject(data.brief.id);
   setStatus(`Created ${data.brief.id}.`);
+  if (onCreated) {
+    await onCreated(data.brief.id);
+    return;
+  }
+  navigate({ screen: "review-project", id: data.brief.id, phase: "overview" });
 }
 
 function renderBrief(snapshot) {
@@ -891,7 +931,7 @@ export async function runAvailableTasks() {
   const results = await Promise.allSettled(runnable.map((step) => runStepTask(step)));
   const failures = results.filter((result) => result.status === "rejected");
   const started = results.filter((result) => result.status === "fulfilled" && result.value?.job).length;
-  await selectProject(appState.selectedProject);
+  await refreshProjectView();
   if (failures.length > 0) {
     setStatus(`${runnable.length - failures.length}/${runnable.length} tasks completed. ${failures[0].reason.message}`);
     return;
@@ -985,7 +1025,7 @@ export async function requestVoice(confirmedPaidRequest) {
     return;
   }
   setStatus(`Voice ready: ${data.artifact.relativePath}`);
-  await selectProject(appState.selectedProject);
+  await refreshProjectView();
 }
 
 // Only a hosted model can cost money. A leftover `paid: true` on the offline
@@ -1017,7 +1057,7 @@ export async function requestScript(confirmedPaidRequest) {
     return;
   }
   setStatus("Script generated.");
-  await selectProject(appState.selectedProject);
+  await refreshProjectView();
 }
 
 async function requestRender() {
@@ -1035,7 +1075,7 @@ async function requestRender() {
     return;
   }
   setStatus(`Rendered: ${data.artifact.relativePath}`);
-  await selectProject(appState.selectedProject);
+  await refreshProjectView();
 }
 
 async function requestCutRender() {
@@ -1053,7 +1093,7 @@ async function requestCutRender() {
     return;
   }
   setStatus(`Cut rendered: ${data.artifact.relativePath}`);
-  await selectProject(appState.selectedProject);
+  await refreshProjectView();
 }
 
 async function requestVisualMapping() {
@@ -1061,7 +1101,7 @@ async function requestVisualMapping() {
   const data = await response.json();
   if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
   setStatus(`Generated mapping for ${data.mapping.segments.length} scenes.`);
-  await selectProject(appState.selectedProject);
+  await refreshProjectView();
 }
 
 async function approveVisualMapping() {
@@ -1069,7 +1109,7 @@ async function approveVisualMapping() {
   const data = await response.json();
   if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
   setStatus("Visual mapping approved.");
-  await selectProject(appState.selectedProject);
+  await refreshProjectView();
 }
 
 async function saveVisualMappingSegment(sceneId, form) {
@@ -1080,7 +1120,7 @@ async function saveVisualMappingSegment(sceneId, form) {
   const data = await response.json();
   if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
   setStatus(`Saved ${sceneId}. Mapping approval is now required again.`);
-  await selectProject(appState.selectedProject);
+  await refreshProjectView();
 }
 
 async function uploadProjectFile(inputId, route) {
@@ -1099,7 +1139,7 @@ async function uploadProjectFile(inputId, route) {
     return;
   }
   setStatus(`Imported: ${(data.artifact ?? data.asset).relativePath}`);
-  await selectProject(appState.selectedProject);
+  await refreshProjectView();
 }
 
 async function uploadAsset(form) {
@@ -1116,7 +1156,7 @@ async function uploadAsset(form) {
   const data = await response.json();
   if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
   setStatus(`Upload Asset complete: ${data.asset.relativePath}`);
-  await selectProject(appState.selectedProject);
+  await refreshProjectView();
 }
 
 async function saveAssetMetadata(assetId, form) {
@@ -1136,7 +1176,7 @@ async function saveAssetMetadata(assetId, form) {
   const data = await response.json();
   if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
   setStatus(`Saved asset details for ${data.asset.filename}. Approve Assets again when ready.`);
-  await selectProject(appState.selectedProject);
+  await refreshProjectView();
 }
 
 async function postProjectAction(route, body, successMessage) {
@@ -1155,7 +1195,7 @@ async function postProjectAction(route, body, successMessage) {
   }
   const artifact = data.artifact ?? data.asset ?? data.check ?? data.draft;
   setStatus(artifact?.relativePath ? `${successMessage} ${artifact.relativePath}` : successMessage);
-  await selectProject(appState.selectedProject);
+  await refreshProjectView();
 }
 
 function renderPreviews(snapshot) {
@@ -1211,12 +1251,7 @@ function translationTargetLabels() {
   return (appState.translationPresets?.presets ?? []).map((preset) => preset.label);
 }
 
-
-function seriesEpisodeProjectIds() {
-  return new Set(appState.series.flatMap((series) => series.episodes.map((episode) => episode.episodeProjectId)));
-}
-
-export function setActiveStageButton(stage = appState.activeStage) {
+function setActiveStageButton(stage = appState.activeStage) {
   for (const button of stageRail.querySelectorAll("[data-stage]")) {
     button.classList.toggle("selected", button.dataset.stage === stage);
   }

@@ -21,24 +21,27 @@ async function readWebScripts(): Promise<string> {
   return parts.join("\n");
 }
 
-test("web shell exposes the complete approval pipeline", async () => {
+test("web shell exposes the routed studio chrome", async () => {
   const html = await readFile("src/web/index.html", "utf8");
-
-  for (const stage of ["Workflow", "Brief", "Script", "Subtitles", "ASR", "Voice", "Assets", "Copyright", "Render", "Config"]) {
-    assert.match(html, new RegExp(stage));
-  }
-  assert.match(html, /id="workflow-board"/);
-  assert.match(html, /id="open-series"/);
-  assert.match(html, /id="series-panel"/);
-  assert.match(html, /id="open-config"/);
+  assert.match(html, /id="view"/);
+  assert.match(html, /id="breadcrumb"/);
+  assert.match(html, /data-nav="projects"/);
+  assert.match(html, /data-nav="sources"/);
+  assert.match(html, /data-nav="config"/);
   assert.match(html, /aria-live="polite"/);
+  assert.match(html, /src="\/main\.js"/);
+
+  // The workspace chrome the screens render into is built by lib/workspace.js
+  // now, so the ids live in the script bundle rather than in the shell.
+  const script = await readWebScripts();
+  for (const marker of ["workflow-board", "series-panel", "stage-content", "mountProjects", "mountWorkspace", "phase-bar"]) {
+    assert.match(script, new RegExp(marker));
+  }
 });
 
 test("web shell and app expose the AI story factory screens", async () => {
-  const html = await readFile("src/web/index.html", "utf8");
-  assert.match(html, /id="open-story-factory"/);
-
   const script = await readWebScripts();
+  assert.match(script, /mountChannel/);
   for (const marker of [
     "renderStoryFactory",
     "renderStoryDetail",
@@ -51,7 +54,7 @@ test("web shell and app expose the AI story factory screens", async () => {
     "Set as channel default",
     "I confirm paid API spend",
     "story-pipeline",
-    "#story-factory",
+    "story-factory",
     "storyFactory.enabled",
     "tts.google.apiKeyEnv",
     "images.provider",
@@ -88,7 +91,7 @@ test("web app exposes UI controls for media, ASR, captions, and render actions",
   assert.match(script, /Run available tasks/);
   assert.match(script, /parallelGroup/);
   assert.match(script, /workflow.steps/);
-  assert.match(script, /Series Manager/);
+  assert.match(script, /New Series/);
   assert.match(script, /Generate episode plan/);
   assert.match(script, /Generate mapping/);
   assert.match(script, /Approve mapping/);
@@ -117,9 +120,10 @@ test("web app exposes UI controls for media, ASR, captions, and render actions",
   assert.match(script, /uploadReviewEpisodeFile/);
   assert.match(script, /reviewProjectApiUrl/);
   assert.equal(script.includes("/api/series"), true);
-  assert.match(script, /#series/);
-  assert.match(script, /#sources/);
-  assert.match(script, /#config/);
+  // Hash routes moved to the two-tier form built in lib/router.js.
+  assert.match(script, /#\/series/);
+  assert.match(script, /#\/sources/);
+  assert.match(script, /#\/config/);
   assert.match(script, /Copyright Check/);
   assert.match(script, /Upload Asset/);
   assert.match(script, /Uploaded assets/);
@@ -288,7 +292,7 @@ test("the sources screen exposes paste, rights, score, download, and delete", as
   const script = await readWebScripts();
   const styles = await readFile("src/web/styles.css", "utf8");
 
-  assert.match(html, /id="open-sources"/);
+  assert.match(html, /data-nav="sources"/);
   assert.match(script, /"\/api\/sources"/);
   assert.match(script, /Add Source/);
   assert.match(script, /Score/);

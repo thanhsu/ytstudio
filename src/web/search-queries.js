@@ -1,4 +1,4 @@
-// Pure query-expansion logic, kept out of app.js so it can be unit tested.
+// Pure query-expansion logic, kept out of the screen modules so it can be unit tested.
 // The browser loads it from /search-queries.js; the tests import it directly.
 
 const MAX_QUERIES = 6;
