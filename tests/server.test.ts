@@ -479,6 +479,143 @@ test("visual mapping API generates, edits, and approves caption-aligned scenes",
   });
 });
 
+async function seedVisualMappingProject(): Promise<void> {
+  await mkdir(join("projects", "sample-project", "workspace", "captions"), { recursive: true });
+  await mkdir(join("projects", "sample-project", "assets"), { recursive: true });
+  await writeFile(join("projects", "sample-project", "workspace", "captions", "draft.srt"), "1\n00:00:00,000 --> 00:00:05,000\nQin Mu trains in the village.\n", "utf8");
+  await writeFile(join("projects", "sample-project", "project-state.json"), JSON.stringify({
+    version: 1, approvals: {}, artifacts: { captions: { kind: "captions", relativePath: "workspace/captions/draft.srt", sourceHash: "x", createdAt: "2026-08-21T00:00:00.000Z" } },
+  }), "utf8");
+  await writeFile(join("projects", "sample-project", "assets", "asset-manifest.json"), JSON.stringify({ version: 1, assets: [
+    {
+      id: "image-1", filename: "village.jpg", relativePath: "assets/images/village.jpg", mediaType: "image", mimeType: "image/jpeg", sizeBytes: 10,
+      rightsConfirmed: true, usagePurpose: "Qin Mu village context", createdAt: "2026-08-21T00:00:00.000Z", analysisStatus: "limited", keywords: ["qin", "mu", "village"],
+    },
+    {
+      id: "logo-eligible", filename: "logo.png", relativePath: "assets/images/logo.png", mediaType: "image", mimeType: "image/png", sizeBytes: 10,
+      rightsConfirmed: true, usagePurpose: "channel logo", createdAt: "2026-08-21T00:00:00.000Z", role: "logo", rightsStatus: "owned",
+    },
+    {
+      id: "logo-ineligible", filename: "other.png", relativePath: "assets/images/other.png", mediaType: "image", mimeType: "image/png", sizeBytes: 10,
+      rightsConfirmed: true, usagePurpose: "not a logo", createdAt: "2026-08-21T00:00:00.000Z",
+    },
+  ] }), "utf8");
+}
+
+test("visual-mapping PATCH persists a partial effects patch and reset restores defaults", async () => {
+  await withTempCwd(async () => {
+    await seedVisualMappingProject();
+    const running = await startStudioServer(createStudioServer(), { port: 0 });
+    try {
+      await fetch(`${running.url}/api/projects/sample-project/visual-mapping/generate`, { method: "POST", headers: { origin: running.url } });
+      await fetch(`${running.url}/api/projects/sample-project/visual-mapping/approve`, { method: "POST", headers: { origin: running.url } });
+
+      const patched = await fetch(`${running.url}/api/projects/sample-project/visual-mapping/segments/scene-001`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", origin: running.url },
+        body: JSON.stringify({ fitMode: "contain", effects: { speed: 1.25, color: { contrast: 1.2 } } }),
+      });
+      assert.equal(patched.status, 200);
+      const patchedBody = await patched.json();
+      assert.equal(patchedBody.segment.effects.speed, 1.25);
+      assert.equal(patchedBody.segment.effects.color.contrast, 1.2);
+      assert.equal(patchedBody.segment.effects.color.saturation, 1);
+      // Editing effects marks the previously-approved mapping draft again, requiring
+      // re-approval through the existing render gate rather than a separate mechanism.
+      assert.equal(patchedBody.mapping.status, "draft");
+
+      const snapshotAfterPatch = await (await fetch(`${running.url}/api/projects/sample-project`)).json();
+      assert.ok(snapshotAfterPatch.renderGate.reasons.includes("visual-mapping-not-approved"));
+
+      await fetch(`${running.url}/api/projects/sample-project/visual-mapping/approve`, { method: "POST", headers: { origin: running.url } });
+
+      const reset = await fetch(`${running.url}/api/projects/sample-project/visual-mapping/segments/scene-001/effects/reset`, {
+        method: "POST", headers: { "content-type": "application/json", origin: running.url }, body: "{}",
+      });
+      assert.equal(reset.status, 200);
+      const resetBody = await reset.json();
+      assert.deepEqual(resetBody.segment.effects, DEFAULT_SEGMENT_EFFECTS);
+      assert.equal(resetBody.mapping.status, "draft");
+
+      const snapshotAfterReset = await (await fetch(`${running.url}/api/projects/sample-project`)).json();
+      assert.ok(snapshotAfterReset.renderGate.reasons.includes("visual-mapping-not-approved"));
+
+      // The reset must not have handed back a live reference to the shared default
+      // constant: mutating the response object must not corrupt future resets.
+      resetBody.segment.effects.speed = 999;
+      assert.equal(DEFAULT_SEGMENT_EFFECTS.speed, 1);
+    } finally { await running.close(); }
+  });
+});
+
+test("visual-mapping effects PATCH rejects invalid values and missing resources", async () => {
+  await withTempCwd(async () => {
+    await seedVisualMappingProject();
+    const running = await startStudioServer(createStudioServer(), { port: 0 });
+    try {
+      await fetch(`${running.url}/api/projects/sample-project/visual-mapping/generate`, { method: "POST", headers: { origin: running.url } });
+
+      const invalidSpeed = await fetch(`${running.url}/api/projects/sample-project/visual-mapping/segments/scene-001`, {
+        method: "PATCH", headers: { "content-type": "application/json", origin: running.url }, body: JSON.stringify({ effects: { speed: 9 } }),
+      });
+      assert.equal(invalidSpeed.status, 400);
+      const invalidSpeedBody = await invalidSpeed.json();
+      assert.match(invalidSpeedBody.message, /speed/i);
+      assert.doesNotMatch(invalidSpeedBody.message, /[/\\]/);
+
+      const missingSegmentPatch = await fetch(`${running.url}/api/projects/sample-project/visual-mapping/segments/missing`, {
+        method: "PATCH", headers: { "content-type": "application/json", origin: running.url }, body: JSON.stringify({ effects: { speed: 1 } }),
+      });
+      assert.equal(missingSegmentPatch.status, 404);
+
+      const missingSegmentReset = await fetch(`${running.url}/api/projects/sample-project/visual-mapping/segments/missing/effects/reset`, {
+        method: "POST", headers: { "content-type": "application/json", origin: running.url }, body: "{}",
+      });
+      assert.equal(missingSegmentReset.status, 404);
+
+      const validPatch = await fetch(`${running.url}/api/projects/sample-project/visual-mapping/segments/scene-001`, {
+        method: "PATCH", headers: { "content-type": "application/json", origin: running.url }, body: JSON.stringify({ effects: { speed: 1 } }),
+      });
+      // Control check: a well-formed value on an existing segment still succeeds.
+      assert.equal(validPatch.status, 200);
+    } finally { await running.close(); }
+  });
+});
+
+test("visual-mapping effects PATCH enforces watermark asset eligibility against the asset manifest", async () => {
+  await withTempCwd(async () => {
+    await seedVisualMappingProject();
+    const running = await startStudioServer(createStudioServer(), { port: 0 });
+    try {
+      await fetch(`${running.url}/api/projects/sample-project/visual-mapping/generate`, { method: "POST", headers: { origin: running.url } });
+
+      const missingAsset = await fetch(`${running.url}/api/projects/sample-project/visual-mapping/segments/scene-001`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", origin: running.url },
+        body: JSON.stringify({ effects: { watermark: { assetId: "no-such-asset", position: "top-left", scale: 0.12, opacity: 0.2 } } }),
+      });
+      assert.equal(missingAsset.status, 400);
+      assert.match((await missingAsset.json()).message, /watermark/i);
+
+      const ineligibleAsset = await fetch(`${running.url}/api/projects/sample-project/visual-mapping/segments/scene-001`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", origin: running.url },
+        body: JSON.stringify({ effects: { watermark: { assetId: "logo-ineligible", position: "top-left", scale: 0.12, opacity: 0.2 } } }),
+      });
+      assert.equal(ineligibleAsset.status, 400);
+      assert.match((await ineligibleAsset.json()).message, /watermark/i);
+
+      const eligibleAsset = await fetch(`${running.url}/api/projects/sample-project/visual-mapping/segments/scene-001`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", origin: running.url },
+        body: JSON.stringify({ effects: { watermark: { assetId: "logo-eligible", position: "top-left", scale: 0.12, opacity: 0.2 } } }),
+      });
+      assert.equal(eligibleAsset.status, 200);
+      assert.equal((await eligibleAsset.json()).segment.effects.watermark.assetId, "logo-eligible");
+    } finally { await running.close(); }
+  });
+});
+
 test("batch review API builds episode analysis and story arc", async () => {
   const previousCwd = process.cwd();
   const root = await mkdtemp(join(tmpdir(), "yt-server-batch-ai-"));

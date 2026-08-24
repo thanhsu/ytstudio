@@ -97,6 +97,7 @@ import {
   saveVisualMapping,
   validateVisualMapping,
 } from "./visual-mapping.ts";
+import { DEFAULT_SEGMENT_EFFECTS, patchSegmentEffects, validateSegmentEffects } from "./visual-effects.ts";
 
 export type StudioServerOptions = {
   staticRoot?: string;
@@ -982,10 +983,56 @@ async function routeRequest(
     if (typeof body.sourceStartSeconds === "number") segment.sourceStartSeconds = Math.max(0, body.sourceStartSeconds);
     if (typeof body.sourceDurationSeconds === "number") segment.sourceDurationSeconds = Math.max(0, body.sourceDurationSeconds);
     if (typeof body.muteSourceAudio === "boolean") segment.muteSourceAudio = body.muteSourceAudio;
-    const asset = (await loadAssetManifest(projectId)).assets.find((candidate) => candidate.id === segment.assetId);
+    const manifest = await loadAssetManifest(projectId);
+    if (body.effects !== undefined) {
+      let patchedEffects;
+      try {
+        patchedEffects = patchSegmentEffects(segment.effects, body.effects);
+      } catch (error: unknown) {
+        sendError(response, 400, {
+          code: "visual-mapping-effects-invalid",
+          message: error instanceof Error ? error.message : "Segment effects patch is invalid.",
+        });
+        return;
+      }
+      if (patchedEffects.watermark) {
+        // Save/load boundaries normalize effects without checking asset eligibility;
+        // the API boundary is where a watermark's asset reference is validated against
+        // the current manifest so an ineligible or missing logo asset is rejected here.
+        const watermarkValidation = validateSegmentEffects(patchedEffects, manifest.assets);
+        if (!watermarkValidation.valid) {
+          sendError(response, 400, {
+            code: "visual-mapping-effects-invalid",
+            message: watermarkValidation.errors.join(" "),
+          });
+          return;
+        }
+      }
+      segment.effects = patchedEffects;
+    }
+    const asset = manifest.assets.find((candidate) => candidate.id === segment.assetId);
     segment.mediaType = asset?.mediaType;
     segment.fallback = segment.assetId ? undefined : "generated-background";
     segment.selectionMode = "manual";
+    mapping.status = "draft";
+    await saveVisualMapping(projectId, mapping);
+    sendJson(response, 200, { ok: true, segment, mapping });
+    return;
+  }
+
+  const mappingSegmentEffectsResetMatch = /^visual-mapping\/segments\/([a-zA-Z0-9-]+)\/effects\/reset$/.exec(rest);
+  if (method === "POST" && mappingSegmentEffectsResetMatch) {
+    const mapping = await loadVisualMapping(projectId);
+    if (!mapping) {
+      sendError(response, 404, { code: "visual-mapping-missing", message: "Generate visual mapping first." });
+      return;
+    }
+    const segment = mapping.segments.find((candidate) => candidate.id === mappingSegmentEffectsResetMatch[1]);
+    if (!segment) {
+      sendError(response, 404, { code: "visual-mapping-segment-missing", message: "Mapping segment not found." });
+      return;
+    }
+    segment.effects = { ...DEFAULT_SEGMENT_EFFECTS, color: { ...DEFAULT_SEGMENT_EFFECTS.color } };
     mapping.status = "draft";
     await saveVisualMapping(projectId, mapping);
     sendJson(response, 200, { ok: true, segment, mapping });
