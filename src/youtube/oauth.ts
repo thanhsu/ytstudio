@@ -94,7 +94,7 @@ async function requestToken(body: URLSearchParams, fetchImpl: OAuthFetch = fetch
   }
   if (!response.ok) {
     const mapped = normalizeYouTubeError({ response: { status: response.status, body: raw } });
-    throw new Error(`${mapped.code}: YouTube OAuth token request failed.`);
+    throw new Error(`${mapped.code}: ${mapped.message}`);
   }
   const accessToken = typeof payload.access_token === "string" ? payload.access_token : "";
   if (!accessToken) throw new Error("YouTube OAuth token response did not contain access_token.");

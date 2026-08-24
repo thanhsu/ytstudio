@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { JobKind } from "../jobs.ts";
 import { loadStudioConfig, type StudioConfig } from "../config.ts";
 import { readAiLog } from "./ai-log.ts";
-import { loadAnalytics, refreshChannelAnalytics } from "./analytics.ts";
+import { loadAnalytics } from "./analytics.ts";
 import { deleteCalendarEntry, loadCalendar, upsertCalendarEntry } from "./calendar.ts";
 import { loadPromptOverrides, savePromptOverride, PROMPT_CATALOG } from "./prompt-overrides.ts";
 import { loadChannelCosts, loadStoryCost } from "./cost.ts";
@@ -27,10 +27,8 @@ import {
 import { storyRelativePath } from "./paths.ts";
 import { editSectionText, listSections, readSection } from "./section-edit.ts";
 import { generateVoiceSample, listVoiceLabVoices } from "./voice-lab.ts";
-import { buildAuthUrl, rememberOAuthState } from "../youtube/oauth.ts";
-import { clearTokens, getFreshAccessToken, loadTokens } from "../youtube/token-store.ts";
+import { getFreshAccessToken, loadTokens } from "../youtube/token-store.ts";
 import { uploadVideo, setThumbnail } from "../youtube/upload.ts";
-import { fetchVideoStats } from "../youtube/analytics.ts";
 import { resolveProjectPath } from "../project-paths.ts";
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
@@ -169,59 +167,6 @@ export async function routeStoryFactory(options: {
       tools.sendJson(200, { ok: true, exported: await exportCompilation(channelId, compilationId) });
       return;
     }
-  }
-
-  if (rest === "youtube/status" && method === "GET") {
-    const tokens = await loadTokens(channelId);
-    const configured = Boolean(process.env[config.youtube.clientIdEnv]?.trim() && process.env[config.youtube.clientSecretEnv]?.trim());
-    tools.sendJson(200, {
-      ok: true,
-      connected: Boolean(tokens),
-      ...(tokens ? { scope: tokens.scope, connectedAt: tokens.connectedAt } : {}),
-      configured,
-    });
-    return;
-  }
-
-  if (rest === "youtube/connect" && method === "POST") {
-    const clientId = process.env[config.youtube.clientIdEnv]?.trim() ?? "";
-    if (!clientId || !process.env[config.youtube.clientSecretEnv]?.trim()) {
-      tools.sendError(409, { code: "youtube-not-configured", message: "Configure both YouTube client ID and client secret environment variables first." });
-      return;
-    }
-    const body = await tools.readBody();
-    const redirectBaseUrl = typeof body.redirectBaseUrl === "string" && body.redirectBaseUrl.trim()
-      ? body.redirectBaseUrl.trim().replace(/\/+$/, "")
-      : "http://127.0.0.1:3000";
-    const redirectUri = `${redirectBaseUrl}/api/youtube/oauth/callback`;
-    const state = `${channelId}.${randomUUID()}`;
-    rememberOAuthState(state, channelId);
-    tools.sendJson(200, {
-      ok: true,
-      authUrl: buildAuthUrl({ clientId, redirectUri, scopes: config.youtube.scopes, state }),
-    });
-    return;
-  }
-
-  if (rest === "youtube/disconnect" && method === "POST") {
-    await clearTokens(channelId);
-    tools.sendJson(200, { ok: true, connected: false });
-    return;
-  }
-
-  if (rest === "analytics/refresh" && method === "POST") {
-    const clientId = process.env[config.youtube.clientIdEnv]?.trim() ?? "";
-    const clientSecret = process.env[config.youtube.clientSecretEnv]?.trim() ?? "";
-    if (!clientId || !clientSecret || !await loadTokens(channelId)) {
-      tools.sendError(409, { code: "youtube-not-connected", message: "Connect YouTube for this channel before refreshing analytics." });
-      return;
-    }
-    const accessToken = await getFreshAccessToken(channelId, { clientId, clientSecret });
-    const result = await refreshChannelAnalytics(channelId, {
-      fetchStats: (videoIds) => fetchVideoStats({ accessToken, videoIds }),
-    });
-    tools.sendJson(200, { ok: true, ...result });
-    return;
   }
 
   if (rest === "calendar" && method === "GET") {
