@@ -139,7 +139,16 @@ export type StoryChannelConfig = {
   mode: StoryMode;
   ttsProfile: StoryTtsProfile;
   visualStyleProfile: VisualStyleProfile;
-  bgm: { ambienceTrackPath: string; volumeDb: number };
+  bgm: {
+    ambienceTrackPath: string;
+    volumeDb: number;
+    sfx: {
+      /** Stinger played at every scene boundary, timed against the scaled render. */
+      sceneChange: { path: string; volumeDb: number } | null;
+      /** Fixed cues at absolute story timestamps (e.g. an intro sting at 0). */
+      events: Array<{ path: string; atSeconds: number; volumeDb: number }>;
+    };
+  };
   /** Applied at TTS-normalization time only; the stored script is never altered. */
   pronunciations: Array<{ original: string; pronunciation: string }>;
   budget: StoryBudget;
@@ -349,6 +358,10 @@ export type ImageManifest = {
 export type BgmPlan = {
   version: 1;
   tracks: Array<{ path: string; startSeconds: number; volumeDb: number; loop: boolean }>;
+  /** Scene-change stinger config, copied verbatim from the channel; the render stage expands it into `events`. */
+  sceneChangeSfx: { path: string; volumeDb: number } | null;
+  /** Concrete SFX cues to mix in, at absolute (already-scaled) story seconds. */
+  events: Array<{ path: string; atSeconds: number; volumeDb: number }>;
 };
 
 export type ThumbnailArtifact = {

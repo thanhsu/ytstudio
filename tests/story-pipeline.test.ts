@@ -13,7 +13,12 @@ import { readAiLog } from "../src/story-factory/ai-log.ts";
 import { loadStoryCost } from "../src/story-factory/cost.ts";
 import { minhashSignature } from "../src/story-factory/fingerprint.ts";
 import { upsertStoryFingerprints } from "../src/story-factory/fingerprint-index.ts";
-import { runSingleStage, runStoryPipeline, type StoryPipelineDeps } from "../src/story-factory/pipeline.ts";
+import {
+  expandSceneChangeEvents,
+  runSingleStage,
+  runStoryPipeline,
+  type StoryPipelineDeps,
+} from "../src/story-factory/pipeline.ts";
 import type { ChatFn } from "../src/story-factory/stage-llm.ts";
 import { resolveProjectPath } from "../src/project-paths.ts";
 import {
@@ -227,6 +232,23 @@ async function withStory<T>(
     await rm(root, { recursive: true, force: true });
   }
 }
+
+test("expandSceneChangeEvents places a stinger at every interior scene start, scaled, skipping the first at 0", () => {
+  const events = expandSceneChangeEvents([0, 70, 145, 210], 2, { path: "C:\\sfx\\stinger.wav", volumeDb: -14 });
+  assert.deepEqual(events, [
+    { path: "C:\\sfx\\stinger.wav", atSeconds: 140, volumeDb: -14 },
+    { path: "C:\\sfx\\stinger.wav", atSeconds: 290, volumeDb: -14 },
+    { path: "C:\\sfx\\stinger.wav", atSeconds: 420, volumeDb: -14 },
+  ]);
+});
+
+test("expandSceneChangeEvents with no sceneChangeSfx configured produces nothing", () => {
+  assert.deepEqual(expandSceneChangeEvents([0, 70, 145], 1, null), []);
+});
+
+test("expandSceneChangeEvents with a single scene has no interior boundary to stinger", () => {
+  assert.deepEqual(expandSceneChangeEvents([0], 1, { path: "C:\\sfx\\stinger.wav", volumeDb: -14 }), []);
+});
 
 test("an assisted run generates everything, auto-passes QA gates, and stops before export", async () => {
   await withStory(async ({ deps, chat, tts, images }) => {

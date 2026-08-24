@@ -168,24 +168,59 @@ export type StoryMuxInput = {
 export function buildStoryMuxArgs(input: StoryMuxInput): string[] {
   const args = ["-y", "-i", input.timelinePath, "-i", input.narrationPath];
   const track = input.bgm.tracks[0];
+  const events = input.bgm.events ?? [];
+
+  if (events.length === 0) {
+    // No SFX events: kept byte-identical to Phase 1, bed or no bed.
+    if (track) {
+      if (track.loop) {
+        args.push("-stream_loop", "-1");
+      }
+      args.push("-i", track.path);
+      args.push(
+        "-filter_complex",
+        // Narration always dominant: the bed is pulled down before the mix, and
+        // duration=first ends the mix with the narration, not the loop.
+        `[2:a]volume=${track.volumeDb}dB[bed];[1:a][bed]amix=inputs=2:duration=first:dropout_transition=3[a]`,
+        "-map",
+        "0:v",
+        "-map",
+        "[a]",
+      );
+    } else {
+      args.push("-map", "0:v", "-map", "1:a");
+    }
+    return finishStoryMuxArgs(args, input);
+  }
+
+  // At least one SFX event: narration [+ bed] + one input per event, mixed
+  // together with normalize=0 so ffmpeg does not quietly rescale narration
+  // level just because more inputs joined the mix.
+  const mixLabels: string[] = ["[1:a]"];
+  const filterParts: string[] = [];
+  let inputIndex = 2;
   if (track) {
     if (track.loop) {
       args.push("-stream_loop", "-1");
     }
     args.push("-i", track.path);
-    args.push(
-      "-filter_complex",
-      // Narration always dominant: the bed is pulled down before the mix, and
-      // duration=first ends the mix with the narration, not the loop.
-      `[2:a]volume=${track.volumeDb}dB[bed];[1:a][bed]amix=inputs=2:duration=first:dropout_transition=3[a]`,
-      "-map",
-      "0:v",
-      "-map",
-      "[a]",
-    );
-  } else {
-    args.push("-map", "0:v", "-map", "1:a");
+    filterParts.push(`[${inputIndex}:a]volume=${track.volumeDb}dB[bed]`);
+    mixLabels.push("[bed]");
+    inputIndex += 1;
   }
+  events.forEach((event, index) => {
+    args.push("-i", event.path);
+    const delayMs = Math.round(event.atSeconds * 1000);
+    filterParts.push(`[${inputIndex}:a]adelay=${delayMs}:all=1,volume=${event.volumeDb}dB[s${index}]`);
+    mixLabels.push(`[s${index}]`);
+    inputIndex += 1;
+  });
+  filterParts.push(`${mixLabels.join("")}amix=inputs=${mixLabels.length}:duration=first:normalize=0[a]`);
+  args.push("-filter_complex", filterParts.join(";"), "-map", "0:v", "-map", "[a]");
+  return finishStoryMuxArgs(args, input);
+}
+
+function finishStoryMuxArgs(args: string[], input: StoryMuxInput): string[] {
   return [
     ...args,
     "-t",

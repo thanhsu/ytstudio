@@ -3,7 +3,7 @@ import test from "node:test";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { buildBgmPlan } from "../src/story-factory/bgm.ts";
+import { buildBgmPlan, normalizeBgmPlan } from "../src/story-factory/bgm.ts";
 import {
   buildStoryMuxArgs,
   buildStorySegmentArgs,
@@ -100,7 +100,12 @@ test("the mux keeps narration dominant over a looped, attenuated ambience bed", 
   const args = buildStoryMuxArgs({
     timelinePath: "timeline.mp4",
     narrationPath: "narration.m4a",
-    bgm: { version: 1, tracks: [{ path: "C:\\media\\rain.mp3", startSeconds: 0, volumeDb: -22, loop: true }] },
+    bgm: {
+      version: 1,
+      tracks: [{ path: "C:\\media\\rain.mp3", startSeconds: 0, volumeDb: -22, loop: true }],
+      sceneChangeSfx: null,
+      events: [],
+    },
     outputPath: "story.mp4",
     durationSeconds: 1500,
   });
@@ -115,13 +120,101 @@ test("without bgm the narration maps directly — intentional silence, no silent
   const args = buildStoryMuxArgs({
     timelinePath: "timeline.mp4",
     narrationPath: "narration.m4a",
-    bgm: { version: 1, tracks: [] },
+    bgm: { version: 1, tracks: [], sceneChangeSfx: null, events: [] },
     outputPath: "story.mp4",
     durationSeconds: 60,
   });
   const joined = args.join(" ");
   assert.match(joined, /-map 0:v -map 1:a/);
   assert.ok(!joined.includes("amix"));
+});
+
+test("a bed with no SFX events keeps Phase 1's mux byte-identical (no normalize=0)", () => {
+  const args = buildStoryMuxArgs({
+    timelinePath: "timeline.mp4",
+    narrationPath: "narration.m4a",
+    bgm: {
+      version: 1,
+      tracks: [{ path: "C:\\media\\rain.mp3", startSeconds: 0, volumeDb: -22, loop: true }],
+      sceneChangeSfx: null,
+      events: [],
+    },
+    outputPath: "story.mp4",
+    durationSeconds: 1500,
+  });
+  const joined = args.join(" ");
+  assert.match(joined, /\[2:a\]volume=-22dB\[bed\];\[1:a\]\[bed\]amix=inputs=2:duration=first:dropout_transition=3\[a\]/);
+  assert.ok(!joined.includes("normalize=0"));
+});
+
+test("SFX events with a bed each add an input, an adelay+volume filter, and normalize=0", () => {
+  const args = buildStoryMuxArgs({
+    timelinePath: "timeline.mp4",
+    narrationPath: "narration.m4a",
+    bgm: {
+      version: 1,
+      tracks: [{ path: "C:\\media\\rain.mp3", startSeconds: 0, volumeDb: -22, loop: true }],
+      sceneChangeSfx: null,
+      events: [
+        { path: "C:\\sfx\\intro.wav", atSeconds: 0, volumeDb: -6 },
+        { path: "C:\\sfx\\creak.wav", atSeconds: 12.3456, volumeDb: -10 },
+      ],
+    },
+    outputPath: "story.mp4",
+    durationSeconds: 1500,
+  });
+  const joined = args.join(" ");
+  // Inputs in order: 0 timeline, 1 narration, 2 bed, 3+4 the two events.
+  assert.match(joined, /-i C:\\sfx\\intro\.wav -i C:\\sfx\\creak\.wav/);
+  assert.match(joined, /\[3:a\]adelay=0:all=1,volume=-6dB\[s0\]/);
+  assert.match(joined, /\[4:a\]adelay=12346:all=1,volume=-10dB\[s1\]/);
+  assert.match(joined, /\[1:a\]\[bed\]\[s0\]\[s1\]amix=inputs=4:duration=first:normalize=0\[a\]/);
+  assert.match(joined, /-map 0:v -map \[a\]/);
+});
+
+test("SFX events without a bed mix narration directly with the event inputs", () => {
+  const args = buildStoryMuxArgs({
+    timelinePath: "timeline.mp4",
+    narrationPath: "narration.m4a",
+    bgm: {
+      version: 1,
+      tracks: [],
+      sceneChangeSfx: null,
+      events: [{ path: "C:\\sfx\\door.wav", atSeconds: 5, volumeDb: -8 }],
+    },
+    outputPath: "story.mp4",
+    durationSeconds: 60,
+  });
+  const joined = args.join(" ");
+  assert.match(joined, /-i C:\\sfx\\door\.wav/);
+  assert.match(joined, /\[2:a\]adelay=5000:all=1,volume=-8dB\[s0\]/);
+  assert.match(joined, /\[1:a\]\[s0\]amix=inputs=2:duration=first:normalize=0\[a\]/);
+});
+
+test("buildBgmPlan copies fixed events and sceneChangeSfx verbatim, clamping out-of-range events", async () => {
+  const channel = normalizeStoryChannel("es-horror", {
+    bgm: {
+      ambienceTrackPath: "",
+      sfx: {
+        sceneChange: { path: "C:\\sfx\\stinger.wav", volumeDb: -14 },
+        events: [
+          { path: "C:\\sfx\\intro.wav", atSeconds: 0, volumeDb: -6 },
+          { path: "C:\\sfx\\too-late.wav", atSeconds: 600, volumeDb: -6 },
+          { path: "C:\\sfx\\negative.wav", atSeconds: -1, volumeDb: -6 },
+        ],
+      },
+    },
+  });
+  const plan = await buildBgmPlan(channel, 300);
+  assert.deepEqual(plan.sceneChangeSfx, { path: "C:\\sfx\\stinger.wav", volumeDb: -14 });
+  assert.deepEqual(plan.events, [{ path: "C:\\sfx\\intro.wav", atSeconds: 0, volumeDb: -6 }]);
+  // Not expanded here — the render stage does that with the scaled scene starts.
+  assert.deepEqual(plan.tracks, []);
+});
+
+test("normalizeBgmPlan defaults sceneChangeSfx/events for old bgm.json files", () => {
+  const plan = normalizeBgmPlan({ version: 1, tracks: [] });
+  assert.deepEqual(plan, { version: 1, tracks: [], sceneChangeSfx: null, events: [] });
 });
 
 test("scenes map to segments in order, with missing images left visibly absent", () => {
@@ -153,7 +246,7 @@ await appendFile(${JSON.stringify(recordPath)}, JSON.stringify(process.argv.slic
         { durationSeconds: 5 },
       ],
       narrationPath: join(root, "narration.m4a"),
-      bgm: { version: 1, tracks: [] },
+      bgm: { version: 1, tracks: [], sceneChangeSfx: null, events: [] },
       outputPath,
       durationSeconds: 10,
       ffmpegPath: process.execPath,
@@ -187,7 +280,7 @@ await appendFile(${JSON.stringify(recordPath)}, JSON.stringify(process.argv.slic
     await renderStoryVideo({
       segments: [{ durationSeconds: 10 }, { durationSeconds: 8 }],
       narrationPath: join(root, "narration.m4a"),
-      bgm: { version: 1, tracks: [] },
+      bgm: { version: 1, tracks: [], sceneChangeSfx: null, events: [] },
       outputPath,
       durationSeconds: 18,
       ffmpegPath: process.execPath,
@@ -223,7 +316,7 @@ await appendFile(${JSON.stringify(recordPath)}, JSON.stringify(process.argv.slic
     await renderStoryVideo({
       segments: [{ durationSeconds: 10 }],
       narrationPath: join(root, "narration.m4a"),
-      bgm: { version: 1, tracks: [] },
+      bgm: { version: 1, tracks: [], sceneChangeSfx: null, events: [] },
       outputPath,
       durationSeconds: 10,
       ffmpegPath: process.execPath,
@@ -271,7 +364,7 @@ test("mkdir is not required beforehand — the render creates its own output dir
     await renderStoryVideo({
       segments: [{ durationSeconds: 2 }],
       narrationPath: join(root, "n.m4a"),
-      bgm: { version: 1, tracks: [] },
+      bgm: { version: 1, tracks: [], sceneChangeSfx: null, events: [] },
       outputPath: join(root, "deep", "nested", "story.mp4"),
       durationSeconds: 2,
       ffmpegPath: process.execPath,
