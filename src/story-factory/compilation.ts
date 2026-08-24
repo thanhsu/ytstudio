@@ -8,6 +8,10 @@ import { loadStory, readStageArtifact } from "./story-project.ts";
 import { storyPath, validateStoryId } from "./paths.ts";
 import type { ExportManifest, StoryMetadataArtifact, StageRun, StoryApproval } from "./types.ts";
 import type { RenderStageArtifact } from "./export.ts";
+import { runLlmCall, stageEndpoint, type ChatFn } from "./stage-llm.ts";
+import { parseMetadata } from "./stages/metadata.ts";
+import { buildMetadataMessages } from "./prompts/metadata.ts";
+import { buildThumbnailOverlayArgs } from "./thumbnail.ts";
 
 export type CompilationProject = {
   version: 1;
@@ -22,6 +26,7 @@ export type CompilationProject = {
 };
 
 export type CompilationRenderArtifact = RenderStageArtifact & { chapters: Array<{ title: string; startSeconds: number }> };
+export type CompilationMetadataDeps = { config: Parameters<typeof stageEndpoint>[0]; chat?: ChatFn; confirmedPaidRequest: boolean; signal?: AbortSignal };
 
 export function compilationPath(channelId: string, compilationId: string, ...segments: string[]): string {
   return resolveProjectPath(channelId, "compilations", validateStoryId(compilationId), ...segments);
@@ -86,6 +91,42 @@ export async function renderCompilation(channelId: string, compilationId: string
   await deps.update?.(100, "Compilation rendered");
 }
 
+export async function runCompilationMetadata(channelId: string, compilationId: string, deps: CompilationMetadataDeps): Promise<StoryMetadataArtifact> {
+  const project = await loadCompilation(channelId, compilationId);
+  const members = await Promise.all(project.storyIds.map(async (storyId) => {
+    const story = await loadStory(channelId, storyId);
+    const idea = await readStageArtifact<{ logline?: string; premise?: string }>(channelId, storyId, "idea");
+    return { title: story.title, logline: idea?.logline ?? story.title, premise: idea?.premise ?? "" };
+  }));
+  const result = await runLlmCall({
+    channelId,
+    storyId: compilationId,
+    stage: "metadata",
+    promptName: "story.compilation-metadata",
+    promptVersion: "comp-meta-v1",
+    endpoint: stageEndpoint(deps.config, "metadata"),
+    messages: buildMetadataMessages({ language: "en", locale: "en-US", niche: "compilation", subNiche: "", tone: "cinematic", promptStyle: "honest", targetDurationMinutes: 60 }, {
+      logline: members.map((member, index) => `Chapter ${index + 1}: ${member.title} — ${member.logline}`).join("\n"),
+      hookText: "A curated compilation of original audio stories.",
+      synopsis: members.map((member) => member.premise || member.title).join("\n"),
+    }),
+    parse: parseMetadata,
+    pricing: deps.config.storyFactory.llmPricing,
+    confirmedPaidRequest: deps.confirmedPaidRequest,
+    chat: deps.chat,
+    signal: deps.signal,
+  });
+  const render = JSON.parse(await readFile(compilationPath(channelId, compilationId, "render.json"), "utf8")) as CompilationRenderArtifact;
+  const chapterLines = render.chapters.map((chapter) => `${formatTimestamp(chapter.startSeconds)} ${chapter.title}`).join("\n");
+  const artifact: StoryMetadataArtifact = { version: 1, ...result.value, description: `${result.value.description}\n\nChapters:\n${chapterLines}`, language: "en", provenance: result.provenance };
+  await writeJson(compilationPath(channelId, compilationId, "metadata.json"), artifact);
+  const projectUpdated = await loadCompilation(channelId, compilationId);
+  projectUpdated.stages.metadata = { status: "done", attemptCount: (projectUpdated.stages.metadata?.attemptCount ?? 0) + 1, costUsd: result.costUsd, finishedAt: new Date().toISOString() };
+  projectUpdated.updatedAt = new Date().toISOString();
+  await writeJson(compilationPath(channelId, compilationId, "compilation.json"), projectUpdated);
+  return artifact;
+}
+
 export async function exportCompilation(channelId: string, compilationId: string): Promise<ExportManifest> {
   const project = await loadCompilation(channelId, compilationId);
   if (!project.approvals.final || project.approvals.final.artifactHash !== await artifactHash(channelId, compilationId, "render.json")) throw new Error("Compilation export requires final approval.");
@@ -95,11 +136,38 @@ export async function exportCompilation(channelId: string, compilationId: string
   await mkdir(dir, { recursive: true });
   const manifest: ExportManifest = { version: 1, videoPath: `compilations/${compilationId}/workspace/export/story.mp4`, thumbnailPath: `compilations/${compilationId}/workspace/export/thumbnail.png`, titlePath: `compilations/${compilationId}/workspace/export/title.txt`, descriptionPath: `compilations/${compilationId}/workspace/export/description.txt`, tagsPath: `compilations/${compilationId}/workspace/export/tags.txt`, srtPath: `compilations/${compilationId}/workspace/export/captions.srt`, packagedAt: new Date().toISOString() };
   await copyFile(resolveProjectPath(channelId, render.videoPath), resolveProjectPath(channelId, manifest.videoPath));
+  await createCompilationThumbnail(channelId, project, metadata, dir);
+  await copyFile(join(dir, "thumbnail.png"), resolveProjectPath(channelId, manifest.thumbnailPath));
   await writeFile(resolveProjectPath(channelId, manifest.titlePath), `${metadata.chosenTitle}\n`, "utf8");
   await writeFile(resolveProjectPath(channelId, manifest.descriptionPath), `${metadata.description}\n`, "utf8");
   await writeFile(resolveProjectPath(channelId, manifest.tagsPath), `${metadata.tags.join(", ")}\n`, "utf8");
   await writeJson(compilationPath(channelId, compilationId, "export.json"), manifest);
   return manifest;
+}
+
+async function createCompilationThumbnail(channelId: string, project: CompilationProject, metadata: StoryMetadataArtifact, exportDir: string): Promise<void> {
+  const first = await readStageArtifact<{ backgroundPath?: string; finalPath?: string }>(channelId, project.storyIds[0], "thumbnail");
+  const source = first?.backgroundPath ?? first?.finalPath;
+  if (!source) throw new Error("Compilation export needs a completed thumbnail on the first member story.");
+  const thumbnailDir = compilationPath(channelId, project.id, "workspace", "thumbnail");
+  await mkdir(thumbnailDir, { recursive: true });
+  const background = join(thumbnailDir, "background.png");
+  await copyFile(resolveProjectPath(channelId, source), background);
+  const output = join(thumbnailDir, "thumbnail.png");
+  if (first?.backgroundPath) {
+    await runProcess("ffmpeg", buildThumbnailOverlayArgs({ backgroundPath: background, overlayText: metadata.thumbnailText, outputPath: output }));
+  } else {
+    // Older stories may only have the final thumbnail artifact. Reuse it as-is
+    // instead of forcing a paid regeneration or requiring ffmpeg during export.
+    await copyFile(background, output);
+  }
+  await copyFile(join(thumbnailDir, "thumbnail.png"), join(exportDir, "thumbnail.png"));
+  await writeJson(compilationPath(channelId, project.id, "thumbnail.json"), { version: 1, backgroundPath: `compilations/${project.id}/workspace/thumbnail/background.png`, overlayText: metadata.thumbnailText, finalPath: `compilations/${project.id}/workspace/thumbnail/thumbnail.png` });
+}
+
+function formatTimestamp(seconds: number): string {
+  const total = Math.max(0, Math.floor(seconds));
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 }
 
 async function readOptionalMetadata(channelId: string, id: string): Promise<StoryMetadataArtifact> {

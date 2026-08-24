@@ -21,6 +21,9 @@ test("compilation validates 4-6 rendered stories, renders chapters, and exports 
       await writeFile(join(dir, "render.json"), JSON.stringify({ version: 1, videoPath: `stories/${id}/workspace/render/story.mp4`, durationSeconds: index * 10, width: 1920, height: 1080 }), "utf8");
       await mkdir(join(dir, "workspace", "render"), { recursive: true });
       await writeFile(join(dir, "workspace", "render", "story.mp4"), `video-${index}`, "utf8");
+      await mkdir(join(dir, "workspace", "thumbnail"), { recursive: true });
+      await writeFile(join(dir, "workspace", "thumbnail", "thumbnail.png"), `thumbnail-${index}`, "utf8");
+      await writeFile(join(dir, "thumbnail.json"), JSON.stringify({ version: 1, finalPath: `stories/${id}/workspace/thumbnail/thumbnail.png` }), "utf8");
     }
     await assert.rejects(() => createCompilation("es-horror", { id: "comp-001", title: "Too short", storyIds: ["story-001", "story-002", "story-003"] }));
     const compilation = await createCompilation("es-horror", { id: "comp-001", title: "Four nights", storyIds: ["story-001", "story-002", "story-003", "story-004"] });

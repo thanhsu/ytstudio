@@ -34,7 +34,7 @@ import { fetchVideoStats } from "../youtube/analytics.ts";
 import { resolveProjectPath } from "../project-paths.ts";
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { createCompilation, exportCompilation, listCompilations, loadCompilation, renderCompilation } from "./compilation.ts";
+import { createCompilation, exportCompilation, listCompilations, loadCompilation, renderCompilation, runCompilationMetadata } from "./compilation.ts";
 import { isStoryStageId, type StoryApprovalStage, type StoryProject, type StoryStageId } from "./types.ts";
 
 /**
@@ -147,6 +147,12 @@ export async function routeStoryFactory(options: {
     }
     if (compilationRest === "render/run" && method === "POST") {
       await tools.startChannelJob("compilation-render", ({ signal, update }) => renderCompilation(channelId, compilationId, { config, signal, update }), `comp::${compilationId}`);
+      return;
+    }
+    if (compilationRest === "metadata/run" && method === "POST") {
+      const body = await tools.readBody();
+      await runCompilationMetadata(channelId, compilationId, { config, confirmedPaidRequest: body.confirmedPaidRequest === true });
+      tools.sendJson(200, { ok: true, compilation: await loadCompilation(channelId, compilationId) });
       return;
     }
     if (compilationRest === "approve/final" && method === "POST") {

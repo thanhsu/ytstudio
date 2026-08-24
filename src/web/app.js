@@ -2003,6 +2003,8 @@ function renderConfig() {
       field("FFprobe path", "render.ffprobePath", config.render.ffprobePath),
       field("Shorts width", "render.shortsWidth", String(config.render.shortsWidth), "number"),
       field("Shorts height", "render.shortsHeight", String(config.render.shortsHeight), "number"),
+      selectField("Story transition", "render.storyTransition", config.render.storyTransition, [["fade", "Fade"], ["xfade", "Crossfade"]]),
+      field("Transition seconds", "render.storyTransitionSeconds", String(config.render.storyTransitionSeconds), "number", "", "any"),
     ]),
     configSection("Story Factory", config.storyFactory.enabled ? "done" : "neutral", config.storyFactory.enabled ? "Enabled" : "Disabled", [
       checkboxField("Story factory enabled", "storyFactory.enabled", config.storyFactory.enabled),
@@ -2010,16 +2012,24 @@ function renderConfig() {
       field("Planner base URL", "storyFactory.models.planner.baseUrl", config.storyFactory.models.planner.baseUrl),
       field("Planner API key env", "storyFactory.models.planner.apiKeyEnv", config.storyFactory.models.planner.apiKeyEnv),
       checkboxField("Planner is paid", "storyFactory.models.planner.paid", config.storyFactory.models.planner.paid),
+      selectField("Planner provider", "storyFactory.models.planner.provider", config.storyFactory.models.planner.provider, [["openai-compatible", "OpenAI-compatible"], ["anthropic", "Anthropic"], ["gemini", "Gemini"]]),
       field("Writer model", "storyFactory.models.writer.model", config.storyFactory.models.writer.model),
       field("Writer base URL", "storyFactory.models.writer.baseUrl", config.storyFactory.models.writer.baseUrl),
       field("Writer API key env", "storyFactory.models.writer.apiKeyEnv", config.storyFactory.models.writer.apiKeyEnv),
       checkboxField("Writer is paid", "storyFactory.models.writer.paid", config.storyFactory.models.writer.paid),
+      selectField("Writer provider", "storyFactory.models.writer.provider", config.storyFactory.models.writer.provider, [["openai-compatible", "OpenAI-compatible"], ["anthropic", "Anthropic"], ["gemini", "Gemini"]]),
       field("QA model", "storyFactory.models.qa.model", config.storyFactory.models.qa.model),
       field("QA base URL", "storyFactory.models.qa.baseUrl", config.storyFactory.models.qa.baseUrl),
       field("QA API key env", "storyFactory.models.qa.apiKeyEnv", config.storyFactory.models.qa.apiKeyEnv),
       checkboxField("QA is paid", "storyFactory.models.qa.paid", config.storyFactory.models.qa.paid),
+      selectField("QA provider", "storyFactory.models.qa.provider", config.storyFactory.models.qa.provider, [["openai-compatible", "OpenAI-compatible"], ["anthropic", "Anthropic"], ["gemini", "Gemini"]]),
       field("Duplicate similarity threshold", "storyFactory.duplicateSimilarityThreshold", String(config.storyFactory.duplicateSimilarityThreshold), "number", "", "any"),
       field("Default max cost per story (USD)", "storyFactory.defaultMaxCostPerStoryUsd", String(config.storyFactory.defaultMaxCostPerStoryUsd), "number", "", "any"),
+    ]),
+    configSection("YouTube", config.youtube.clientIdEnv && config.youtube.clientSecretEnv ? "done" : "warn", config.youtube.clientIdEnv && config.youtube.clientSecretEnv ? "Configured" : "Needs environment variables", [
+      field("Client ID environment variable", "youtube.clientIdEnv", config.youtube.clientIdEnv),
+      field("Client secret environment variable", "youtube.clientSecretEnv", config.youtube.clientSecretEnv),
+      textareaField("OAuth scopes", "youtube.scopes", (config.youtube.scopes ?? []).join("\n")),
     ]),
     configSection("Google TTS", config.tts.google.apiKeyEnv ? "done" : "warn", "Story narration", [
       field("Google TTS API key env", "tts.google.apiKeyEnv", config.tts.google.apiKeyEnv),
@@ -3492,7 +3502,11 @@ async function renderStoryChannelSettings(channelId) {
         imageIntervalSeconds: Number(values.imageIntervalSeconds),
         aspectRatio: "16:9",
       },
-      bgm: { ambienceTrackPath: values.ambienceTrackPath, volumeDb: Number(values.volumeDb) },
+      bgm: {
+        ambienceTrackPath: values.ambienceTrackPath,
+        volumeDb: Number(values.volumeDb),
+        sfx: { sceneChange: values.sceneChangeSfxPath ? { path: values.sceneChangeSfxPath, volumeDb: Number(values.sceneChangeSfxVolumeDb) } : null },
+      },
       pronunciations: lines(values.pronunciations)
         .map((line) => {
           const [original, pronunciation] = line.split("=");
@@ -3526,6 +3540,8 @@ async function renderStoryChannelSettings(channelId) {
     field("Seconds per image", "imageIntervalSeconds", String(channel.visualStyleProfile?.imageIntervalSeconds ?? 75), "number"),
     field("Ambience track path (licensed)", "ambienceTrackPath", channel.bgm?.ambienceTrackPath ?? ""),
     field("Ambience volume dB", "volumeDb", String(channel.bgm?.volumeDb ?? -22), "number", "", "any"),
+    field("Scene-change SFX path (licensed)", "sceneChangeSfxPath", channel.bgm?.sfx?.sceneChange?.path ?? ""),
+    field("Scene-change SFX volume dB", "sceneChangeSfxVolumeDb", String(channel.bgm?.sfx?.sceneChange?.volumeDb ?? -12), "number", "", "any"),
     textareaField("Pronunciations (original=pronunciation per line)", "pronunciations", (channel.pronunciations ?? []).map((rule) => `${rule.original}=${rule.pronunciation}`).join("\n")),
     field("Max cost per story (USD)", "maxCostPerStoryUsd", String(channel.budget?.maxCostPerStoryUsd ?? 5), "number", "", "any"),
     actionButton("Save Channel Settings", null, "submit", "primary"),
