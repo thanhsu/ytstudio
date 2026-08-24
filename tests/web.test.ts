@@ -510,3 +510,11 @@ test("subtitles stage exposes voiceover import and render controls", async () =>
   assert.match(script, /Render Voiceover Track/);
   assert.match(script, /"voiceover-render"/);
 });
+
+test("the sources screen shows live download progress and offers audio-only downloads", async () => {
+  const script = await readWebScripts();
+  assert.match(script, /job\.progress/);
+  assert.match(script, /Audio only/);
+  assert.match(script, /audioOnly/);
+  assert.match(script, /sources\.downloadDir/);
+});

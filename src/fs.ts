@@ -24,6 +24,16 @@ export function sourcesRoot(): string {
   return configured ? resolve(configured) : resolve(process.cwd(), DEFAULT_SOURCES_DIR);
 }
 
+/**
+ * Bridges the operator's configured download folder into the env var the
+ * store already honors. An explicit YT_STUDIO_SOURCES_DIR always wins, so
+ * tests and power users keep their override.
+ */
+export function applySourcesDownloadDir(downloadDir: string): void {
+  if (!downloadDir.trim() || process.env.YT_STUDIO_SOURCES_DIR) return;
+  process.env.YT_STUDIO_SOURCES_DIR = resolve(downloadDir.trim());
+}
+
 export function projectDir(projectId: string): string {
   return join(projectsRoot(), projectId);
 }

@@ -219,3 +219,53 @@ test("a configured ffmpeg is handed to yt-dlp so split formats can merge", async
     assert.equal(with_[with_.indexOf("--ffmpeg-location") + 1], "C:/tools/ffmpeg.exe");
   });
 });
+
+test("progress streams live, once per whole percent, and ends by naming the saved file", async () => {
+  await withSourcesRoot(async () => {
+    await saveDeclaredCandidate("youtube-abc");
+    const base = await downloadOptions();
+    const noisy = await makeFakeExecutable(`
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+const argv = process.argv.slice(2);
+const dir = dirname(argv[argv.indexOf("-o") + 1]);
+await mkdir(dir, { recursive: true });
+console.log("[download]  25.0% of 1.00MiB at 2MiB/s");
+console.log("[download]  25.7% of 1.00MiB at 2MiB/s");
+console.log("[download]  50.0% of 1.00MiB at 2MiB/s");
+console.log("[download] 100% of 1.00MiB");
+await writeFile(join(dir, "video.mp4"), "video", "utf8");
+`);
+    const updates: Array<{ progress: number; message: string }> = [];
+
+    await downloadCandidate("youtube-abc", {
+      ...base,
+      ytDlpArgs: [noisy],
+      update: async (progress, message) => void updates.push({ progress, message }),
+    });
+
+    assert.deepEqual(updates.map((entry) => entry.progress), [25, 50, 100, 100]);
+    assert.match(updates.at(-1)?.message ?? "", /video\.mp4$/);
+    assert.equal(updates.at(-1)?.message.includes("Saved "), true);
+  });
+});
+
+test("an audio-only download asks for the audio format and records the choice", async () => {
+  await withSourcesRoot(async () => {
+    await saveDeclaredCandidate("youtube-abc");
+    const seen: string[] = [];
+
+    const candidate = await downloadCandidate("youtube-abc", {
+      ...(await downloadOptions()),
+      format: "bv*+ba/b",
+      audioOnly: true,
+      onCommand: (_path, args) => seen.push(...args),
+    });
+
+    assert.equal(seen[seen.indexOf("-f") + 1], "ba/b");
+    assert.equal(candidate.media?.audioOnly, true);
+
+    const full = await downloadCandidate("youtube-abc", await downloadOptions());
+    assert.notEqual(full.media?.audioOnly, true);
+  });
+});

@@ -5,6 +5,8 @@ export type ProcessOptions = {
   input?: string | Buffer;
   signal?: AbortSignal;
   maxOutputBytes?: number;
+  /** Called with each complete stdout line while the process is still running. */
+  onStdoutLine?: (line: string) => void;
 };
 
 export type ProcessResult = {
@@ -51,11 +53,18 @@ export async function runProcess(command: string, args: string[], options: Proce
     let stderrBytes = 0;
     let settled = false;
 
+    let pendingLine = "";
     child.stdout.on("data", (chunk: Buffer) => {
       if (stdoutBytes < maxOutputBytes) {
         stdoutChunks.push(chunk.subarray(0, Math.max(0, maxOutputBytes - stdoutBytes)));
       }
       stdoutBytes += chunk.length;
+      if (options.onStdoutLine) {
+        pendingLine += chunk.toString("utf8");
+        const lines = pendingLine.split(/\r?\n/);
+        pendingLine = lines.pop() ?? "";
+        for (const line of lines) options.onStdoutLine(line);
+      }
     });
 
     child.stderr.on("data", (chunk: Buffer) => {
@@ -77,6 +86,7 @@ export async function runProcess(command: string, args: string[], options: Proce
         return;
       }
       settled = true;
+      if (options.onStdoutLine && pendingLine) options.onStdoutLine(pendingLine);
 
       const result: ProcessResult = {
         command,

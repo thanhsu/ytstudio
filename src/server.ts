@@ -51,7 +51,7 @@ import { saveTokens, storedTokensFromResponse } from "./youtube/token-store.ts";
 import { compositeOwner, ProjectJobManager, type JobKind, type JobOperation } from "./jobs.ts";
 import { extractAudioForAsr, importMedia } from "./media-ingest.ts";
 import { importVoiceoverSegments, renderVoiceoverTrack } from "./voiceover.ts";
-import { projectsRoot, sourcesRoot } from "./fs.ts";
+import { applySourcesDownloadDir, projectsRoot, sourcesRoot } from "./fs.ts";
 import { loadProjectState } from "./project-state.ts";
 import { resolveProjectPath, validateProjectId } from "./project-paths.ts";
 import {
@@ -209,6 +209,9 @@ export async function startStudioServer(
 ): Promise<RunningStudioServer> {
   const host = options.host ?? "127.0.0.1";
   const port = options.port ?? 3000;
+
+  const bootConfig = await loadStudioConfig().catch(() => null);
+  applySourcesDownloadDir(bootConfig?.sources.downloadDir ?? "");
 
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
@@ -1436,8 +1439,10 @@ async function routeSourceRequest(
         sendSourceError(response, error);
         return;
       }
+      const body = await readJsonBody(request);
+      const audioOnly = body.audioOnly === true;
       await startSourceJob(response, sourceId, "download", ({ signal, update }) =>
-        downloadCandidate(sourceId, { signal, update }));
+        downloadCandidate(sourceId, { signal, update, audioOnly }));
       return;
     }
 

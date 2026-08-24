@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { loadStudioConfig, saveStudioConfig } from "../src/config.ts";
 
@@ -292,6 +292,7 @@ test("the sources block defaults, and rejects entries that are not usable string
     assert.equal(defaults.sources.ytDlpPath, "");
     assert.deepEqual(defaults.sources.ytDlpArgs, []);
     assert.equal(defaults.sources.format, "bv*+ba/b");
+    assert.equal(defaults.sources.downloadDir, "");
     assert.deepEqual(defaults.sources.subtitleLanguages, ["en"]);
     assert.equal(defaults.sources.defaultSearchPlatform, "youtube");
     assert.equal(defaults.sources.searchLimit, 8);
@@ -306,6 +307,7 @@ test("the sources block defaults, and rejects entries that are not usable string
       JSON.stringify({
         sources: {
           ytDlpPath: "tools/yt-dlp.exe",
+          downloadDir: "D:/media/downloads",
           subtitleLanguages: ["vi", "", 7],
           ytDlpArgs: "nope",
           defaultSearchPlatform: "douyin",
@@ -317,6 +319,7 @@ test("the sources block defaults, and rejects entries that are not usable string
     );
     const loaded = await loadStudioConfig();
     assert.equal(loaded.sources.ytDlpPath, "tools/yt-dlp.exe");
+    assert.equal(loaded.sources.downloadDir, "D:/media/downloads");
     assert.deepEqual(loaded.sources.subtitleLanguages, ["vi"]);
     assert.deepEqual(loaded.sources.ytDlpArgs, []);
     assert.equal(loaded.sources.defaultSearchPlatform, "douyin");
@@ -329,5 +332,24 @@ test("the sources block defaults, and rejects entries that are not usable string
   } finally {
     process.chdir(previousCwd);
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a configured download folder becomes the sources root unless the env already chose one", async () => {
+  const { applySourcesDownloadDir, sourcesRoot } = await import("../src/fs.ts");
+  const previous = process.env.YT_STUDIO_SOURCES_DIR;
+  try {
+    delete process.env.YT_STUDIO_SOURCES_DIR;
+    applySourcesDownloadDir("");
+    assert.equal(process.env.YT_STUDIO_SOURCES_DIR, undefined);
+
+    applySourcesDownloadDir("D:/media/downloads");
+    assert.equal(sourcesRoot(), resolve("D:/media/downloads"));
+
+    applySourcesDownloadDir("D:/other");
+    assert.equal(sourcesRoot(), resolve("D:/media/downloads"), "an explicit env choice is never overridden");
+  } finally {
+    if (previous === undefined) delete process.env.YT_STUDIO_SOURCES_DIR;
+    else process.env.YT_STUDIO_SOURCES_DIR = previous;
   }
 });

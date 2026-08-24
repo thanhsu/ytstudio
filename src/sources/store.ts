@@ -37,6 +37,8 @@ export type SourceCandidate = {
   score?: SourceScore;
   media?: {
     videoRelativePath: string;
+    /** The download deliberately fetched only the audio track. */
+    audioOnly?: boolean;
     subtitleRelativePath?: string;
     subtitleLanguage?: string;
     downloadedAt: string;

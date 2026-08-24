@@ -152,6 +152,8 @@ export type StudioConfig = {
     // HTTP would turn a same-origin POST into arbitrary command execution.
     ytDlpArgs: string[];
     format: string;
+    /** Root folder for downloaded sources; empty keeps ./sources (or the env override). */
+    downloadDir: string;
     subtitleLanguages: string[];
     defaultSearchPlatform: "youtube" | "bilibili" | "tiktok" | "douyin" | "facebook";
     searchLimit: number;
@@ -267,6 +269,7 @@ export const DEFAULT_STUDIO_CONFIG: StudioConfig = {
     ytDlpPath: "",
     ytDlpArgs: [],
     format: "bv*+ba/b",
+    downloadDir: "",
     subtitleLanguages: ["en"],
     defaultSearchPlatform: "youtube",
     searchLimit: 8,
@@ -454,6 +457,7 @@ export function normalizeStudioConfig(value: unknown): StudioConfig {
       ytDlpPath: stringValue(candidate.sources?.ytDlpPath, ""),
       ytDlpArgs: stringArrayValue(candidate.sources?.ytDlpArgs, DEFAULT_STUDIO_CONFIG.sources.ytDlpArgs),
       format: stringValue(candidate.sources?.format, DEFAULT_STUDIO_CONFIG.sources.format),
+      downloadDir: stringValue(candidate.sources?.downloadDir, DEFAULT_STUDIO_CONFIG.sources.downloadDir),
       subtitleLanguages: stringArrayValue(
         candidate.sources?.subtitleLanguages,
         DEFAULT_STUDIO_CONFIG.sources.subtitleLanguages,

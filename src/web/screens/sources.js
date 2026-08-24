@@ -365,13 +365,17 @@ function renderSourceRow(candidate) {
   const actions = document.createElement("div");
   actions.className = "source-actions";
   const download = actionButton("Download", () => startSourceJob(candidate.id, "download"), "button", "primary");
+  const audioDownload = actionButton("Audio only", () => startSourceJob(candidate.id, "download", { audioOnly: true }), "button");
   if (candidate.rights === "unknown") {
-    download.disabled = true;
-    download.title = "Declare rights before downloading.";
+    for (const button of [download, audioDownload]) {
+      button.disabled = true;
+      button.title = "Declare rights before downloading.";
+    }
   }
   actions.append(
     actionButton("Score", () => startSourceJob(candidate.id, "score")),
     download,
+    audioDownload,
     actionButton("Delete", () => deleteSource(candidate.id, candidate.title)),
   );
 
@@ -419,12 +423,12 @@ function renderSourceScore(score) {
   return panel;
 }
 
-async function startSourceJob(id, action) {
+async function startSourceJob(id, action, body = {}) {
   try {
     const response = await fetch(`/api/sources/${encodeURIComponent(id)}/${action}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: "{}",
+      body: JSON.stringify(body),
     });
     const data = await response.json();
     if (!response.ok) {
@@ -442,7 +446,8 @@ function followSourceJob(id) {
   const stream = new EventSource(`/api/sources/${encodeURIComponent(id)}/events`);
   stream.addEventListener("job", async (event) => {
     const job = JSON.parse(event.data);
-    setStatus(`${job.kind} ${job.status}: ${job.message}`);
+    const percent = job.status === "running" && Number.isFinite(job.progress) ? ` ${job.progress}%` : "";
+    setStatus(`${job.kind} ${job.status}${percent}: ${job.message}`);
     if (job.status !== "running") {
       stream.close();
       await renderSources();

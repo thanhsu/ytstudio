@@ -184,6 +184,7 @@ export function renderConfig(container = configHost) {
       field("yt-dlp path", "sources.ytDlpPath", config.sources.ytDlpPath),
       textareaField("yt-dlp args", "sources.ytDlpArgs", (config.sources.ytDlpArgs ?? []).join("\n")),
       field("Download format", "sources.format", config.sources.format),
+      field("Download folder (empty = ./sources)", "sources.downloadDir", config.sources.downloadDir ?? ""),
       textareaField("Subtitle languages", "sources.subtitleLanguages", (config.sources.subtitleLanguages ?? []).join("\n")),
       selectField("Default source search", "sources.defaultSearchPlatform", config.sources.defaultSearchPlatform, sourcePlatformOptions()),
       field("Source search limit", "sources.searchLimit", String(config.sources.searchLimit), "number"),

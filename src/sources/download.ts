@@ -11,6 +11,8 @@ export type DownloadOptions = {
   /** Configuration only — never a request body, where it would be command execution. */
   ytDlpArgs?: string[];
   format?: string;
+  /** Fetch only the audio track; overrides `format`. */
+  audioOnly?: boolean;
   subtitleLanguages?: string[];
   /** Absent means subtitles are not converted, not that the download fails. */
   ffmpegPath?: string;
@@ -67,7 +69,7 @@ export async function downloadCandidate(id: string, options: DownloadOptions): P
 
   const config = await loadStudioConfig().catch(() => null);
   const executable = requireYtDlpPath(options.ytDlpPath ?? config?.sources.ytDlpPath ?? "");
-  const format = options.format ?? config?.sources.format ?? "bv*+ba/b";
+  const format = options.audioOnly ? "ba/b" : options.format ?? config?.sources.format ?? "bv*+ba/b";
   const languages = options.subtitleLanguages ?? config?.sources.subtitleLanguages ?? ["en"];
   const ffmpegPath = options.ffmpegPath ?? config?.render.ffmpegPath ?? "";
   const directory = resolveSourcePath(safeId);
@@ -93,13 +95,23 @@ export async function downloadCandidate(id: string, options: DownloadOptions): P
   options.onCommand?.(executable, args);
 
   try {
-    const result = await runProcess(executable, args, { signal: options.signal });
-    if (options.update) {
-      for (const line of result.stdout.split(/\r?\n/)) {
-        const progress = parseDownloadProgress(line);
-        if (progress !== null) await options.update(progress, `Downloading ${candidate.title}`);
-      }
-    }
+    // Progress must reach the job while yt-dlp is still running, throttled to
+    // whole percents so a chatty download does not thrash the job store.
+    let lastPercent = -1;
+    await runProcess(executable, args, {
+      signal: options.signal,
+      onStdoutLine: options.update
+        ? (line) => {
+            const progress = parseDownloadProgress(line);
+            if (progress === null) return;
+            const percent = Math.floor(progress);
+            if (percent === lastPercent) return;
+            lastPercent = percent;
+            // Fire-and-forget: a failed progress write must not kill the download.
+            void options.update?.(percent, `Downloading ${candidate.title}`)?.catch(() => {});
+          }
+        : undefined,
+    });
   } catch (error: unknown) {
     await removeQuietly(() => clearDownloadedFiles(safeId));
     // An abort is a cancellation, not a broken source: the remedies differ, and a
@@ -123,12 +135,14 @@ export async function downloadCandidate(id: string, options: DownloadOptions): P
   }
 
   const subtitle = selectSubtitle(files, languages);
+  await options.update?.(100, `Saved ${resolveSourcePath(safeId, video)}`);
   return patchCandidate(safeId, (current) => ({
     ...current,
     status: "downloaded",
     error: undefined,
     media: {
       videoRelativePath: video,
+      ...(options.audioOnly ? { audioOnly: true } : {}),
       ...(subtitle ? { subtitleRelativePath: subtitle.path, subtitleLanguage: subtitle.language } : {}),
       downloadedAt: new Date().toISOString(),
     },
