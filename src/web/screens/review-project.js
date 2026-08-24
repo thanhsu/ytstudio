@@ -383,7 +383,50 @@ function renderSubtitles(snapshot) {
     uploadField("Import Source SRT", "srt-file", ".srt", () => uploadProjectFile("srt-file", "subtitles/source")),
     sectionTitle("Current source subtitle"),
     artifactList(snapshot.state?.artifacts ?? {}, ["source-subtitles"]),
+    sectionTitle("Voiceover"),
+    paragraph(
+      "Import per-cue audio segments (0001.wav, 0002.wav, ...) from a local folder, then render one audio track that follows the SRT timeline.",
+    ),
+    voiceoverImportForm(),
+    actionButton(
+      "Render Voiceover Track",
+      () => postProjectAction("voiceover/render", {}, "Voiceover render started."),
+      "button",
+      "primary",
+    ),
+    artifactList(snapshot.state?.artifacts ?? {}, ["voiceover-segments", "voiceover-track"]),
   );
+}
+
+// The segment folder holds thousands of files, so the server reads it straight
+// from the local disk by path instead of a browser upload.
+function voiceoverImportForm() {
+  const form = document.createElement("form");
+  form.className = "form-grid";
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    importVoiceover(form).catch((error) => setStatus(error.message));
+  });
+  form.replaceChildren(
+    field("Audio folder path", "folderPath", "", "text", "D:\\path\\to\\audio_usa"),
+    field("Timing SRT path (optional, defaults to the source subtitle)", "srtPath", "", "text", "D:\\path\\to\\timing.srt"),
+    actionButton("Import Voiceover Segments", null, "submit", "primary"),
+  );
+  return form;
+}
+
+async function importVoiceover(form) {
+  const data = await runProjectRoute("voiceover/import", formValues(form));
+  const summary = data.result;
+  const parts = [`Imported ${summary.segmentCount}/${summary.cueCount} segments.`];
+  if (summary.missingCues.length > 0) {
+    parts.push(`Missing cues: ${summary.missingCues.length}.`);
+  }
+  if (summary.extraFiles.length > 0) {
+    parts.push(`Unmatched files: ${summary.extraFiles.length}.`);
+  }
+  setStatus(parts.join(" "));
+  await refreshProjectView();
 }
 
 function renderTranslation(snapshot) {

@@ -49,6 +49,7 @@ import { consumeOAuthState, exchangeCode } from "./youtube/oauth.ts";
 import { saveTokens, storedTokensFromResponse } from "./youtube/token-store.ts";
 import { compositeOwner, ProjectJobManager, type JobKind, type JobOperation } from "./jobs.ts";
 import { extractAudioForAsr, importMedia } from "./media-ingest.ts";
+import { importVoiceoverSegments, renderVoiceoverTrack } from "./voiceover.ts";
 import { projectsRoot, sourcesRoot } from "./fs.ts";
 import { loadProjectState } from "./project-state.ts";
 import { resolveProjectPath, validateProjectId } from "./project-paths.ts";
@@ -1159,6 +1160,29 @@ async function routeRequest(
           body.provider === "faster-whisper" || body.provider === "whisper-cpp" ? body.provider : undefined,
         audioRelativePath: typeof body.audio === "string" ? body.audio : undefined,
       }));
+    return;
+  }
+
+  if (method === "POST" && rest === "voiceover/import") {
+    const body = await readJsonBody(request);
+    if (typeof body.folderPath !== "string" || !body.folderPath.trim()) {
+      sendError(response, 400, { code: "folder-path-required", message: "Provide folderPath to the audio segments." });
+      return;
+    }
+    const result = await importVoiceoverSegments({
+      projectId,
+      folderPath: body.folderPath,
+      srtPath: typeof body.srtPath === "string" && body.srtPath.trim() ? body.srtPath : undefined,
+    });
+    sendJson(response, 200, { ok: true, result });
+    return;
+  }
+
+  if (method === "POST" && rest === "voiceover/render") {
+    const config = await loadStudioConfig();
+    const ffmpegPath = config.render.ffmpegPath || process.env.FFMPEG_PATH || "ffmpeg";
+    await startProjectJob(response, projectId, "voiceover-render", ({ update }) =>
+      renderVoiceoverTrack({ projectId, ffmpegPath, onProgress: update }));
     return;
   }
 

@@ -502,3 +502,11 @@ test("every select option list is pair-shaped, because selectField destructures 
     assert.doesNotMatch(list, /\{\s*value:/, `${name} must hold [value, label] pairs, not objects`);
   }
 });
+
+test("subtitles stage exposes voiceover import and render controls", async () => {
+  const script = await readWebScripts();
+  assert.match(script, /voiceover\/import/);
+  assert.match(script, /voiceover\/render/);
+  assert.match(script, /Render Voiceover Track/);
+  assert.match(script, /"voiceover-render"/);
+});
