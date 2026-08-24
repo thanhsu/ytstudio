@@ -121,6 +121,7 @@ export async function refreshAppData() {
   appState.workflowTemplates = await workflowsResponse.json();
   appState.config = (await configResponse.json()).config;
   appState.projects = data.projects ?? [];
+  appState.projectBriefs = data.briefs ?? [];
   appState.reviewProjectsBySeries = Object.fromEntries(
     await Promise.all(
       appState.series.map(async (series) => {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Readable } from "node:stream";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -175,6 +175,57 @@ test("updateAssetMetadata rejects an unsupported rights status instead of silent
         }),
       /rights status/i,
     );
+  } finally {
+    process.chdir(previousCwd);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("oversized upload succeeds with a size warning naming the recommended limit", async () => {
+  const previousCwd = process.cwd();
+  const root = await mkdtemp(join(tmpdir(), "yt-review-studio-"));
+
+  try {
+    process.chdir(root);
+    const asset = await saveAsset(
+      "sample-project",
+      {
+        filename: "big.png",
+        stream: Readable.from([Buffer.alloc(1024 * 1024), Buffer.alloc(1024 * 1024)]),
+        mediaType: "image",
+        rightsConfirmed: true,
+        usagePurpose: "Big background.",
+      },
+      { warnUploadBytes: 1024 * 1024 },
+    );
+
+    assert.equal(asset.sizeBytes, 2 * 1024 * 1024);
+    assert.match(asset.sizeWarning ?? "", /1 MB/);
+    assert.equal((await readdir(join(root, "projects", "sample-project", "assets", "images"))).length, 1);
+    const manifest = await loadAssetManifest("sample-project");
+    assert.match(manifest.assets[0].sizeWarning ?? "", /1 MB/);
+    assert.equal(validateAssetManifest(manifest).valid, true);
+  } finally {
+    process.chdir(previousCwd);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("upload within the recommended size carries no warning", async () => {
+  const previousCwd = process.cwd();
+  const root = await mkdtemp(join(tmpdir(), "yt-review-studio-"));
+
+  try {
+    process.chdir(root);
+    const asset = await saveAsset("sample-project", {
+      filename: "small.png",
+      stream: Readable.from(["tiny"]),
+      mediaType: "image",
+      rightsConfirmed: true,
+      usagePurpose: "Small background.",
+    });
+
+    assert.equal(asset.sizeWarning, undefined);
   } finally {
     process.chdir(previousCwd);
     await rm(root, { recursive: true, force: true });

@@ -1,5 +1,5 @@
 import { createWriteStream } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { basename, extname } from "node:path";
 import { randomUUID } from "node:crypto";
 import { Readable, Transform } from "node:stream";
@@ -30,6 +30,7 @@ export type AssetRecord = {
   rightsConfirmed: boolean;
   usagePurpose: string;
   createdAt: string;
+  sizeWarning?: string;
   analysisStatus?: "pending" | "running" | "ready" | "limited" | "failed";
   analysisError?: string;
   durationSeconds?: number;
@@ -68,9 +69,13 @@ export type AssetValidation = {
 const MANIFEST_PATH = "assets/asset-manifest.json";
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
 const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".webm"]);
-const MAX_UPLOAD_BYTES = 250 * 1024 * 1024;
+export const RECOMMENDED_UPLOAD_BYTES = 250 * 1024 * 1024;
 
-export async function saveAsset(projectId: string, upload: AssetUpload): Promise<AssetRecord> {
+export async function saveAsset(
+  projectId: string,
+  upload: AssetUpload,
+  options: { warnUploadBytes?: number } = {},
+): Promise<AssetRecord> {
   const extension = validateAssetFilename(upload.filename, upload.mediaType);
   const id = randomUUID();
   const directory = upload.mediaType === "image" ? "assets/images" : "assets/clips";
@@ -79,8 +84,19 @@ export async function saveAsset(projectId: string, upload: AssetUpload): Promise
   const outputPath = resolveProjectPath(projectId, relativePath);
 
   await mkdir(resolveProjectPath(projectId, directory), { recursive: true });
-  const counter = new ByteCounter(MAX_UPLOAD_BYTES);
-  await pipeline(upload.stream, counter, createWriteStream(outputPath));
+  const counter = new ByteCounter();
+  try {
+    await pipeline(upload.stream, counter, createWriteStream(outputPath));
+  } catch (error: unknown) {
+    await rm(outputPath, { force: true });
+    throw error;
+  }
+
+  const warnBytes = options.warnUploadBytes ?? RECOMMENDED_UPLOAD_BYTES;
+  const sizeWarning =
+    counter.sizeBytes > warnBytes
+      ? `Asset is ${Math.round(counter.sizeBytes / (1024 * 1024))} MB, above the recommended ${Math.round(warnBytes / (1024 * 1024))} MB.`
+      : undefined;
 
   const record: AssetRecord = {
     id,
@@ -93,6 +109,7 @@ export async function saveAsset(projectId: string, upload: AssetUpload): Promise
     usagePurpose: upload.usagePurpose?.trim() ?? "",
     createdAt: new Date().toISOString(),
     analysisStatus: "pending",
+    ...(sizeWarning ? { sizeWarning } : {}),
   };
 
   const manifest = await loadAssetManifest(projectId);
@@ -212,19 +229,9 @@ function isNotFound(error: unknown): boolean {
 
 class ByteCounter extends Transform {
   sizeBytes = 0;
-  private readonly maxBytes: number;
-
-  constructor(maxBytes: number) {
-    super();
-    this.maxBytes = maxBytes;
-  }
 
   _transform(chunk: Buffer, _encoding: BufferEncoding, callback: (error?: Error | null, data?: Buffer) => void): void {
     this.sizeBytes += chunk.length;
-    if (this.sizeBytes > this.maxBytes) {
-      callback(new Error("Asset upload exceeds maximum size."));
-      return;
-    }
     callback(null, chunk);
   }
 }

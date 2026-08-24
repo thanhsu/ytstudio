@@ -24,7 +24,7 @@ import {
 } from "./audio-story.ts";
 import { generateSourceSrtFromAsr } from "./asr.ts";
 import { generateThumbnailBrief, loadBrandKit, saveBrandAsset, saveBrandKit, type BrandAssetType } from "./brand-kit.ts";
-import { createBrief } from "./brief.ts";
+import { createBrief, updateBrief } from "./brief.ts";
 import { loadStudioConfig, saveStudioConfig } from "./config.ts";
 import { saveCopyrightCheck } from "./copyright.ts";
 import { saveEditingPlan } from "./editing-plan.ts";
@@ -66,10 +66,12 @@ import { generateScript } from "./script.ts";
 import { saveStoryArc } from "./story-arc.ts";
 import {
   createSeriesProject,
+  deleteSeriesProject,
   generateEpisodePlan,
   listSeriesProjects,
   loadSeriesProject,
   updateSeriesEpisode,
+  updateSeriesProject,
   type EpisodeStatus,
 } from "./series.ts";
 import {
@@ -380,6 +382,53 @@ async function routeRequest(
     }
     if (method === "GET" && rest === "") {
       sendJson(response, 200, { series: await loadSeriesProject(seriesId) });
+      return;
+    }
+    if (method === "PATCH" && rest === "") {
+      const body = await readJsonBody(request);
+      try {
+        const series = await updateSeriesProject(seriesId, {
+          title: optionalString(body.title),
+          show: optionalString(body.show),
+          originalTitle: optionalString(body.originalTitle),
+          audience: optionalString(body.audience),
+          language: optionalString(body.language),
+          brandNotes: optionalString(body.brandNotes),
+          titleStyle: optionalString(body.titleStyle),
+          thumbnailStyle: optionalString(body.thumbnailStyle),
+          scheduleNotes: optionalString(body.scheduleNotes),
+        });
+        sendJson(response, 200, { ok: true, series });
+      } catch (error: unknown) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          sendError(response, 404, { code: "series-not-found", message: `Series not found: ${seriesId}` });
+        } else {
+          sendError(response, 400, { code: "series-invalid", message: error instanceof Error ? error.message : String(error) });
+        }
+      }
+      return;
+    }
+    if (method === "DELETE" && rest === "") {
+      let series;
+      try {
+        series = await loadSeriesProject(seriesId);
+      } catch (error: unknown) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          sendError(response, 404, { code: "series-not-found", message: `Series not found: ${seriesId}` });
+          return;
+        }
+        throw error;
+      }
+      const busyOwner = [seriesId, ...series.episodes.map((episode) => episode.episodeProjectId)]
+        .find((owner) => jobs.isBusy(owner));
+      if (busyOwner) {
+        sendError(response, 409, {
+          code: "series-job-running",
+          message: `Wait for the running job on ${busyOwner} to finish before deleting this series.`,
+        });
+        return;
+      }
+      sendJson(response, 200, { ok: true, ...(await deleteSeriesProject(seriesId)) });
       return;
     }
     if (method === "POST" && rest === "episode-plan") {
@@ -749,6 +798,61 @@ async function routeRequest(
 
   if (method === "GET" && rest === "") {
     await sendProject(response, projectId);
+    return;
+  }
+
+  if (method === "PATCH" && rest === "") {
+    const body = await readJsonBody(request);
+    try {
+      const brief = await updateBrief(projectId, {
+        topic: optionalString(body.topic),
+        show: optionalString(body.show),
+        format: body.format === "shorts" || body.format === "longform" ? body.format : undefined,
+        audience: optionalString(body.audience),
+        language: optionalString(body.language),
+        notes: optionalString(body.notes),
+      });
+      sendJson(response, 200, { ok: true, brief });
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        sendError(response, 404, { code: "project-not-found", message: `Project not found: ${projectId}` });
+      } else {
+        sendError(response, 400, { code: "brief-invalid", message: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    return;
+  }
+
+  if (method === "DELETE" && rest === "") {
+    let isSeries = false;
+    try {
+      await stat(resolveProjectPath(projectId, "series.json"));
+      isSeries = true;
+    } catch {
+      // A review project has no series.json.
+    }
+    if (isSeries) {
+      sendError(response, 409, {
+        code: "project-is-series",
+        message: "This id is a series. Delete it through the series route so its episodes are handled.",
+      });
+      return;
+    }
+    try {
+      await stat(resolveProjectPath(projectId, "brief.json"));
+    } catch {
+      sendError(response, 404, { code: "project-not-found", message: `Project not found: ${projectId}` });
+      return;
+    }
+    if (jobs.isBusy(projectId)) {
+      sendError(response, 409, {
+        code: "project-job-running",
+        message: "Wait for the running job to finish or cancel it before deleting this project.",
+      });
+      return;
+    }
+    await rm(resolveProjectPath(projectId), { recursive: true, force: true });
+    sendJson(response, 200, { ok: true, id: projectId });
     return;
   }
 
@@ -1411,6 +1515,17 @@ function sendSourceError(response: ServerResponse, error: unknown): void {
 async function sendProjects(response: ServerResponse): Promise<void> {
   const root = projectsRoot();
   let ids: string[] = [];
+  const briefs: Array<{
+    id: string;
+    topic: string;
+    show: string;
+    format: string;
+    workflowType: string;
+    audience: string;
+    language: string;
+    notes: string;
+    createdAt: string;
+  }> = [];
   try {
     const candidates = (await readdir(root, { withFileTypes: true }))
       .filter((entry) => entry.isDirectory())
@@ -1425,8 +1540,19 @@ async function sendProjects(response: ServerResponse): Promise<void> {
       });
     for (const id of candidates) {
       try {
-        await readFile(join(root, id, "brief.json"), "utf8");
+        const brief = JSON.parse(await readFile(join(root, id, "brief.json"), "utf8")) as Record<string, unknown>;
         ids.push(id);
+        briefs.push({
+          id,
+          topic: typeof brief.topic === "string" ? brief.topic : "",
+          show: typeof brief.show === "string" ? brief.show : "",
+          format: typeof brief.format === "string" ? brief.format : "",
+          workflowType: typeof brief.workflowType === "string" ? brief.workflowType : "",
+          audience: typeof brief.audience === "string" ? brief.audience : "",
+          language: typeof brief.language === "string" ? brief.language : "",
+          notes: typeof brief.notes === "string" ? brief.notes : "",
+          createdAt: typeof brief.createdAt === "string" ? brief.createdAt : "",
+        });
       } catch {
         // Series roots and incomplete folders are managed by other endpoints.
       }
@@ -1434,7 +1560,7 @@ async function sendProjects(response: ServerResponse): Promise<void> {
   } catch {
     ids = [];
   }
-  sendJson(response, 200, { projects: ids });
+  sendJson(response, 200, { projects: ids, briefs });
 }
 
 async function sendProject(response: ServerResponse, projectId: string): Promise<void> {
