@@ -7,6 +7,7 @@ import { normalizePublishInput, normalizePublishAt } from "../src/youtube/publis
 import { startYouTubePublish } from "../src/youtube/publish.ts";
 import { loadYouTubeStore, saveYouTubeStore } from "../src/youtube/youtube-store.ts";
 import { ProjectJobManager } from "../src/jobs.ts";
+import { createStory, loadStory, readStageArtifact } from "../src/story-factory/story-project.ts";
 
 test("scheduled publish normalizes an ISO timestamp to UTC and private visibility", () => {
   const input = normalizePublishInput({
@@ -53,4 +54,22 @@ test("publishing persists one completed job and duplicate prevention reuses its 
     if (previous === undefined) delete process.env.YT_STUDIO_PROJECTS_DIR; else process.env.YT_STUDIO_PROJECTS_DIR = previous;
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("story publishing keeps the legacy publish artifact and stage as a compatibility side effect", async () => {
+  const root = await mkdtemp(join(tmpdir(), "yt-publish-compat-"));
+  const previous = process.env.YT_STUDIO_PROJECTS_DIR;
+  process.env.YT_STUDIO_PROJECTS_DIR = root;
+  const manager = new ProjectJobManager();
+  try {
+    await createStory({ channelId: "channel-1", language: "en", locale: "en-US", niche: "reviews", subNiches: ["anime"], defaultTargetDurationMinutes: 10, mode: "story", ttsProfile: {}, visualStyleProfile: {}, budget: {} } as never, { id: "story-1", title: "Title" });
+    await saveYouTubeStore("channel-1", { version: 1, remoteChannelId: "UCchannel", links: [], jobs: [], analytics: {} });
+    const readiness = async () => ({ ready: true, matrix: { script: "current", media: "current", final: "current", export: "current" } as const, exportPath: "workspace/video.mp4", thumbnailPath: null, metadata: { title: "Title", description: "", tags: [] as string[] } });
+    const job = await startYouTubePublish("channel-1", { sourceKind: "story", sourceId: "story-1" }, { jobManager: manager, readiness, accessToken: async () => "token", upload: async () => ({ videoId: "video-compat" }) });
+    await manager.waitForIdle("channel-1::youtube-publish::story::story-1");
+    const artifact = await readStageArtifact<{ videoId: string }>("channel-1", "story-1", "publish");
+    assert.equal(artifact?.videoId, "video-compat");
+    assert.equal((await loadStory("channel-1", "story-1")).stages.publish?.status, "done");
+    assert.equal((await loadYouTubeStore("channel-1")).jobs.find((candidate) => candidate.id === job.id)?.status, "completed");
+  } finally { if (previous === undefined) delete process.env.YT_STUDIO_PROJECTS_DIR; else process.env.YT_STUDIO_PROJECTS_DIR = previous; await rm(root, { recursive: true, force: true }); }
 });

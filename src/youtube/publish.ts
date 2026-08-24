@@ -7,6 +7,8 @@ import { uploadVideo, setThumbnail } from "./upload.ts";
 import { loadYouTubeStore, upsertPublishJob, upsertVideoLink, type YouTubePublishJob, type YouTubeVideoLink, type PrivacyStatus, type SourceKind } from "./youtube-store.ts";
 import { evaluatePublishReadiness, type PublishReadiness } from "./publish-readiness.ts";
 import { loadCalendar } from "../story-factory/calendar.ts";
+import { saveStageRun, writeStageArtifact } from "../story-factory/story-project.ts";
+import type { PublishArtifact } from "../story-factory/types.ts";
 
 export type YouTubePublishInput = {
   sourceKind: SourceKind;
@@ -95,6 +97,15 @@ export async function startYouTubePublish(seriesId: string, rawInput: YouTubePub
         const link: YouTubeVideoLink = { version: 1, videoId, channelId: remoteChannelId, sourceKind: input.sourceKind, sourceId: input.sourceId, exportPath: input.exportPath ?? ready.exportPath ?? "", title: metadata.title, privacyStatus: publishAt ? "private" : input.privacyStatus, publishAt: publishAt ?? null, createdAt: existing?.createdAt ?? now, updatedAt: (deps.now ?? (() => new Date()))().toISOString() };
         await upsertVideoLink(seriesId, link);
         job.status = "completed"; job.progress = 100; job.updatedAt = (deps.now ?? (() => new Date()))().toISOString(); await upsertPublishJob(seriesId, job);
+        if (input.sourceKind === "story") await writeStoryPublishCompatibility(seriesId, input.sourceId, {
+          version: 1,
+          videoId,
+          uploadedAt: job.updatedAt,
+          privacyStatus: publishAt ? "private" : input.privacyStatus,
+          ...(publishAt ? { publishAt } : {}),
+          thumbnailSet: Boolean(thumbnailPath),
+          title: metadata.title,
+        });
       } catch (error: unknown) {
         if (signal.aborted) { job.status = "cancelled"; job.updatedAt = new Date().toISOString(); await upsertPublishJob(seriesId, job); return; }
         const mapped = mapPublishError(error); job.status = "failed"; job.error = { code: mapped.code, message: mapped.message, retryable: mapped.retryable }; job.updatedAt = new Date().toISOString(); await upsertPublishJob(seriesId, job);
@@ -122,6 +133,15 @@ const defaultManager = new ProjectJobManager();
 const activeManagerJobs = new Map<string, { manager: ProjectJobManager; owner: string; id: string }>();
 async function defaultAccessToken(seriesId: string): Promise<string> { const config = await loadStudioConfig(); const clientId = process.env[config.youtube.clientIdEnv]?.trim() ?? ""; const clientSecret = process.env[config.youtube.clientSecretEnv]?.trim() ?? ""; return getFreshAccessToken(seriesId, { clientId, clientSecret }); }
 async function calendarFallback(seriesId: string, input: YouTubePublishInput, load: typeof loadCalendar): Promise<string | undefined> { const calendar = await load(seriesId); const entry = calendar.entries.find((candidate) => candidate.storyId === input.sourceId && candidate.plannedPublishAt && Date.parse(candidate.plannedPublishAt) > Date.now()); return normalizePublishAt(entry?.plannedPublishAt ?? undefined); }
+async function writeStoryPublishCompatibility(seriesId: string, storyId: string, artifact: PublishArtifact): Promise<void> {
+  try {
+    await writeStageArtifact(seriesId, storyId, "publish", artifact);
+    await saveStageRun(seriesId, storyId, "publish", { status: "done", finishedAt: artifact.uploadedAt });
+  } catch {
+    // The YouTube store/job is authoritative. A legacy Story Factory artifact
+    // must never turn an already completed remote publish into a false failure.
+  }
+}
 function mapPublishError(error: unknown): YouTubePublishError { const message = error instanceof Error ? error.message : String(error); if (message.includes("youtube-quota-exceeded") || message.includes("quotaExceeded") || message.includes("uploadLimitExceeded")) return new YouTubePublishError("youtube-quota-exceeded", "YouTube quota has been exceeded.", false, "wait-for-quota-reset"); if (message.startsWith("youtube-")) return new YouTubePublishError(message.split(":", 1)[0], message.slice(message.indexOf(":") + 1).trim() || message, !message.includes("not-found") && !message.includes("invalid") && !message.includes("quota")); return new YouTubePublishError("youtube-upload-failed", "YouTube upload failed.", true, "retry-publish"); }
 function isSource(value: unknown): value is SourceKind { return value === "story" || value === "review" || value === "compilation"; }
 function isPrivacy(value: unknown): value is PrivacyStatus { return value === "public" || value === "private" || value === "unlisted"; }
