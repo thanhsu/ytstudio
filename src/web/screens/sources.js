@@ -7,7 +7,7 @@ import {
 import { setStatus } from "../lib/shell.js";
 import { stageTitle, seriesPanel, stageContent } from "../lib/refs.js";
 import { appState } from "../lib/state.js";
-import { setActiveStageButton } from "../app.js";
+import { setActiveStageButton } from "./review-project.js";
 
 export function sourcePlatformOptions() {
   return [

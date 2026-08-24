@@ -6,7 +6,7 @@ import {
 import { setStatus } from "../lib/shell.js";
 import { stageTitle, stageContent } from "../lib/refs.js";
 import { appState } from "../lib/state.js";
-import { setActiveStageButton, targetOptions } from "../app.js";
+import { setActiveStageButton, targetOptions } from "./review-project.js";
 import { sourcePlatformOptions } from "./sources.js";
 
 // A hand-edited studio.config.json can hold a provider the studio will refuse to
