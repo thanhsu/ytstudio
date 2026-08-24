@@ -1,13 +1,12 @@
 import type { IncomingMessage } from "node:http";
 import { randomUUID } from "node:crypto";
 import { loadStudioConfig } from "../config.ts";
-import { refreshChannelAnalytics } from "../story-factory/analytics.ts";
 import { buildAuthUrl, rememberOAuthState } from "./oauth.ts";
 import { clearTokens, getFreshAccessToken, loadTokens } from "./token-store.ts";
 import { assertRemoteChannelId, getChannelProfile } from "./channel.ts";
 import { deleteRemoteVideo, getRemoteVideo, listRemoteVideos, updateRemoteVideo, validateMetadata, type VideoMetadata } from "./videos.ts";
 import { fetchVideoStats } from "./analytics.ts";
-import { loadYouTubeStore, removeVideoLink, saveYouTubeStore } from "./youtube-store.ts";
+import { loadYouTubeStore, removeVideoLink, saveYouTubeStore, updateAnalyticsSnapshots } from "./youtube-store.ts";
 import { cancelYouTubePublish, startYouTubePublish, type YouTubePublishDeps } from "./publish.ts";
 
 export type YouTubeRouteError = { code: string; message: string; action?: string; details?: unknown };
@@ -112,6 +111,19 @@ export async function routeYouTube(options: {
       }
     }
 
+    if (route === "analytics" && method === "GET") {
+      const store = await loadYouTubeStore(seriesId);
+      const analytics = store.links.map((link) => ({
+        videoId: link.videoId,
+        sourceProject: seriesId,
+        sourceKind: link.sourceKind,
+        sourceId: link.sourceId,
+        snapshot: store.analytics[link.videoId] ?? null,
+      }));
+      tools.sendJson(200, { ok: true, analytics });
+      return true;
+    }
+
     if (route === "analytics/refresh" && method === "POST") {
       const clientId = process.env[config.youtube.clientIdEnv]?.trim() ?? "";
       const clientSecret = process.env[config.youtube.clientSecretEnv]?.trim() ?? "";
@@ -120,8 +132,18 @@ export async function routeYouTube(options: {
         return true;
       }
       const accessToken = await getFreshAccessToken(seriesId, { clientId, clientSecret, fetch: tools.fetch });
-      const result = await refreshChannelAnalytics(seriesId, { fetchStats: (videoIds) => fetchVideoStats({ accessToken, videoIds, fetch: tools.fetch }) });
-      tools.sendJson(200, { ok: true, ...result });
+      const body = await tools.readBody();
+      const store = await loadYouTubeStore(seriesId);
+      const requestedIds = Array.isArray(body.videoIds) ? body.videoIds.filter((id): id is string => typeof id === "string" && id.trim().length > 0) : store.links.map((link) => link.videoId);
+      const uniqueIds = [...new Set(requestedIds)];
+      const stats = await fetchVideoStats({ accessToken, videoIds: uniqueIds, fetch: tools.fetch });
+      const fetchedAt = new Date().toISOString();
+      const snapshots = Object.fromEntries(uniqueIds.map((videoId) => {
+        const values = stats.get(videoId) ?? { views: 0, likes: 0, comments: 0 };
+        return [videoId, { ...values, fetchedAt }];
+      }));
+      await updateAnalyticsSnapshots(seriesId, snapshots);
+      tools.sendJson(200, { ok: true, refreshed: uniqueIds.map((videoId) => ({ videoId, fetchedAt })) });
       return true;
     }
 

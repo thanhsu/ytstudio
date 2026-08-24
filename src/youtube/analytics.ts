@@ -21,13 +21,18 @@ export async function fetchVideoStats(options: {
   const result = new Map<string, { views: number; likes: number; comments: number }>();
   for (const item of body.items ?? []) {
     if (typeof item.id !== "string") continue;
-    result.set(item.id, {
-      views: nonNegativeCount(item.statistics?.viewCount),
-      likes: nonNegativeCount(item.statistics?.likeCount),
-      comments: nonNegativeCount(item.statistics?.commentCount),
-    });
+    result.set(item.id, normalizeVideoStats(item.statistics));
   }
   return result;
+}
+
+export function normalizeVideoStats(value: unknown): { views: number; likes: number; comments: number } {
+  const statistics = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  return {
+    views: nonNegativeCount(statistics.viewCount),
+    likes: nonNegativeCount(statistics.likeCount),
+    comments: nonNegativeCount(statistics.commentCount),
+  };
 }
 
 function nonNegativeCount(value: unknown): number {

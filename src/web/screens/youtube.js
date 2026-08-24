@@ -11,7 +11,7 @@ const INTERNAL_NAV = [
   ["settings", "Settings"],
 ];
 const PRIVACY_OPTIONS = [["public", "Public"], ["private", "Private"], ["unlisted", "Unlisted"]];
-const screenState = { activeYouTubeJob: null, videos: [], nextPageToken: null, loading: false, calendar: null };
+const screenState = { activeYouTubeJob: null, videos: [], nextPageToken: null, loading: false, analyticsLoading: false, analyticsError: null, analytics: [], calendar: null };
 
 const api = (seriesId, route) => `/api/series/${encodeURIComponent(seriesId)}/youtube/${route}`;
 
@@ -43,6 +43,7 @@ async function loadDashboard(seriesId) {
     fetch(api(seriesId, "channel")),
     fetch(api(seriesId, "videos")),
     fetch(api(seriesId, "publish")),
+    fetch(api(seriesId, "analytics")),
     fetch(`/api/series/${encodeURIComponent(seriesId)}/calendar`).catch(() => null),
   ]);
   const values = await Promise.all(responses.map(async (response) => {
@@ -53,9 +54,10 @@ async function loadDashboard(seriesId) {
   }));
   screenState.videos = values[2].videos ?? [];
   screenState.nextPageToken = values[2].nextPageToken ?? null;
-  const calendarData = values[4] ?? {};
+  screenState.analytics = values[4].analytics ?? [];
+  const calendarData = values[5] ?? {};
   screenState.calendar = (calendarData.calendar?.entries ?? []).find((entry) => entry.plannedPublishAt) ?? null;
-  return { status: values[0], channel: values[1].channel, videos: screenState.videos, jobs: values[3].jobs ?? [], calendar: screenState.calendar };
+  return { status: values[0], channel: values[1].channel, videos: screenState.videos, jobs: values[3].jobs ?? [], analytics: screenState.analytics, calendar: screenState.calendar };
 }
 
 function renderShell(series, activeView, data = {}) {
@@ -99,9 +101,31 @@ function renderView(series, activeView, data) {
   if (activeView === "videos") return renderVideos(series, data.videos ?? []);
   if (activeView === "queue") return renderQueue(data.jobs ?? []);
   if (activeView === "calendar") return renderCalendar(series.id);
-  if (activeView === "analytics") return emptyPanel("Analytics", "Analytics snapshots are cached. Refresh is available in a later phase.");
+  if (activeView === "analytics") return renderAnalytics(series.id, data.analytics ?? []);
   if (activeView === "settings") return emptyPanel("Settings", "Manage this series’ YouTube connection and permissions.");
   return renderOverview(series, data);
+}
+
+function renderAnalytics(seriesId, analytics) {
+  const panel = document.createElement("section"); panel.className = "youtube-panel";
+  const heading = document.createElement("h3"); heading.textContent = "Analytics"; panel.append(heading);
+  const note = document.createElement("p"); note.textContent = "Cached analytics — refresh manually when you want current counts."; panel.append(note);
+  const refresh = actionButton(screenState.analyticsLoading ? "Loading analytics" : "Refresh analytics", () => refreshAnalytics(seriesId, refresh), "button", "primary"); refresh.disabled = screenState.analyticsLoading; panel.append(refresh);
+  if (screenState.analyticsError) { const error = document.createElement("p"); error.setAttribute("role", "alert"); error.textContent = `Analytics refresh failed: ${screenState.analyticsError}`; panel.append(error); }
+  const list = document.createElement("ul");
+  for (const item of analytics) { const row = document.createElement("li"); const snapshot = item.snapshot; row.textContent = `${item.videoId}: ${snapshot ? `${snapshot.views} views, ${snapshot.likes} likes, ${snapshot.comments} comments (cached ${snapshot.fetchedAt})` : "No cached snapshot"}`; list.append(row); }
+  panel.append(list); return panel;
+}
+
+async function refreshAnalytics(seriesId, button) {
+  screenState.analyticsLoading = true; screenState.analyticsError = null; button.disabled = true; button.textContent = "Loading analytics";
+  try {
+    const response = await fetch(api(seriesId, "analytics/refresh"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({}) });
+    const data = await response.json(); if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
+    const cached = await fetch(api(seriesId, "analytics")); const cachedData = await cached.json(); if (!cached.ok) throw new Error(`${cachedData.code}: ${cachedData.message}`);
+    screenState.analytics = cachedData.analytics ?? []; setStatus("YouTube analytics refreshed.");
+  } catch (error) { screenState.analyticsError = error instanceof Error ? error.message : "Unable to refresh analytics."; setStatus(screenState.analyticsError); }
+  finally { screenState.analyticsLoading = false; button.disabled = false; button.textContent = "Refresh analytics"; }
 }
 
 function renderOverview(series, data) {

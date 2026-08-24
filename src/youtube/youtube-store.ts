@@ -19,6 +19,15 @@ export async function removeVideoLink(seriesId: string, videoId: string): Promis
 export async function upsertPublishJob(seriesId: string, job: YouTubePublishJob): Promise<YouTubeStore> { const store = await loadYouTubeStore(seriesId); const index = store.jobs.findIndex((item) => item.id === job.id); if (index >= 0) store.jobs[index] = normalizeJob(job)!; else store.jobs.push(normalizeJob(job)!); await saveYouTubeStore(seriesId, store); return store; }
 export async function listPublishJobs(seriesId: string): Promise<YouTubePublishJob[]> { return (await loadYouTubeStore(seriesId)).jobs; }
 export async function getAnalyticsSnapshot(seriesId: string, videoId: string): Promise<AnalyticsSnapshot | null> { return (await loadYouTubeStore(seriesId)).analytics[videoId] ?? null; }
+export async function updateAnalyticsSnapshots(seriesId: string, updates: Record<string, AnalyticsSnapshot>): Promise<YouTubeStore> {
+  const store = await loadYouTubeStore(seriesId);
+  for (const [videoId, snapshot] of Object.entries(updates)) {
+    const normalized = normalizeAnalytics(snapshot);
+    if (normalized) store.analytics[videoId] = normalized;
+  }
+  await saveYouTubeStore(seriesId, store);
+  return store;
+}
 
 function normalize(value: any): YouTubeStore { const result = emptyStore(); if (!value || typeof value !== "object") return result; result.remoteChannelId = typeof value.remoteChannelId === "string" && /^UC[\w-]+$/.test(value.remoteChannelId) ? value.remoteChannelId : null; result.links = Array.isArray(value.links) ? value.links.map(normalizeLink).filter(Boolean) as YouTubeVideoLink[] : []; result.jobs = Array.isArray(value.jobs) ? value.jobs.map(normalizeJob).filter(Boolean) as YouTubePublishJob[] : []; if (value.analytics && typeof value.analytics === "object") for (const [id, snapshot] of Object.entries(value.analytics)) { const normalized = normalizeAnalytics(snapshot); if (normalized) result.analytics[id] = normalized; } return result; }
 function normalizeLink(value: any): YouTubeVideoLink | null { if (!value || typeof value.videoId !== "string" || typeof value.channelId !== "string" || !/^UC[\w-]+$/.test(value.channelId) || !isSource(value.sourceKind) || typeof value.sourceId !== "string") return null; return { version: 1, videoId: value.videoId, channelId: value.channelId, sourceKind: value.sourceKind, sourceId: value.sourceId, exportPath: string(value.exportPath), title: string(value.title), privacyStatus: isPrivacy(value.privacyStatus) ? value.privacyStatus : "private", publishAt: nullableString(value.publishAt), createdAt: string(value.createdAt), updatedAt: string(value.updatedAt) }; }

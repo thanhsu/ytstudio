@@ -32,7 +32,7 @@ test("YouTube dashboard uses accessible DOM APIs and loads channel status, video
 
 test("YouTube video library renders joined rows, paging, edit fields, and confirmed delete", async () => {
   const script = await screen();
-  for (const marker of ["thumbnailUrl", "publishedAt", "views", "likes", "comments", "sourceProject", "youtube.com/watch", "fetchedAt", "nextPageToken", "pageToken", "title", "description", "tags", "privacyStatus", "thumbnail", "confirm: true", "Delete remote video"]) assert.match(script, new RegExp(marker.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")));
+  for (const marker of ["thumbnailUrl", "publishedAt", "views", "likes", "comments", "sourceProject", "youtube.com/watch", "fetchedAt", "nextPageToken", "pageToken", "title", "description", "tags", "privacyStatus", "thumbnail", "confirm: true", "Delete remote video", "Cached analytics", "Refresh analytics", "Analytics refresh failed", "Loading analytics"]) assert.match(script, new RegExp(marker.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")));
   assert.match(script, /No source project/);
 });
 
