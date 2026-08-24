@@ -14,7 +14,7 @@ import { assertWithinBudget, addStoryCost, BudgetExceededError, estimateGoogleTt
 import { StoryContentError } from "./errors.ts";
 import type { RenderStageArtifact } from "./export.ts";
 import { storyPath, storyRelativePath } from "./paths.ts";
-import { buildBgmPlan } from "./bgm.ts";
+import { buildBgmPlan, normalizeBgmPlan } from "./bgm.ts";
 import { renderStoryVideo, buildStorySegments } from "./render-story.ts";
 import type { ChatFn } from "./stage-llm.ts";
 import { STAGE_ROLES } from "./stage-llm.ts";
@@ -52,6 +52,7 @@ import {
 } from "./tts-chunking.ts";
 import { googleTtsConfigFromStudio } from "./voice-lab.ts";
 import type {
+  BgmPlan,
   ImageManifest,
   NaturalizedScript,
   SceneList,
@@ -511,14 +512,31 @@ async function runBgmStage(ctx: StageContext): Promise<void> {
   await writeStageArtifact(ctx.channelId, ctx.storyId, "bgm", plan);
 }
 
+/**
+ * Scene-change stinger placement: one event per interior scene boundary
+ * (the first scene starts at 0 — nothing to mark there), at the SCALED
+ * story second, since callers already know the estimated→actual scale.
+ */
+export function expandSceneChangeEvents(
+  sceneStartSeconds: number[],
+  scale: number,
+  sfx: { path: string; volumeDb: number } | null,
+): Array<{ path: string; atSeconds: number; volumeDb: number }> {
+  if (!sfx) return [];
+  return sceneStartSeconds
+    .slice(1)
+    .map((startSeconds) => ({ path: sfx.path, atSeconds: startSeconds * scale, volumeDb: sfx.volumeDb }));
+}
+
 async function runRenderStage(ctx: StageContext): Promise<void> {
   const scenes = await readStageArtifact<SceneList>(ctx.channelId, ctx.storyId, "scenes");
   const images = await readStageArtifact<ImageManifest>(ctx.channelId, ctx.storyId, "images");
   const tts = await readStageArtifact<TtsChunkManifest>(ctx.channelId, ctx.storyId, "tts");
-  const bgm = await readStageArtifact<{ version: 1; tracks: [] }>(ctx.channelId, ctx.storyId, "bgm");
-  if (!scenes || !images || !tts || !bgm) {
+  const bgmArtifact = await readStageArtifact<Partial<BgmPlan>>(ctx.channelId, ctx.storyId, "bgm");
+  if (!scenes || !images || !tts || !bgmArtifact) {
     throw new Error("Rendering needs scenes, images, narration, and a bgm plan.");
   }
+  const bgmPlan = normalizeBgmPlan(bgmArtifact);
   const actualDuration = tts.totalDurationSeconds;
   if (actualDuration <= 0) {
     throw new Error("Rendering needs a merged narration with a measured duration.");
@@ -526,6 +544,12 @@ async function runRenderStage(ctx: StageContext): Promise<void> {
   // Scene timings were estimated from word count; stretch them onto the real audio.
   const estimatedEnd = scenes.scenes[scenes.scenes.length - 1]?.endSeconds ?? 0;
   const scale = estimatedEnd > 0 ? actualDuration / estimatedEnd : 1;
+  const sceneChangeEvents = expandSceneChangeEvents(
+    scenes.scenes.map((scene) => scene.startSeconds),
+    scale,
+    bgmPlan.sceneChangeSfx,
+  );
+  const bgm: BgmPlan = { ...bgmPlan, events: [...bgmPlan.events, ...sceneChangeEvents] };
   const imagePaths = new Map(
     images.images
       .filter((image) => image.status === "done")
@@ -555,6 +579,7 @@ async function runRenderStage(ctx: StageContext): Promise<void> {
     ffmpegPrefixArgs: ctx.ffmpegPrefixArgs,
     signal: ctx.signal,
     update: async (completed, total) => ctx.update?.(`Rendered segment ${completed}/${total}.`),
+    transition: { kind: ctx.config.render.storyTransition, seconds: ctx.config.render.storyTransitionSeconds },
   });
 
   const artifact: RenderStageArtifact = {

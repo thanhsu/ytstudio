@@ -20,6 +20,7 @@ import {
   STAGE_ARTIFACT_FILES,
 } from "./story-project.ts";
 import { storyRelativePath } from "./paths.ts";
+import { editSectionText, listSections, readSection } from "./section-edit.ts";
 import { generateVoiceSample, listVoiceLabVoices } from "./voice-lab.ts";
 import { isStoryStageId, type StoryApprovalStage, type StoryProject, type StoryStageId } from "./types.ts";
 
@@ -220,6 +221,53 @@ async function routeStory(options: {
     });
     tools.sendJson(200, { ok: true, story: updated, status: deriveStoryStatus(updated) });
     return;
+  }
+
+  if (storyRest === "sections" && method === "GET") {
+    const sections = await listSections(channelId, storyId);
+    tools.sendJson(200, {
+      ok: true,
+      sections: sections.map((section) => ({
+        index: section.index,
+        title: section.title,
+        wordCount: section.wordCount,
+      })),
+    });
+    return;
+  }
+
+  const sectionMatch = /^sections\/(\d+)$/.exec(storyRest);
+  if (sectionMatch) {
+    const index = Number(sectionMatch[1]);
+    if (method === "GET") {
+      const section = await readSection(channelId, storyId, index);
+      if (!section) {
+        tools.sendError(404, { code: "section-not-found", message: `Section ${index} does not exist.` });
+        return;
+      }
+      tools.sendJson(200, { ok: true, section });
+      return;
+    }
+    if (method === "PUT") {
+      const body = await tools.readBody();
+      const text = typeof body.text === "string" ? body.text : "";
+      if (!text.trim()) {
+        tools.sendError(400, { code: "section-text-required", message: "text is required." });
+        return;
+      }
+      try {
+        const { section, invalidated } = await editSectionText(channelId, storyId, index, text);
+        tools.sendJson(200, { ok: true, section, invalidated });
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (/not found/i.test(message)) {
+          tools.sendError(404, { code: "section-not-found", message });
+          return;
+        }
+        throw error;
+      }
+      return;
+    }
   }
 
   const artifactMatch = /^artifacts\/([a-z-]+)$/.exec(storyRest);

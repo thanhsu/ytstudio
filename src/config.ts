@@ -30,6 +30,11 @@ export type LlmEndpointConfig = {
   paid: boolean;
   temperature: number;
   maxOutputTokens: number;
+  // Which transport carries this endpoint's calls. "openai-compatible" covers
+  // Ollama, LM Studio, OpenAI, DeepSeek, Groq, and OpenRouter; "anthropic" and
+  // "gemini" call those providers' native APIs directly. baseUrl still names
+  // the actual host — this only selects the wire format.
+  provider: "openai-compatible" | "anthropic" | "gemini";
 };
 
 export type StudioConfig = {
@@ -129,6 +134,11 @@ export type StudioConfig = {
     shortsHeight: number;
     longformWidth: number;
     longformHeight: number;
+    // "fade": current behavior, per-segment fade in/out, stitched with the
+    // concat demuxer. "xfade": segments are padded by the transition overlap
+    // and blended in one filtergraph pass — see render-story.ts.
+    storyTransition: "fade" | "xfade";
+    storyTransitionSeconds: number;
   };
   sources: {
     ytDlpPath: string;
@@ -237,6 +247,8 @@ export const DEFAULT_STUDIO_CONFIG: StudioConfig = {
     shortsHeight: 1920,
     longformWidth: 1920,
     longformHeight: 1080,
+    storyTransition: "fade",
+    storyTransitionSeconds: 0.5,
   },
   sources: {
     ytDlpPath: "",
@@ -408,6 +420,17 @@ export function normalizeStudioConfig(value: unknown): StudioConfig {
       shortsHeight: numberValue(candidate.render?.shortsHeight, 1920),
       longformWidth: numberValue(candidate.render?.longformWidth, 1920),
       longformHeight: numberValue(candidate.render?.longformHeight, 1080),
+      storyTransition: enumValue(
+        candidate.render?.storyTransition,
+        ["fade", "xfade"],
+        DEFAULT_STUDIO_CONFIG.render.storyTransition,
+      ),
+      storyTransitionSeconds: rangeValue(
+        candidate.render?.storyTransitionSeconds,
+        DEFAULT_STUDIO_CONFIG.render.storyTransitionSeconds,
+        0.1,
+        2,
+      ),
     },
     sources: {
       ytDlpPath: stringValue(candidate.sources?.ytDlpPath, ""),
@@ -457,6 +480,7 @@ function defaultLlmEndpoint(): LlmEndpointConfig {
     paid: false,
     temperature: 0.8,
     maxOutputTokens: 8000,
+    provider: "openai-compatible",
   };
 }
 
@@ -470,6 +494,7 @@ function llmEndpointValue(value: unknown): LlmEndpointConfig {
     paid: booleanValue(candidate.paid, fallback.paid),
     temperature: rangeValue(candidate.temperature, fallback.temperature, 0, 2),
     maxOutputTokens: numberValue(candidate.maxOutputTokens, fallback.maxOutputTokens),
+    provider: enumValue(candidate.provider, ["openai-compatible", "anthropic", "gemini"], fallback.provider),
   };
 }
 

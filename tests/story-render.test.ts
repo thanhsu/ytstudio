@@ -3,11 +3,12 @@ import test from "node:test";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { buildBgmPlan } from "../src/story-factory/bgm.ts";
+import { buildBgmPlan, normalizeBgmPlan } from "../src/story-factory/bgm.ts";
 import {
   buildStoryMuxArgs,
   buildStorySegmentArgs,
   buildStorySegments,
+  buildXfadeTimelineArgs,
   renderStoryVideo,
 } from "../src/story-factory/render-story.ts";
 import { normalizeStoryChannel } from "../src/story-factory/channel.ts";
@@ -34,6 +35,62 @@ test("an image segment gets a slow zoom, fades, and a pre-upscale against jitter
   assert.match(second[second.indexOf("-filter_complex") + 1], /max\(1\+0\.13-0\.13\*on\/300,1\)/);
 });
 
+test("xfade mode: only the first segment fades in and only the last fades out", () => {
+  const first = buildStorySegmentArgs({ durationSeconds: 10 }, 0, "o0.mp4", DIMENSIONS, {
+    fadeIn: true,
+    fadeOut: false,
+  });
+  const firstFilter = first[first.indexOf("-filter_complex") + 1];
+  assert.match(firstFilter, /fade=t=in:st=0:d=0\.5/);
+  assert.ok(!firstFilter.includes("fade=t=out"));
+
+  const middle = buildStorySegmentArgs({ durationSeconds: 10 }, 1, "o1.mp4", DIMENSIONS, {
+    fadeIn: false,
+    fadeOut: false,
+  });
+  const middleFilter = middle[middle.indexOf("-filter_complex") + 1];
+  assert.ok(!middleFilter.includes("fade="));
+  assert.match(middleFilter, /setsar=1\[v\]/);
+
+  const last = buildStorySegmentArgs({ durationSeconds: 10 }, 2, "o2.mp4", DIMENSIONS, {
+    fadeIn: false,
+    fadeOut: true,
+  });
+  const lastFilter = last[last.indexOf("-filter_complex") + 1];
+  assert.ok(!lastFilter.includes("fade=t=in"));
+  assert.match(lastFilter, /fade=t=out:st=9\.5:d=0\.5/);
+});
+
+test("buildXfadeTimelineArgs chains pairwise xfade filters with accumulating offsets", () => {
+  const args = buildXfadeTimelineArgs(
+    ["segment-000.mp4", "segment-001.mp4", "segment-002.mp4"],
+    [10.5, 10.5, 10],
+    0.5,
+    "timeline.mp4",
+  );
+  assert.deepEqual(
+    args.slice(0, 7),
+    ["-y", "-i", "segment-000.mp4", "-i", "segment-001.mp4", "-i", "segment-002.mp4"],
+  );
+  const filter = args[args.indexOf("-filter_complex") + 1];
+  assert.equal(
+    filter,
+    "[0:v][1:v]xfade=transition=fade:duration=0.5:offset=10[x1];" +
+      "[x1][2:v]xfade=transition=fade:duration=0.5:offset=20[x2]",
+  );
+  assert.equal(args[args.indexOf("-map") + 1], "[x2]");
+  assert.ok(args.includes("libx264"));
+  assert.ok(args.includes("ultrafast"));
+  assert.ok(args.includes("yuv420p"));
+  assert.equal(args[args.indexOf("-r") + 1], "30");
+  assert.equal(args[args.length - 1], "timeline.mp4");
+});
+
+test("buildXfadeTimelineArgs with one segment degenerates to a plain copy", () => {
+  const args = buildXfadeTimelineArgs(["segment-000.mp4"], [10], 0.5, "timeline.mp4");
+  assert.deepEqual(args, ["-y", "-i", "segment-000.mp4", "-c", "copy", "timeline.mp4"]);
+});
+
 test("a scene without an image renders a dark frame, not a crash", () => {
   const args = buildStorySegmentArgs({ durationSeconds: 20 }, 2, "o.mp4", DIMENSIONS);
   assert.ok(args.join(" ").includes("color=c=#0b0f19:s=1920x1080"));
@@ -43,7 +100,12 @@ test("the mux keeps narration dominant over a looped, attenuated ambience bed", 
   const args = buildStoryMuxArgs({
     timelinePath: "timeline.mp4",
     narrationPath: "narration.m4a",
-    bgm: { version: 1, tracks: [{ path: "C:\\media\\rain.mp3", startSeconds: 0, volumeDb: -22, loop: true }] },
+    bgm: {
+      version: 1,
+      tracks: [{ path: "C:\\media\\rain.mp3", startSeconds: 0, volumeDb: -22, loop: true }],
+      sceneChangeSfx: null,
+      events: [],
+    },
     outputPath: "story.mp4",
     durationSeconds: 1500,
   });
@@ -58,13 +120,101 @@ test("without bgm the narration maps directly — intentional silence, no silent
   const args = buildStoryMuxArgs({
     timelinePath: "timeline.mp4",
     narrationPath: "narration.m4a",
-    bgm: { version: 1, tracks: [] },
+    bgm: { version: 1, tracks: [], sceneChangeSfx: null, events: [] },
     outputPath: "story.mp4",
     durationSeconds: 60,
   });
   const joined = args.join(" ");
   assert.match(joined, /-map 0:v -map 1:a/);
   assert.ok(!joined.includes("amix"));
+});
+
+test("a bed with no SFX events keeps Phase 1's mux byte-identical (no normalize=0)", () => {
+  const args = buildStoryMuxArgs({
+    timelinePath: "timeline.mp4",
+    narrationPath: "narration.m4a",
+    bgm: {
+      version: 1,
+      tracks: [{ path: "C:\\media\\rain.mp3", startSeconds: 0, volumeDb: -22, loop: true }],
+      sceneChangeSfx: null,
+      events: [],
+    },
+    outputPath: "story.mp4",
+    durationSeconds: 1500,
+  });
+  const joined = args.join(" ");
+  assert.match(joined, /\[2:a\]volume=-22dB\[bed\];\[1:a\]\[bed\]amix=inputs=2:duration=first:dropout_transition=3\[a\]/);
+  assert.ok(!joined.includes("normalize=0"));
+});
+
+test("SFX events with a bed each add an input, an adelay+volume filter, and normalize=0", () => {
+  const args = buildStoryMuxArgs({
+    timelinePath: "timeline.mp4",
+    narrationPath: "narration.m4a",
+    bgm: {
+      version: 1,
+      tracks: [{ path: "C:\\media\\rain.mp3", startSeconds: 0, volumeDb: -22, loop: true }],
+      sceneChangeSfx: null,
+      events: [
+        { path: "C:\\sfx\\intro.wav", atSeconds: 0, volumeDb: -6 },
+        { path: "C:\\sfx\\creak.wav", atSeconds: 12.3456, volumeDb: -10 },
+      ],
+    },
+    outputPath: "story.mp4",
+    durationSeconds: 1500,
+  });
+  const joined = args.join(" ");
+  // Inputs in order: 0 timeline, 1 narration, 2 bed, 3+4 the two events.
+  assert.match(joined, /-i C:\\sfx\\intro\.wav -i C:\\sfx\\creak\.wav/);
+  assert.match(joined, /\[3:a\]adelay=0:all=1,volume=-6dB\[s0\]/);
+  assert.match(joined, /\[4:a\]adelay=12346:all=1,volume=-10dB\[s1\]/);
+  assert.match(joined, /\[1:a\]\[bed\]\[s0\]\[s1\]amix=inputs=4:duration=first:normalize=0\[a\]/);
+  assert.match(joined, /-map 0:v -map \[a\]/);
+});
+
+test("SFX events without a bed mix narration directly with the event inputs", () => {
+  const args = buildStoryMuxArgs({
+    timelinePath: "timeline.mp4",
+    narrationPath: "narration.m4a",
+    bgm: {
+      version: 1,
+      tracks: [],
+      sceneChangeSfx: null,
+      events: [{ path: "C:\\sfx\\door.wav", atSeconds: 5, volumeDb: -8 }],
+    },
+    outputPath: "story.mp4",
+    durationSeconds: 60,
+  });
+  const joined = args.join(" ");
+  assert.match(joined, /-i C:\\sfx\\door\.wav/);
+  assert.match(joined, /\[2:a\]adelay=5000:all=1,volume=-8dB\[s0\]/);
+  assert.match(joined, /\[1:a\]\[s0\]amix=inputs=2:duration=first:normalize=0\[a\]/);
+});
+
+test("buildBgmPlan copies fixed events and sceneChangeSfx verbatim, clamping out-of-range events", async () => {
+  const channel = normalizeStoryChannel("es-horror", {
+    bgm: {
+      ambienceTrackPath: "",
+      sfx: {
+        sceneChange: { path: "C:\\sfx\\stinger.wav", volumeDb: -14 },
+        events: [
+          { path: "C:\\sfx\\intro.wav", atSeconds: 0, volumeDb: -6 },
+          { path: "C:\\sfx\\too-late.wav", atSeconds: 600, volumeDb: -6 },
+          { path: "C:\\sfx\\negative.wav", atSeconds: -1, volumeDb: -6 },
+        ],
+      },
+    },
+  });
+  const plan = await buildBgmPlan(channel, 300);
+  assert.deepEqual(plan.sceneChangeSfx, { path: "C:\\sfx\\stinger.wav", volumeDb: -14 });
+  assert.deepEqual(plan.events, [{ path: "C:\\sfx\\intro.wav", atSeconds: 0, volumeDb: -6 }]);
+  // Not expanded here — the render stage does that with the scaled scene starts.
+  assert.deepEqual(plan.tracks, []);
+});
+
+test("normalizeBgmPlan defaults sceneChangeSfx/events for old bgm.json files", () => {
+  const plan = normalizeBgmPlan({ version: 1, tracks: [] });
+  assert.deepEqual(plan, { version: 1, tracks: [], sceneChangeSfx: null, events: [] });
 });
 
 test("scenes map to segments in order, with missing images left visibly absent", () => {
@@ -96,7 +246,7 @@ await appendFile(${JSON.stringify(recordPath)}, JSON.stringify(process.argv.slic
         { durationSeconds: 5 },
       ],
       narrationPath: join(root, "narration.m4a"),
-      bgm: { version: 1, tracks: [] },
+      bgm: { version: 1, tracks: [], sceneChangeSfx: null, events: [] },
       outputPath,
       durationSeconds: 10,
       ffmpegPath: process.execPath,
@@ -113,6 +263,73 @@ await appendFile(${JSON.stringify(recordPath)}, JSON.stringify(process.argv.slic
     // The temp segment directory is removed even on success.
     const leftovers = (await readFile(recordPath, "utf8")).length;
     assert.ok(leftovers > 0);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("xfade mode pads every segment but the last, skips the concat demuxer, and runs one xfade pass", async () => {
+  const root = await mkdtemp(join(tmpdir(), "yt-story-xfade-"));
+  const recordPath = join(root, "calls.jsonl");
+  const fakeFfmpeg = await makeFakeExecutable(`
+import { appendFile } from "node:fs/promises";
+await appendFile(${JSON.stringify(recordPath)}, JSON.stringify(process.argv.slice(2)) + "\\n", "utf8");
+`);
+  try {
+    const outputPath = join(root, "render", "story.mp4");
+    await renderStoryVideo({
+      segments: [{ durationSeconds: 10 }, { durationSeconds: 8 }],
+      narrationPath: join(root, "narration.m4a"),
+      bgm: { version: 1, tracks: [], sceneChangeSfx: null, events: [] },
+      outputPath,
+      durationSeconds: 18,
+      ffmpegPath: process.execPath,
+      ffmpegPrefixArgs: [fakeFfmpeg],
+      transition: { kind: "xfade", seconds: 0.5 },
+    });
+    const calls = (await readFile(recordPath, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as string[]);
+    assert.equal(calls.length, 4, "two segments + one xfade timeline pass + mux");
+    // Only the non-last segment is padded by the transition overlap.
+    assert.ok(calls[0].join(" ").includes("d=10.5"));
+    assert.ok(calls[1].join(" ").includes("d=8"));
+    assert.ok(!calls[1].join(" ").includes("d=8.5"));
+    assert.ok(calls[2].join(" ").includes("xfade"));
+    assert.ok(!calls[2].includes("concat"));
+    assert.equal(calls[3][calls[3].length - 1], outputPath);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("xfade mode with a single scene skips the filtergraph and just copies through", async () => {
+  const root = await mkdtemp(join(tmpdir(), "yt-story-xfade-single-"));
+  const recordPath = join(root, "calls.jsonl");
+  const fakeFfmpeg = await makeFakeExecutable(`
+import { appendFile } from "node:fs/promises";
+await appendFile(${JSON.stringify(recordPath)}, JSON.stringify(process.argv.slice(2)) + "\\n", "utf8");
+`);
+  try {
+    const outputPath = join(root, "render", "story.mp4");
+    await renderStoryVideo({
+      segments: [{ durationSeconds: 10 }],
+      narrationPath: join(root, "narration.m4a"),
+      bgm: { version: 1, tracks: [], sceneChangeSfx: null, events: [] },
+      outputPath,
+      durationSeconds: 10,
+      ffmpegPath: process.execPath,
+      ffmpegPrefixArgs: [fakeFfmpeg],
+      transition: { kind: "xfade", seconds: 0.5 },
+    });
+    const calls = (await readFile(recordPath, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as string[]);
+    assert.equal(calls.length, 3, "one segment + one copy timeline pass + mux");
+    assert.ok(!calls[1].join(" ").includes("xfade"));
+    assert.ok(calls[1].includes("copy"));
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -147,7 +364,7 @@ test("mkdir is not required beforehand — the render creates its own output dir
     await renderStoryVideo({
       segments: [{ durationSeconds: 2 }],
       narrationPath: join(root, "n.m4a"),
-      bgm: { version: 1, tracks: [] },
+      bgm: { version: 1, tracks: [], sceneChangeSfx: null, events: [] },
       outputPath: join(root, "deep", "nested", "story.mp4"),
       durationSeconds: 2,
       ffmpegPath: process.execPath,

@@ -84,6 +84,50 @@ test("studio config carries long-form output dimensions", async () => {
   });
 });
 
+test("studio config defaults story transitions to a plain 0.5s fade", async () => {
+  await withTempCwd(async () => {
+    const config = await loadStudioConfig();
+
+    assert.equal(config.render.storyTransition, "fade");
+    assert.equal(config.render.storyTransitionSeconds, 0.5);
+  });
+});
+
+test("a valid xfade transition setting is saved and reloaded as-is", async () => {
+  await withTempCwd(async () => {
+    const saved = await saveStudioConfig({
+      render: { storyTransition: "xfade", storyTransitionSeconds: 0.75 },
+    });
+    assert.equal(saved.render.storyTransition, "xfade");
+    assert.equal(saved.render.storyTransitionSeconds, 0.75);
+
+    const reloaded = await loadStudioConfig();
+    assert.equal(reloaded.render.storyTransition, "xfade");
+    assert.equal(reloaded.render.storyTransitionSeconds, 0.75);
+  });
+});
+
+test("an unknown transition kind or out-of-range seconds falls back to defaults", async () => {
+  await withTempCwd(async () => {
+    await writeFile(
+      "studio.config.json",
+      JSON.stringify({ render: { storyTransition: "wipe", storyTransitionSeconds: 5 } }),
+      "utf8",
+    );
+    const reloaded = await loadStudioConfig();
+    assert.equal(reloaded.render.storyTransition, "fade");
+    assert.equal(reloaded.render.storyTransitionSeconds, 0.5);
+
+    await writeFile(
+      "studio.config.json",
+      JSON.stringify({ render: { storyTransitionSeconds: 0.05 } }),
+      "utf8",
+    );
+    const tooShort = await loadStudioConfig();
+    assert.equal(tooShort.render.storyTransitionSeconds, 0.5);
+  });
+});
+
 test("studio config carries script model settings", async () => {
   await withTempCwd(async () => {
     const config = await loadStudioConfig();
@@ -157,6 +201,7 @@ test("the story factory, google tts, and images blocks default and normalize", a
     const defaults = await loadStudioConfig();
     assert.equal(defaults.storyFactory.enabled, false);
     assert.equal(defaults.storyFactory.models.planner.baseUrl, "http://127.0.0.1:11434/v1");
+    assert.equal(defaults.storyFactory.models.planner.provider, "openai-compatible");
     assert.equal(defaults.storyFactory.models.writer.paid, false);
     assert.deepEqual(defaults.storyFactory.llmPricing, []);
     assert.equal(defaults.storyFactory.duplicateSimilarityThreshold, 0.6);
@@ -174,7 +219,11 @@ test("the story factory, google tts, and images blocks default and normalize", a
       JSON.stringify({
         storyFactory: {
           enabled: true,
-          models: { writer: { model: "gpt-5-mini", apiKeyEnv: "OPENAI_API_KEY", paid: true } },
+          models: {
+            writer: { model: "gpt-5-mini", apiKeyEnv: "OPENAI_API_KEY", paid: true, provider: "anthropic" },
+            qa: { model: "gemini-2.5-flash", provider: "gemini" },
+            planner: { model: "local-model", provider: "not-a-real-provider" },
+          },
           llmPricing: [
             { modelPattern: "gpt-5-mini", inputUsdPerMTok: 0.25, outputUsdPerMTok: 2 },
             { modelPattern: "", inputUsdPerMTok: 1, outputUsdPerMTok: 1 },
@@ -192,6 +241,10 @@ test("the story factory, google tts, and images blocks default and normalize", a
     assert.equal(loaded.storyFactory.enabled, true);
     assert.equal(loaded.storyFactory.models.writer.model, "gpt-5-mini");
     assert.equal(loaded.storyFactory.models.writer.paid, true);
+    assert.equal(loaded.storyFactory.models.writer.provider, "anthropic");
+    assert.equal(loaded.storyFactory.models.qa.provider, "gemini");
+    // An unrecognized provider falls back rather than surviving, unlike script.provider.
+    assert.equal(loaded.storyFactory.models.planner.provider, "openai-compatible");
     // Malformed pricing rows are dropped; the valid one survives.
     assert.deepEqual(loaded.storyFactory.llmPricing, [
       { modelPattern: "gpt-5-mini", inputUsdPerMTok: 0.25, outputUsdPerMTok: 2 },

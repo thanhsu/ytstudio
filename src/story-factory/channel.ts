@@ -62,6 +62,7 @@ export function normalizeStoryChannel(channelId: string, value: unknown): StoryC
     bgm: {
       ambienceTrackPath: stringOr(candidate.bgm?.ambienceTrackPath, ""),
       volumeDb: rangeOr(candidate.bgm?.volumeDb, -22, -60, 0),
+      sfx: normalizeBgmSfx(candidate.bgm?.sfx),
     },
     pronunciations: normalizePronunciations(candidate.pronunciations),
     budget: { maxCostPerStoryUsd: rangeOr(candidate.budget?.maxCostPerStoryUsd, 5, 0, 10000) },
@@ -100,6 +101,36 @@ export function normalizeVisualStyle(value: unknown): VisualStyleProfile {
     imageIntervalSeconds: rangeOr(candidate.imageIntervalSeconds, 75, 45, 120),
     aspectRatio: "16:9",
   };
+}
+
+function normalizeBgmSfx(value: unknown): StoryChannelConfig["bgm"]["sfx"] {
+  const candidate = value && typeof value === "object" ? (value as Partial<StoryChannelConfig["bgm"]["sfx"]>) : {};
+  return {
+    sceneChange: normalizeSfxCue(candidate.sceneChange),
+    events: normalizeSfxEvents(candidate.events),
+  };
+}
+
+function normalizeSfxCue(value: unknown): { path: string; volumeDb: number } | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as { path?: unknown; volumeDb?: unknown };
+  const path = typeof candidate.path === "string" ? candidate.path.trim() : "";
+  if (!path) return null;
+  return { path, volumeDb: rangeOr(candidate.volumeDb, -18, -60, 0) };
+}
+
+function normalizeSfxEvents(value: unknown): Array<{ path: string; atSeconds: number; volumeDb: number }> {
+  if (!Array.isArray(value)) return [];
+  const events: Array<{ path: string; atSeconds: number; volumeDb: number }> = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const candidate = item as { path?: unknown; atSeconds?: unknown; volumeDb?: unknown };
+    const path = typeof candidate.path === "string" ? candidate.path.trim() : "";
+    const atSeconds = Number(candidate.atSeconds);
+    if (!path || !Number.isFinite(atSeconds) || atSeconds < 0) continue;
+    events.push({ path, atSeconds, volumeDb: rangeOr(candidate.volumeDb, -18, -60, 0) });
+  }
+  return events;
 }
 
 function validateStoryChannel(config: StoryChannelConfig): void {

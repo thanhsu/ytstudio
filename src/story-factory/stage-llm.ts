@@ -1,4 +1,5 @@
 import type { LlmEndpointConfig, StudioConfig } from "../config.ts";
+import { anthropicChat } from "../llm/anthropic.ts";
 import {
   chatJsonWithUsage,
   type ChatMessage,
@@ -6,6 +7,7 @@ import {
   type ChatResult,
   type OpenAiCompatibleConfig,
 } from "../llm/chat.ts";
+import { geminiChat } from "../llm/gemini.ts";
 import { appendAiLog } from "./ai-log.ts";
 import { addStoryCost, estimateLlmCost } from "./cost.ts";
 import type { Provenance, StoryStageId } from "./types.ts";
@@ -22,6 +24,22 @@ export type ChatFn = (
   messages: ChatMessage[],
   options: ChatOptions,
 ) => Promise<ChatResult>;
+
+/**
+ * The transport for a configured endpoint's provider. All three take the same
+ * `OpenAiCompatibleConfig` shape, so switching a role's provider is a config
+ * change, never a call-site change.
+ */
+function chatFnFor(provider: LlmEndpointConfig["provider"]): ChatFn {
+  switch (provider) {
+    case "anthropic":
+      return anthropicChat;
+    case "gemini":
+      return geminiChat;
+    default:
+      return chatJsonWithUsage;
+  }
+}
 
 export type LlmStageRole = "planner" | "writer" | "qa";
 
@@ -87,7 +105,7 @@ export async function runLlmCall<T>(options: LlmCallOptions<T>): Promise<LlmCall
     temperature: options.endpoint.temperature,
     maxOutputTokens: options.endpoint.maxOutputTokens,
   };
-  const chat = options.chat ?? chatJsonWithUsage;
+  const chat = options.chat ?? chatFnFor(options.endpoint.provider);
   const startedAt = Date.now();
   let result: ChatResult;
   try {
@@ -101,7 +119,7 @@ export async function runLlmCall<T>(options: LlmCallOptions<T>): Promise<LlmCall
       stage: options.stage,
       promptName: options.promptName,
       promptVersion: options.promptVersion,
-      provider: "openai-compatible",
+      provider: options.endpoint.provider,
       model: options.endpoint.model,
       usage: null,
       costUsd: 0,
@@ -121,7 +139,7 @@ export async function runLlmCall<T>(options: LlmCallOptions<T>): Promise<LlmCall
     stage: options.stage,
     promptName: options.promptName,
     promptVersion: options.promptVersion,
-    provider: "openai-compatible",
+    provider: options.endpoint.provider,
     model: options.endpoint.model,
     usage: result.usage
       ? { promptTokens: result.usage.promptTokens, completionTokens: result.usage.completionTokens }
@@ -137,7 +155,7 @@ export async function runLlmCall<T>(options: LlmCallOptions<T>): Promise<LlmCall
   return {
     value,
     provenance: {
-      provider: "openai-compatible",
+      provider: options.endpoint.provider,
       model: options.endpoint.model,
       promptVersion: options.promptVersion,
       generatedAt: new Date().toISOString(),

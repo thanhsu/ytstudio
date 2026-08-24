@@ -74,15 +74,7 @@ export async function chatJsonWithUsage(
   messages: ChatMessage[],
   options: ChatOptions,
 ): Promise<ChatResult> {
-  if (config.paid && !options.confirmedPaidRequest) {
-    throw new Error("This model is marked paid and requires an explicit confirmed paid request.");
-  }
-  // A configured key that is not in the environment is a mistake whether or not
-  // the endpoint is marked paid: sending an unauthenticated request to a hosted
-  // endpoint only turns it into a 401 further downstream.
-  if (!config.apiKey && (config.apiKeyEnv || config.paid)) {
-    throw new Error(missingApiKeyMessage(config));
-  }
+  assertChatRequestAllowed(config, options);
 
   const endpoint = `${config.baseUrl.replace(/\/+$/, "")}/chat/completions`;
   const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -90,9 +82,10 @@ export async function chatJsonWithUsage(
     headers.Authorization = `Bearer ${config.apiKey}`;
   }
 
-  let response: Response;
-  try {
-    response = await (config.fetch ?? fetch)(endpoint, {
+  const response = await fetchChatEndpoint(
+    config.fetch ?? fetch,
+    endpoint,
+    {
       method: "POST",
       signal: options.signal,
       headers,
@@ -103,15 +96,9 @@ export async function chatJsonWithUsage(
         max_tokens: config.maxOutputTokens,
         response_format: { type: "json_object" },
       }),
-    });
-  } catch (error: unknown) {
-    // A cancelled request must stay identifiable as a cancellation, not be
-    // relabeled as "server unreachable" — the two have different remedies.
-    if (options.signal?.aborted || isAbortError(error)) {
-      throw error;
-    }
-    throw new Error(`Could not reach the model server at ${endpoint}: ${messageOf(error)}`);
-  }
+    },
+    options.signal,
+  );
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");
@@ -138,6 +125,46 @@ export async function chatJsonWithUsage(
   return { content, usage: normalizeUsage(payload.usage) };
 }
 
+/**
+ * The paid-guard and missing-key checks shared by every transport that takes an
+ * `OpenAiCompatibleConfig`: a native Anthropic or Gemini adapter carries the
+ * same two rules as the OpenAI-compatible one, so they are extracted here
+ * rather than re-typed per provider.
+ */
+export function assertChatRequestAllowed(config: OpenAiCompatibleConfig, options: ChatOptions): void {
+  if (config.paid && !options.confirmedPaidRequest) {
+    throw new Error("This model is marked paid and requires an explicit confirmed paid request.");
+  }
+  // A configured key that is not in the environment is a mistake whether or not
+  // the endpoint is marked paid: sending an unauthenticated request to a hosted
+  // endpoint only turns it into a 401 further downstream.
+  if (!config.apiKey && (config.apiKeyEnv || config.paid)) {
+    throw new Error(missingApiKeyMessage(config));
+  }
+}
+
+/**
+ * Shared fetch wrapper: a cancelled request must stay identifiable as a
+ * cancellation, not be relabeled as "server unreachable" — the two have
+ * different remedies. Every transport that takes an `OpenAiCompatibleConfig`
+ * hits this same failure mode, so the distinction lives here once.
+ */
+export async function fetchChatEndpoint(
+  fetchImpl: typeof fetch,
+  endpoint: string,
+  init: RequestInit,
+  signal?: AbortSignal,
+): Promise<Response> {
+  try {
+    return await fetchImpl(endpoint, init);
+  } catch (error: unknown) {
+    if (signal?.aborted || isAbortError(error)) {
+      throw error;
+    }
+    throw new Error(`Could not reach the model server at ${endpoint}: ${messageOf(error)}`);
+  }
+}
+
 function normalizeUsage(usage: ChatCompletionResponse["usage"]): ChatUsage | null {
   if (!usage || typeof usage !== "object") {
     return null;
@@ -159,7 +186,12 @@ function normalizeUsage(usage: ChatCompletionResponse["usage"]): ChatUsage | nul
 // into the status bar, so an unbounded upstream body cannot travel with them.
 const MAX_UPSTREAM_EXCERPT = 400;
 
-function truncate(value: string): string {
+/**
+ * Exported so every provider adapter truncates upstream error/payload excerpts
+ * the same way before they are persisted to the job file and pushed through
+ * SSE — an unbounded upstream body must never travel with a thrown error.
+ */
+export function truncate(value: string): string {
   const collapsed = value.trim();
   if (!collapsed) {
     return "(empty body)";
@@ -169,7 +201,7 @@ function truncate(value: string): string {
     : collapsed;
 }
 
-function describePayload(payload: unknown): string {
+export function describePayload(payload: unknown): string {
   try {
     return JSON.stringify(payload) ?? String(payload);
   } catch {
@@ -177,17 +209,17 @@ function describePayload(payload: unknown): string {
   }
 }
 
-function missingApiKeyMessage(config: OpenAiCompatibleConfig): string {
+export function missingApiKeyMessage(config: OpenAiCompatibleConfig): string {
   if (config.apiKeyEnv) {
     return `No API key: the ${config.apiKeyEnv} environment variable named by script.apiKeyEnv is empty. Set it in the shell that starts the studio, or clear script.apiKeyEnv for an endpoint that needs no key.`;
   }
   return "An API key is required for the configured paid model provider. Set script.apiKeyEnv to the name of the environment variable that holds it.";
 }
 
-function messageOf(error: unknown): string {
+export function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function isAbortError(error: unknown): boolean {
+export function isAbortError(error: unknown): boolean {
   return typeof error === "object" && error !== null && (error as { name?: unknown }).name === "AbortError";
 }
