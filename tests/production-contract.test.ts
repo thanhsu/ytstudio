@@ -23,6 +23,7 @@ import {
   saveProductionProject,
 } from "../src/production/store.ts";
 import { resolveProjectPath } from "../src/project-paths.ts";
+import { loadProjectState } from "../src/project-state.ts";
 
 function validProject(): ProductionProject {
   return {
@@ -271,6 +272,20 @@ test("refuses malformed persisted contract versions", async () => {
     const path = resolveProjectPath(project.projectId, PRODUCTION_PROJECT_RELATIVE_PATH);
     await writeFile(path, JSON.stringify({ ...project, version: 99 }), "utf8");
     await assert.rejects(() => loadProductionProject(project.projectId), /unsupported production project version/i);
+  } finally {
+    process.chdir(previousCwd);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("saving a production project does not create or alter project approvals", async () => {
+  const previousCwd = process.cwd();
+  const root = await mkdtemp(join(tmpdir(), "yt-production-contract-"));
+  try {
+    process.chdir(root);
+    const project = validProject();
+    await saveProductionProject(project);
+    assert.deepEqual(await loadProjectState(project.projectId), { version: 1, approvals: {}, artifacts: {} });
   } finally {
     process.chdir(previousCwd);
     await rm(root, { recursive: true, force: true });

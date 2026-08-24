@@ -98,6 +98,27 @@ music into a Shorts-ready or long-form draft.
 - AI providers: adapter interface for script and TTS providers.
 - Storage: local filesystem projects.
 
+### Shared Production Boundary
+
+Each workflow may have different content-generation stages, but it should
+normalize into a versioned `ProductionProject` artifact before entering the
+shared production stages:
+
+```text
+Review / Audio Story / Subtitle / Licensed Source
+                         ↓
+                 ProductionProject v1
+                         ↓
+                 Edit → Render → Export → Publish
+```
+
+The artifact is stored under
+`projects/<project-id>/workspace/production/production-project.json`. Its
+assets carry provenance and rights status, but existing human copyright and
+asset approvals remain authoritative. The first implementation adds Review and
+Audio Story adapters without replacing the current renderers; migration of the
+shared editor and renderer is a follow-up step.
+
 ## Local Project Shape
 
 ```text

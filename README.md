@@ -388,6 +388,20 @@ human approves the new version. Nothing in the pipeline approves on your behalf.
   with the operator.
 - Generated files stay under ignored `projects/<id>/workspace/`.
 
+## Production Contract
+
+Review, Audio Story, subtitle, and licensed-source workflows can share a
+normalized production boundary at:
+
+```text
+projects/<project-id>/workspace/production/production-project.json
+```
+
+The version-one contract describes content, narration, captions, typed assets,
+an edit timeline, and publish metadata. Review and Audio Story adapters are
+currently available; existing renderers and approval gates remain unchanged
+while the shared Edit → Render → Export flow is migrated incrementally.
+
 ## Background Jobs
 
 Voice, render, ASR, script generation, source scoring, and source downloads run
