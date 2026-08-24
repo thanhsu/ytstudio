@@ -1,5 +1,7 @@
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ensureProjectDir, writeJson } from "./fs.ts";
+import { resolveProjectPath } from "./project-paths.ts";
 import { normalizeWorkflowType } from "./workflow-templates.ts";
 import type { VideoBrief, VideoFormat } from "./types.ts";
 
@@ -50,4 +52,37 @@ export async function createBrief(input: CreateBriefInput): Promise<VideoBrief> 
   const dir = await ensureProjectDir(brief.id);
   await writeJson(join(dir, "brief.json"), brief);
   return brief;
+}
+
+export type UpdateBriefInput = Partial<Pick<CreateBriefInput, "topic" | "show" | "format" | "audience" | "language" | "notes">>;
+
+export async function loadBrief(projectId: string): Promise<VideoBrief> {
+  return JSON.parse(await readFile(resolveProjectPath(projectId, "brief.json"), "utf8")) as VideoBrief;
+}
+
+export async function updateBrief(projectId: string, update: UpdateBriefInput): Promise<VideoBrief> {
+  const brief = await loadBrief(projectId);
+  const input: CreateBriefInput = {
+    id: brief.id,
+    topic: update.topic ?? brief.topic,
+    show: update.show ?? brief.show,
+    format: update.format ?? brief.format,
+    workflowType: brief.workflowType,
+    audience: update.audience ?? brief.audience,
+    language: update.language ?? brief.language,
+    notes: update.notes ?? brief.notes,
+  };
+  validateBrief(input);
+
+  const updated: VideoBrief = {
+    ...brief,
+    topic: input.topic.trim(),
+    show: input.show.trim(),
+    format: input.format,
+    audience: input.audience.trim(),
+    language: input.language.trim(),
+    notes: input.notes?.trim() ?? "",
+  };
+  await writeJson(resolveProjectPath(projectId, "brief.json"), updated);
+  return updated;
 }

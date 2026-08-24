@@ -557,11 +557,21 @@ select:focus-visible {
   color: var(--text-muted);
 }
 
-.projects-row button {
+.projects-row .row-actions {
   grid-column: 3;
   grid-row: 1 / 3;
   align-self: center;
   justify-self: end;
+  display: flex;
+  gap: 0.4rem;
+}
+
+.projects-row .row-edit {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  margin-top: 0.65rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--border-subtle);
 }
 
 .type-badge {
