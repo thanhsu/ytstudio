@@ -1,7 +1,7 @@
 import { appState, refreshAppData } from "../lib/state.js";
 import { fetchJsonOrNull, storyApiUrl } from "../lib/api.js";
 import { setStatus, view, setBreadcrumb, setActiveNav } from "../lib/shell.js";
-import { actionButton, field, selectField, gateNotice } from "../lib/dom.js";
+import { actionButton, field, selectField, textareaField, formValues, gateNotice } from "../lib/dom.js";
 import { navigate } from "../lib/router.js";
 import { renderCreateProjectForm } from "./review-project.js";
 import { renderCreateSeriesForm } from "./series.js";
@@ -13,7 +13,7 @@ const TYPE_FILTERS = [
   ["channel", "Story channels"],
 ];
 
-const screenState = { typeFilter: "", search: "", storyChannelIds: new Set(), creating: null };
+const screenState = { typeFilter: "", search: "", storyChannelIds: new Set(), creating: null, editing: null };
 
 // The live `.projects-rows` element. Filtering repaints only this list, so the
 // focused search box is never torn out of the DOM between keystrokes.
@@ -55,12 +55,21 @@ function seriesEpisodeProjectIds() {
 function rows() {
   const items = [];
   const hiddenEpisodeProjects = seriesEpisodeProjectIds();
+  const briefs = Object.fromEntries((appState.projectBriefs ?? []).map((brief) => [brief.id, brief]));
   for (const projectId of appState.projects) {
     if (hiddenEpisodeProjects.has(projectId)) continue;
-    items.push({ type: "review", id: projectId, title: projectId, hash: `#/project/${encodeURIComponent(projectId)}/overview` });
+    const brief = briefs[projectId];
+    items.push({
+      type: "review",
+      id: projectId,
+      title: brief?.topic?.trim() || projectId,
+      subtitle: brief?.show?.trim() ? `${projectId} · ${brief.show}` : undefined,
+      brief,
+      hash: `#/project/${encodeURIComponent(projectId)}/overview`,
+    });
   }
   for (const series of appState.series) {
-    items.push({ type: "series", id: series.id, title: series.title || series.id, subtitle: series.workflowType, hash: `#/series/${encodeURIComponent(series.id)}/overview` });
+    items.push({ type: "series", id: series.id, title: series.title || series.id, subtitle: `${series.id} · ${series.workflowType}`, series, hash: `#/series/${encodeURIComponent(series.id)}/overview` });
     if (screenState.storyChannelIds.has(series.id)) {
       items.push({ type: "channel", id: series.id, title: series.title || series.id, hash: `#/channel/${encodeURIComponent(series.id)}/overview` });
     }
@@ -130,9 +139,21 @@ function renderProjectRows() {
     const title = document.createElement("strong");
     title.textContent = row.title;
     const subtitle = document.createElement("small");
-    subtitle.textContent = row.subtitle ? `${row.id} · ${row.subtitle}` : row.id;
-    const open = actionButton("Open", () => navigate(row.hash));
-    item.append(badge, title, subtitle, open);
+    subtitle.textContent = row.subtitle ?? row.id;
+    const actions = document.createElement("div");
+    actions.className = "row-actions";
+    actions.append(actionButton("Open", () => navigate(row.hash)));
+    // A channel row shares its id with its series row, which owns edit/delete.
+    if (row.type !== "channel") {
+      actions.append(
+        actionButton("Edit", () => toggleEdit(row)),
+        actionButton("Delete", () => deleteRow(row).catch((error) => setStatus(error.message))),
+      );
+    }
+    item.append(badge, title, subtitle, actions);
+    if (screenState.editing && screenState.editing.type === row.type && screenState.editing.id === row.id) {
+      item.append(renderEditForm(row));
+    }
     return item;
   });
   if (items.length === 0) {
@@ -146,4 +167,80 @@ function renderProjectRows() {
 function toggleCreate(kind) {
   screenState.creating = screenState.creating === kind ? null : kind;
   renderProjectsScreen();
+}
+
+function toggleEdit(row) {
+  const isOpen = screenState.editing && screenState.editing.type === row.type && screenState.editing.id === row.id;
+  screenState.editing = isOpen ? null : { type: row.type, id: row.id };
+  renderProjectRows();
+}
+
+function renderEditForm(row) {
+  const form = document.createElement("form");
+  form.className = "row-edit form-grid";
+  if (row.type === "review") {
+    const brief = row.brief ?? {};
+    form.append(
+      field("Topic", "topic", brief.topic ?? "", "text"),
+      field("Show", "show", brief.show ?? "", "text"),
+      field("Audience", "audience", brief.audience ?? "", "text"),
+      field("Language", "language", brief.language ?? "", "text"),
+      textareaField("Notes", "notes", brief.notes ?? ""),
+    );
+  } else {
+    const series = row.series ?? {};
+    form.append(
+      field("Title", "title", series.title ?? "", "text"),
+      field("Show", "show", series.show ?? "", "text"),
+      field("Audience", "audience", series.audience ?? "", "text"),
+      field("Language", "language", series.language ?? "", "text"),
+      textareaField("Brand notes", "brandNotes", series.brandNotes ?? ""),
+    );
+  }
+  form.append(
+    actionButton("Save", null, "submit", "primary"),
+    actionButton("Cancel", () => toggleEdit(row)),
+  );
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    saveRowEdits(row, formValues(form)).catch((error) => setStatus(error.message));
+  });
+  return form;
+}
+
+async function saveRowEdits(row, values) {
+  const url = row.type === "review"
+    ? `/api/projects/${encodeURIComponent(row.id)}`
+    : `/api/series/${encodeURIComponent(row.id)}`;
+  const response = await fetch(url, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(values),
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    setStatus(`${data.code}: ${data.message}`);
+    return;
+  }
+  screenState.editing = null;
+  setStatus(`Saved ${row.id}.`);
+  await mountProjects({ screen: "projects" });
+}
+
+async function deleteRow(row) {
+  const message = row.type === "series"
+    ? `Delete series "${row.title}" and its ${row.series?.episodes?.length ?? 0} episode projects? This cannot be undone.`
+    : `Delete project "${row.title}" (${row.id})? This cannot be undone.`;
+  if (!window.confirm(message)) return;
+  const url = row.type === "series"
+    ? `/api/series/${encodeURIComponent(row.id)}`
+    : `/api/projects/${encodeURIComponent(row.id)}`;
+  const response = await fetch(url, { method: "DELETE" });
+  const data = await response.json();
+  if (!response.ok) {
+    setStatus(`${data.code}: ${data.message}`);
+    return;
+  }
+  setStatus(`Deleted ${row.id}.`);
+  await mountProjects({ screen: "projects" });
 }

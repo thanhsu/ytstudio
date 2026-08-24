@@ -1,4 +1,4 @@
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { createBrief } from "./brief.ts";
 import { ensureProjectDir, projectsRoot, writeJson } from "./fs.ts";
@@ -196,6 +196,52 @@ export async function updateSeriesEpisode(
   series.updatedAt = next.updatedAt;
   await saveSeriesProject(series);
   return series;
+}
+
+export type UpdateSeriesInput = Partial<
+  Pick<
+    SeriesProject,
+    | "title"
+    | "show"
+    | "originalTitle"
+    | "audience"
+    | "language"
+    | "brandNotes"
+    | "titleStyle"
+    | "thumbnailStyle"
+    | "scheduleNotes"
+  >
+>;
+
+export async function updateSeriesProject(seriesId: string, update: UpdateSeriesInput): Promise<SeriesProject> {
+  const series = await loadSeriesProject(seriesId);
+  const next: SeriesProject = {
+    ...series,
+    title: update.title !== undefined ? required(update.title, "title") : series.title,
+    show: update.show !== undefined ? required(update.show, "show") : series.show,
+    audience: update.audience !== undefined ? required(update.audience, "audience") : series.audience,
+    language: update.language !== undefined ? required(update.language, "language") : series.language,
+    originalTitle: update.originalTitle !== undefined ? update.originalTitle.trim() : series.originalTitle,
+    brandNotes: update.brandNotes !== undefined ? update.brandNotes.trim() : series.brandNotes,
+    titleStyle: update.titleStyle !== undefined ? update.titleStyle.trim() : series.titleStyle,
+    thumbnailStyle: update.thumbnailStyle !== undefined ? update.thumbnailStyle.trim() : series.thumbnailStyle,
+    scheduleNotes: update.scheduleNotes !== undefined ? update.scheduleNotes.trim() : series.scheduleNotes,
+    updatedAt: new Date().toISOString(),
+  };
+  await saveSeriesProject(next);
+  return next;
+}
+
+export async function deleteSeriesProject(seriesId: string): Promise<{ id: string; removedEpisodeProjects: string[] }> {
+  const series = await loadSeriesProject(seriesId);
+  const removedEpisodeProjects: string[] = [];
+  for (const episode of series.episodes) {
+    const episodeProjectId = validateProjectId(episode.episodeProjectId);
+    await rm(join(projectsRoot(), episodeProjectId), { recursive: true, force: true });
+    removedEpisodeProjects.push(episodeProjectId);
+  }
+  await rm(join(projectsRoot(), seriesId), { recursive: true, force: true });
+  return { id: seriesId, removedEpisodeProjects };
 }
 
 export async function saveSeriesProject(series: SeriesProject): Promise<void> {
