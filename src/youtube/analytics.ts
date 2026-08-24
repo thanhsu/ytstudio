@@ -1,4 +1,5 @@
 import { redact } from "../redact.ts";
+import { normalizeYouTubeError, redactedYouTubeError } from "./errors.ts";
 
 const STATS_ENDPOINT = "https://www.googleapis.com/youtube/v3/videos";
 
@@ -9,9 +10,12 @@ export async function fetchVideoStats(options: {
 }): Promise<Map<string, { views: number; likes: number; comments: number }>> {
   if (options.videoIds.length === 0) return new Map();
   const url = `${STATS_ENDPOINT}?part=statistics&id=${encodeURIComponent(options.videoIds.join(","))}`;
-  const response = await (options.fetch ?? fetch)(url, { headers: { authorization: `Bearer ${options.accessToken}` } });
+  let response: Response;
+  try { response = await (options.fetch ?? fetch)(url, { headers: { authorization: `Bearer ${options.accessToken}` } }); }
+  catch (error) { throw redactedYouTubeError(error); }
   if (!response.ok) {
-    throw new Error(`YouTube analytics request failed (${response.status}): ${redact((await response.text())).slice(0, 400)}`);
+    const mapped = normalizeYouTubeError({ response: { status: response.status, body: await response.text() } });
+    throw new Error(`${mapped.code}: ${mapped.message}`);
   }
   const body = await response.json() as { items?: Array<{ id?: unknown; statistics?: Record<string, unknown> }> };
   const result = new Map<string, { views: number; likes: number; comments: number }>();
