@@ -37,6 +37,7 @@ export const JOB_LABELS = {
   "story-pipeline": "Story pipeline",
   "story-stage": "Story stage",
   "story-export": "Story export",
+  "voiceover-render": "Voiceover render",
 };
 
 const jobEventHandlers = new Set();
