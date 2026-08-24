@@ -1,7 +1,7 @@
 import { optionalStringArray, parseJsonObject, requireText } from "../../llm/parse.ts";
 import { buildNaturalizeMessages, NATURALIZE_PROMPT_NAME, NATURALIZE_PROMPT_VERSION } from "../prompts/naturalize.ts";
 import { readStageArtifact, writeStageArtifact } from "../story-project.ts";
-import type { NaturalizedScript, ScriptArtifact } from "../types.ts";
+import type { NaturalizedScript, Provenance, ScriptArtifact } from "../types.ts";
 import { readSectionFile } from "./sections.ts";
 import { llmStage, promptContext, type StageContext } from "./context.ts";
 
@@ -27,6 +27,12 @@ export async function runNaturalizeStage(ctx: StageContext): Promise<Naturalized
   }
   const naturalizedSections: string[] = [];
   const changes: Array<{ sectionIndex: number; note: string }> = [];
+  let provenance: Provenance = {
+    provider: "openai-compatible",
+    model: ctx.config.storyFactory.models.qa.model,
+    promptVersion: NATURALIZE_PROMPT_VERSION,
+    generatedAt: new Date().toISOString(),
+  };
   for (const entry of script.sections) {
     const section = await readSectionFile(ctx.channelId, ctx.storyId, entry.index);
     if (!section) {
@@ -45,18 +51,14 @@ export async function runNaturalizeStage(ctx: StageContext): Promise<Naturalized
     for (const note of result.value.notes) {
       changes.push({ sectionIndex: entry.index, note });
     }
+    provenance = result.provenance;
   }
   const artifact: NaturalizedScript = {
     version: 1,
     fullText: naturalizedSections.join("\n\n"),
     changes,
     locale: ctx.story.config.locale,
-    provenance: {
-      provider: "openai-compatible",
-      model: ctx.config.storyFactory.models.qa.model,
-      promptVersion: NATURALIZE_PROMPT_VERSION,
-      generatedAt: new Date().toISOString(),
-    },
+    provenance,
   };
   await writeStageArtifact(ctx.channelId, ctx.storyId, "naturalize", artifact);
   return artifact;

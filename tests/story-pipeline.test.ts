@@ -21,7 +21,9 @@ import {
   createStory,
   deriveStoryStatus,
   loadStory,
+  readStageArtifact,
 } from "../src/story-factory/story-project.ts";
+import type { NaturalizedScript } from "../src/story-factory/types.ts";
 import { makeFakeExecutable } from "./helpers.ts";
 
 const IDEA_LOGLINE = "El ascensor del hospital abandonado baja solo cada madrugada.";
@@ -153,13 +155,16 @@ function createFakeImages(): ImageProvider & { calls: number } {
   return provider;
 }
 
-async function withStory<T>(fn: (helpers: {
-  deps: StoryPipelineDeps;
-  chat: FakeChat;
-  tts: ReturnType<typeof createFakeTts>;
-  images: ReturnType<typeof createFakeImages>;
-  config: StudioConfig;
-}) => Promise<T>): Promise<T> {
+async function withStory<T>(
+  fn: (helpers: {
+    deps: StoryPipelineDeps;
+    chat: FakeChat;
+    tts: ReturnType<typeof createFakeTts>;
+    images: ReturnType<typeof createFakeImages>;
+    config: StudioConfig;
+  }) => Promise<T>,
+  overrides: { qaProvider?: "openai-compatible" | "anthropic" | "gemini" } = {},
+): Promise<T> {
   const previousCwd = process.cwd();
   const root = await mkdtemp(join(tmpdir(), "yt-story-pipeline-"));
   try {
@@ -172,7 +177,15 @@ async function withStory<T>(fn: (helpers: {
         models: {
           planner: { baseUrl: "http://fake", model: "fake-model", apiKeyEnv: "", paid: false, temperature: 0.8, maxOutputTokens: 8000 },
           writer: { baseUrl: "http://fake", model: "fake-model", apiKeyEnv: "", paid: false, temperature: 0.8, maxOutputTokens: 8000 },
-          qa: { baseUrl: "http://fake", model: "fake-model", apiKeyEnv: "", paid: false, temperature: 0.8, maxOutputTokens: 8000 },
+          qa: {
+            baseUrl: "http://fake",
+            model: "fake-model",
+            apiKeyEnv: "",
+            paid: false,
+            temperature: 0.8,
+            maxOutputTokens: 8000,
+            ...(overrides.qaProvider ? { provider: overrides.qaProvider } : {}),
+          },
         },
         llmPricing: [{ modelPattern: "fake-model", inputUsdPerMTok: 1, outputUsdPerMTok: 2 }],
         duplicateSimilarityThreshold: 0.6,
@@ -247,6 +260,19 @@ test("an assisted run generates everything, auto-passes QA gates, and stops befo
     assert.equal(log.length, 14);
     assert.ok(log.every((entry) => entry.ok && entry.usage?.promptTokens === 1000 && entry.promptVersion));
   });
+});
+
+test("naturalize provenance records the qa role's configured provider, not a hardcoded one", async () => {
+  await withStory(
+    async ({ deps }) => {
+      const outcome = await runStoryPipeline("es-horror", "story-001", deps);
+      assert.equal(outcome.completed, true);
+
+      const artifact = await readStageArtifact<NaturalizedScript>("es-horror", "story-001", "naturalize");
+      assert.equal(artifact?.provenance.provider, "anthropic");
+    },
+    { qaProvider: "anthropic" },
+  );
 });
 
 test("a second run over a finished story calls no provider at all", async () => {
