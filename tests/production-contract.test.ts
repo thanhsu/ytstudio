@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import {
   assertValidProductionProject,
   validateProductionProject,
@@ -13,6 +16,13 @@ import type {
   ReviewProductionInput,
 } from "../src/production/adapters.ts";
 import type { ProductionProject } from "../src/production/types.ts";
+import {
+  loadProductionProject,
+  loadProductionProjectOrNull,
+  PRODUCTION_PROJECT_RELATIVE_PATH,
+  saveProductionProject,
+} from "../src/production/store.ts";
+import { resolveProjectPath } from "../src/project-paths.ts";
 
 function validProject(): ProductionProject {
   return {
@@ -220,4 +230,49 @@ test("adapters reject invalid output instead of emitting an unsafe contract", ()
     () => normalizeReviewProject({ ...input, timeline: { ...input.timeline, durationSeconds: -1 } }),
     /invalid production project/i,
   );
+});
+
+test("saves and loads a production project under workspace production", async () => {
+  const previousCwd = process.cwd();
+  const root = await mkdtemp(join(tmpdir(), "yt-production-contract-"));
+  try {
+    process.chdir(root);
+    const project = validProject();
+    await saveProductionProject(project);
+    assert.deepEqual(await loadProductionProject(project.projectId), project);
+    assert.equal(await loadProductionProjectOrNull("missing-project"), null);
+    const savedPath = resolveProjectPath(project.projectId, PRODUCTION_PROJECT_RELATIVE_PATH);
+    assert.match(await readFile(savedPath, "utf8"), /"version": 1/);
+  } finally {
+    process.chdir(previousCwd);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("refuses to save invalid production projects", async () => {
+  const previousCwd = process.cwd();
+  const root = await mkdtemp(join(tmpdir(), "yt-production-contract-"));
+  try {
+    process.chdir(root);
+    await assert.rejects(() => saveProductionProject({ ...validProject(), version: 2 } as never), /unsupported production project version/i);
+  } finally {
+    process.chdir(previousCwd);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("refuses malformed persisted contract versions", async () => {
+  const previousCwd = process.cwd();
+  const root = await mkdtemp(join(tmpdir(), "yt-production-contract-"));
+  try {
+    process.chdir(root);
+    const project = validProject();
+    await saveProductionProject(project);
+    const path = resolveProjectPath(project.projectId, PRODUCTION_PROJECT_RELATIVE_PATH);
+    await writeFile(path, JSON.stringify({ ...project, version: 99 }), "utf8");
+    await assert.rejects(() => loadProductionProject(project.projectId), /unsupported production project version/i);
+  } finally {
+    process.chdir(previousCwd);
+    await rm(root, { recursive: true, force: true });
+  }
 });
