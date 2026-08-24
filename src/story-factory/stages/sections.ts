@@ -116,16 +116,25 @@ export async function runSectionsStage(
     await writeStageArtifact(ctx.channelId, ctx.storyId, "bible", bible);
   }
 
+  const script = assembleScriptArtifact(sections);
+  await writeStageArtifact(ctx.channelId, ctx.storyId, "sections", script);
+  return script;
+}
+
+/**
+ * Build the script.json artifact from a story's sections. Shared by the
+ * generation stage above and by section-edit.ts, so a hand-edit and a fresh
+ * generation hash the same fullText/sourceHash the same way.
+ */
+export function assembleScriptArtifact(sections: SectionArtifact[]): ScriptArtifact {
   const fullText = sections.map((section) => section.text.trim()).join("\n\n");
-  const script: ScriptArtifact = {
+  return {
     version: 1,
     fullText,
     sections: sections.map((section) => ({ index: section.index, textHash: sha256(section.text) })),
     wordCount: fullText.trim().split(/\s+/).length,
     sourceHash: sha256(fullText),
   };
-  await writeStageArtifact(ctx.channelId, ctx.storyId, "sections", script);
-  return script;
 }
 
 export async function readSectionFile(
@@ -145,7 +154,7 @@ export async function readSectionFile(
   }
 }
 
-async function writeSectionFile(channelId: string, storyId: string, section: SectionArtifact): Promise<void> {
+export async function writeSectionFile(channelId: string, storyId: string, section: SectionArtifact): Promise<void> {
   const path = storyPath(channelId, storyId, "sections", sectionFileName(section.index));
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, `${JSON.stringify(section, null, 2)}\n`, "utf8");
