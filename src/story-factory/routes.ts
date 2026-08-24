@@ -32,6 +32,8 @@ import { uploadVideo, setThumbnail } from "../youtube/upload.ts";
 import { fetchVideoStats } from "../youtube/analytics.ts";
 import { resolveProjectPath } from "../project-paths.ts";
 import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { createCompilation, exportCompilation, listCompilations, loadCompilation, renderCompilation } from "./compilation.ts";
 import { isStoryStageId, type StoryApprovalStage, type StoryProject, type StoryStageId } from "./types.ts";
 
 /**
@@ -94,6 +96,48 @@ export async function routeStoryFactory(options: {
     if (method === "PUT") {
       const body = await tools.readBody();
       tools.sendJson(200, { ok: true, storyChannel: await saveStoryChannel(channelId, body) });
+      return;
+    }
+  }
+
+  if (rest === "compilations" && method === "GET") {
+    tools.sendJson(200, { ok: true, compilations: await listCompilations(channelId) });
+    return;
+  }
+  if (rest === "compilations" && method === "POST") {
+    const body = await tools.readBody();
+    try {
+      const compilation = await createCompilation(channelId, { id: String(body.id ?? ""), title: String(body.title ?? ""), storyIds: Array.isArray(body.storyIds) ? body.storyIds.map(String) : [] });
+      tools.sendJson(200, { ok: true, compilation });
+    } catch (error: unknown) {
+      tools.sendError(400, { code: "compilation-invalid", message: error instanceof Error ? error.message : String(error) });
+    }
+    return;
+  }
+  const compilationMatch = /^compilations\/([a-z0-9-]+)(?:\/(.*))?$/.exec(rest);
+  if (compilationMatch) {
+    const compilationId = compilationMatch[1];
+    const compilationRest = compilationMatch[2] ?? "";
+    if (!compilationRest && method === "GET") {
+      tools.sendJson(200, { ok: true, compilation: await loadCompilation(channelId, compilationId) });
+      return;
+    }
+    if (compilationRest === "render/run" && method === "POST") {
+      await tools.startChannelJob("compilation-render", ({ signal, update }) => renderCompilation(channelId, compilationId, { config, signal, update }), `comp::${compilationId}`);
+      return;
+    }
+    if (compilationRest === "approve/final" && method === "POST") {
+      const compilation = await loadCompilation(channelId, compilationId);
+      const render = await readFile(resolveProjectPath(channelId, "compilations", compilationId, "render.json"));
+      const artifactHash = createHash("sha256").update(render).digest("hex");
+      compilation.approvals.final = { artifactHash, approvedAt: new Date().toISOString(), note: "" };
+      compilation.updatedAt = new Date().toISOString();
+      await (await import("../fs.ts")).writeJson(resolveProjectPath(channelId, "compilations", compilationId, "compilation.json"), compilation);
+      tools.sendJson(200, { ok: true, compilation });
+      return;
+    }
+    if (compilationRest === "export" && method === "POST") {
+      tools.sendJson(200, { ok: true, exported: await exportCompilation(channelId, compilationId) });
       return;
     }
   }

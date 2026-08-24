@@ -15,7 +15,8 @@ export type JobKind =
   | "story-pipeline"
   | "story-stage"
   | "story-export"
-  | "story-publish";
+  | "story-publish"
+  | "compilation-render";
 export type JobStatus = "running" | "succeeded" | "failed" | "cancelled";
 
 export type JobRecord = {

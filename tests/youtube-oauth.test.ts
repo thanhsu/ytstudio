@@ -30,7 +30,7 @@ test("buildAuthUrl carries offline consent and encoded OAuth parameters", () => 
 
 test("exchangeCode and refreshAccessToken post form bodies and compute expiry", async () => {
   const calls: Array<{ url: string; body: string }> = [];
-  const fetchImpl = async (input: string | URL, init?: RequestInit): Promise<Response> => {
+  const fetchImpl = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     calls.push({ url: String(input), body: String(init?.body) });
     return response({ access_token: "access", refresh_token: "refresh", expires_in: 3600, scope: "scope-a" });
   };

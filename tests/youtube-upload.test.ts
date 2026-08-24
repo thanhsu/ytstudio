@@ -10,7 +10,7 @@ test("uploadVideo initializes a resumable upload and streams the whole file", as
   const videoPath = join(root, "story.mp4");
   await writeFile(videoPath, Buffer.from("video-bytes"));
   const calls: Array<{ url: string; method: string; headers: Headers; body?: ArrayBuffer }> = [];
-  const fetchImpl = async (input: string | URL, init?: RequestInit): Promise<Response> => {
+  const fetchImpl = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const headers = new Headers(init?.headers);
     const body = init?.body ? await new Response(init.body as BodyInit).arrayBuffer() : undefined;
     calls.push({ url: String(input), method: init?.method ?? "GET", headers, body });

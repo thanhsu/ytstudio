@@ -240,7 +240,7 @@ async function executeGuarded(
     // the BUDGET_PAUSED story status. LLM stages check with a zero estimate
     // (spend is only known after the call); media stages add concrete
     // estimates of their own before spending.
-    await assertWithinBudget(channelId, storyId, story.config.budget.maxCostPerStoryUsd, 0, { maxUsd: ctx.channel.budget.maxCostPerMonthUsd });
+    await assertWithinBudget(channelId, storyId, story.config.budget.maxCostPerStoryUsd, 0, { maxUsd: ctx.channel.budget.maxCostPerMonthUsd ?? 0 });
     await executeStage(stage, ctx, options);
   } catch (error: unknown) {
     await saveStageRun(channelId, storyId, stage, {
@@ -396,7 +396,7 @@ async function runTtsStage(ctx: StageContext, onlyChunkIndex?: number): Promise<
     .filter((chunk) => chunk.status !== "done")
     .reduce((sum, chunk) => sum + chunk.chars, 0);
   const estimate = estimateGoogleTtsCost(pendingChars, profile.tier, googleConfig.pricing);
-  await assertWithinBudget(ctx.channelId, ctx.storyId, ctx.story.config.budget.maxCostPerStoryUsd, estimate.totalUsd, { maxUsd: ctx.channel.budget.maxCostPerMonthUsd });
+  await assertWithinBudget(ctx.channelId, ctx.storyId, ctx.story.config.budget.maxCostPerStoryUsd, estimate.totalUsd, { maxUsd: ctx.channel.budget.maxCostPerMonthUsd ?? 0 });
 
   const persist = async (value: TtsChunkManifest) => {
     await writeStageArtifact(ctx.channelId, ctx.storyId, "tts", value);
@@ -472,7 +472,7 @@ async function runImagesStage(ctx: StageContext, onlySceneId?: string): Promise<
   for (const image of manifest.images) {
     if (onlySceneId && image.sceneId !== onlySceneId) continue;
     if (image.status === "done") continue;
-    await assertWithinBudget(ctx.channelId, ctx.storyId, ctx.story.config.budget.maxCostPerStoryUsd, usdPerImage, { maxUsd: ctx.channel.budget.maxCostPerMonthUsd });
+    await assertWithinBudget(ctx.channelId, ctx.storyId, ctx.story.config.budget.maxCostPerStoryUsd, usdPerImage, { maxUsd: ctx.channel.budget.maxCostPerMonthUsd ?? 0 });
     try {
       await provider.generate(
         {
@@ -609,7 +609,7 @@ async function runThumbnailStage(ctx: StageContext): Promise<void> {
         ctx.storyId,
         ctx.story.config.budget.maxCostPerStoryUsd,
         ctx.config.images.gemini.usdPerImage,
-        { maxUsd: ctx.channel.budget.maxCostPerMonthUsd },
+        { maxUsd: ctx.channel.budget.maxCostPerMonthUsd ?? 0 },
       );
       const artifact = await provider.generate(request, signal);
       generatedImages += 1;
