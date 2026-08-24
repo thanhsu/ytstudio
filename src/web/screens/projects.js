@@ -15,6 +15,10 @@ const TYPE_FILTERS = [
 
 const screenState = { typeFilter: "", search: "", storyChannelIds: new Set(), creating: null };
 
+// The live `.projects-rows` element. Filtering repaints only this list, so the
+// focused search box is never torn out of the DOM between keystrokes.
+let rowsList = null;
+
 export async function mountProjects(route) {
   setActiveNav("projects");
   setBreadcrumb([{ label: "Projects" }]);
@@ -70,12 +74,12 @@ function renderProjectsScreen() {
   const filterField = selectField("Type", "typeFilter", screenState.typeFilter, TYPE_FILTERS);
   filterField.querySelector("select").addEventListener("change", (event) => {
     screenState.typeFilter = event.target.value;
-    renderProjectsScreen();
+    renderProjectRows();
   });
   const searchField = field("Search", "search", screenState.search, "search", "Filter by name or id");
   searchField.querySelector("input").addEventListener("input", (event) => {
     screenState.search = event.target.value;
-    renderProjectsScreen();
+    renderProjectRows();
   });
   toolbar.append(
     filterField,
@@ -85,26 +89,9 @@ function renderProjectsScreen() {
     actionButton("New Story Channel", () => toggleCreate("channel")),
   );
 
-  const list = document.createElement("ul");
-  list.className = "projects-rows";
-  const visible = rows();
-  if (visible.length === 0) {
-    list.append(gateNotice("Nothing here yet", "Create a project to start.", "info"));
-  }
-  for (const row of visible) {
-    const item = document.createElement("li");
-    item.className = `projects-row type-${row.type}`;
-    const badge = document.createElement("span");
-    badge.className = `type-badge type-${row.type}`;
-    badge.textContent = TYPE_BADGES[row.type];
-    const title = document.createElement("strong");
-    title.textContent = row.title;
-    const subtitle = document.createElement("small");
-    subtitle.textContent = row.subtitle ? `${row.id} · ${row.subtitle}` : row.id;
-    const open = actionButton("Open", () => navigate(row.hash));
-    item.append(badge, title, subtitle, open);
-    list.append(item);
-  }
+  rowsList = document.createElement("ul");
+  rowsList.className = "projects-rows";
+  renderProjectRows();
 
   const createHost = document.createElement("div");
   createHost.className = "projects-create";
@@ -117,8 +104,33 @@ function renderProjectsScreen() {
     );
   }
 
-  screen.append(toolbar, createHost, list);
+  screen.append(toolbar, createHost, rowsList);
   view.replaceChildren(screen);
+}
+
+// Repaints the row list in place. The toolbar (and with it the focused search
+// input and the type select) is left alone, so filtering never interrupts typing.
+function renderProjectRows() {
+  if (!rowsList) return;
+  const visible = rows();
+  const items = visible.map((row) => {
+    const item = document.createElement("li");
+    item.className = `projects-row type-${row.type}`;
+    const badge = document.createElement("span");
+    badge.className = `type-badge type-${row.type}`;
+    badge.textContent = TYPE_BADGES[row.type];
+    const title = document.createElement("strong");
+    title.textContent = row.title;
+    const subtitle = document.createElement("small");
+    subtitle.textContent = row.subtitle ? `${row.id} · ${row.subtitle}` : row.id;
+    const open = actionButton("Open", () => navigate(row.hash));
+    item.append(badge, title, subtitle, open);
+    return item;
+  });
+  if (items.length === 0) {
+    items.push(gateNotice("Nothing here yet", "Create a project to start.", "info"));
+  }
+  rowsList.replaceChildren(...items);
 }
 
 function toggleCreate(kind) {
