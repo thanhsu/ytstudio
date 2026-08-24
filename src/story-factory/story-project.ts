@@ -330,7 +330,7 @@ function snapshotConfig(channel: StoryChannelConfig, input: CreateStoryInput): S
     mode: input.mode === undefined ? channel.mode : normalizeMode(input.mode),
     ttsProfile: { ...channel.ttsProfile },
     visualStyleProfile: { ...channel.visualStyleProfile },
-    budget: { maxCostPerStoryUsd: channel.budget.maxCostPerStoryUsd },
+    budget: { ...channel.budget },
   };
 }
 
@@ -380,7 +380,10 @@ function normalizeStory(channelId: string, storyId: string, value: unknown): Sto
       mode: normalizeMode(configCandidate.mode),
       ttsProfile: normalizeTtsProfile(configCandidate.ttsProfile),
       visualStyleProfile: normalizeVisualStyle(configCandidate.visualStyleProfile),
-      budget: { maxCostPerStoryUsd: boundedBudget(configCandidate.budget?.maxCostPerStoryUsd) },
+      budget: {
+        maxCostPerStoryUsd: boundedBudget(configCandidate.budget?.maxCostPerStoryUsd),
+        maxCostPerMonthUsd: boundedMonthlyBudget(configCandidate.budget?.maxCostPerMonthUsd),
+      },
     },
     stages,
     approvals,
@@ -465,6 +468,11 @@ function boundedMinutes(value: unknown): number {
 function boundedBudget(value: unknown): number {
   const number = Number(value);
   return Number.isFinite(number) && number >= 0 && number <= 10000 ? number : 5;
+}
+
+function boundedMonthlyBudget(value: unknown): number {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 && number <= 100000 ? number : 0;
 }
 
 function boundedCount(value: unknown): number {

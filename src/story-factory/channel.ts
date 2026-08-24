@@ -65,7 +65,10 @@ export function normalizeStoryChannel(channelId: string, value: unknown): StoryC
       sfx: normalizeBgmSfx(candidate.bgm?.sfx),
     },
     pronunciations: normalizePronunciations(candidate.pronunciations),
-    budget: { maxCostPerStoryUsd: rangeOr(candidate.budget?.maxCostPerStoryUsd, 5, 0, 10000) },
+    budget: {
+      maxCostPerStoryUsd: rangeOr(candidate.budget?.maxCostPerStoryUsd, 5, 0, 10000),
+      maxCostPerMonthUsd: rangeOr(candidate.budget?.maxCostPerMonthUsd, 0, 0, 100000),
+    },
     updatedAt: stringOr(candidate.updatedAt, new Date(0).toISOString()),
   };
 }

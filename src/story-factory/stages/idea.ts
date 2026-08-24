@@ -7,6 +7,7 @@ import { writeStageArtifact } from "../story-project.ts";
 import type { IdeaArtifact } from "../types.ts";
 import { llmStage, promptContext, type StageContext } from "./context.ts";
 import { resolvePromptVersion } from "../prompt-overrides.ts";
+import { ideaDirective, loadPerformanceProfile } from "../performance.ts";
 
 export type ParsedIdea = {
   logline: string;
@@ -30,6 +31,7 @@ export async function runIdeaStage(ctx: StageContext): Promise<IdeaArtifact> {
   const priorEntries = index.entries.filter((entry) => entry.storyId !== ctx.storyId);
   const avoidPremises = priorEntries.slice(-20).map((entry) => entry.logline).filter(Boolean);
   const threshold = ctx.config.storyFactory.duplicateSimilarityThreshold;
+  const performance = await loadPerformanceProfile(ctx.channelId);
   const candidates = priorEntries
     .filter((entry) => entry.ideaSignature.length > 0)
     .map((entry) => ({ storyId: entry.storyId, signature: entry.ideaSignature }));
@@ -49,6 +51,9 @@ export async function runIdeaStage(ctx: StageContext): Promise<IdeaArtifact> {
           attempt === 0
             ? avoidPremises
             : [...avoidPremises, `REJECTED as too similar on the last attempt: ${duplicateCheck.nearest[0]?.storyId ?? ""}`],
+        performance: performance?.provenThemes.length
+          ? { provenThemes: performance.provenThemes, directive: ideaDirective(ctx.storyId) }
+          : undefined,
       }, ctx.promptOverrides),
       parseIdea,
     );

@@ -106,6 +106,8 @@ export async function addStoryCost(
   if (spend.kind === "image") channel.byKind.image = round6(channel.byKind.image + spend.usd);
   channel.totalUsd = round6(channel.byKind.llm + channel.byKind.tts + channel.byKind.image);
   channel.byStory[storyId] = cost.totalUsd;
+  const month = now.slice(0, 7);
+  channel.byMonth[month] = round6((channel.byMonth[month] ?? 0) + spend.usd);
   channel.updatedAt = now;
   await writeJsonFile(channelStoryFactoryPath(channelId, CHANNEL_COSTS_FILE), channel);
 
@@ -121,6 +123,7 @@ export async function assertWithinBudget(
   storyId: string,
   limitUsd: number,
   nextEstimateUsd: number,
+  monthly?: { maxUsd: number; now?: Date },
 ): Promise<void> {
   if (limitUsd <= 0) {
     return;
@@ -128,6 +131,12 @@ export async function assertWithinBudget(
   const cost = await loadStoryCost(channelId, storyId);
   if (cost.totalUsd + nextEstimateUsd > limitUsd) {
     throw new BudgetExceededError(cost.totalUsd, limitUsd);
+  }
+  if (monthly && monthly.maxUsd > 0) {
+    const month = (monthly.now ?? new Date()).toISOString().slice(0, 7);
+    const channel = await loadChannelCosts(channelId);
+    const spent = channel.byMonth[month] ?? 0;
+    if (spent + nextEstimateUsd > monthly.maxUsd) throw new BudgetExceededError(spent, monthly.maxUsd);
   }
 }
 
@@ -169,8 +178,18 @@ function normalizeChannelCosts(value: unknown): ChannelCosts {
     totalUsd: round6(byKind.llm + byKind.tts + byKind.image),
     byKind,
     byStory,
+    byMonth: normalizeByMonth(candidate.byMonth),
     updatedAt: typeof candidate.updatedAt === "string" ? candidate.updatedAt : new Date(0).toISOString(),
   };
+}
+
+function normalizeByMonth(value: unknown): Record<string, number> {
+  const result: Record<string, number> = {};
+  if (!value || typeof value !== "object") return result;
+  for (const [month, amount] of Object.entries(value)) {
+    if (/^\d{4}-\d{2}$/.test(month) && Number.isFinite(Number(amount)) && Number(amount) >= 0) result[month] = Number(amount);
+  }
+  return result;
 }
 
 async function readOptionalJson(path: string): Promise<unknown> {

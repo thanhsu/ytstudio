@@ -20,7 +20,7 @@ Fields:
 
 export function buildIdeaMessages(
   context: StoryPromptContext,
-  options: { avoidPremises: string[] },
+  options: { avoidPremises: string[]; performance?: { provenThemes: string[]; directive: "proven" | "explore" } },
   overrides?: PromptOverrides,
 ): ChatMessage[] {
   const system = resolvePromptSystem(overrides, IDEA_PROMPT_NAME, IDEA_SYSTEM_TEMPLATE, IDEA_PROMPT_VERSION, {
@@ -28,7 +28,12 @@ export function buildIdeaMessages(
     jsonRule: JSON_ONLY_RULE,
   }).system;
 
-  const user = `${renderOptionalBlock(
+  const performanceBlock = options.performance?.provenThemes.length
+    ? options.performance.directive === "proven"
+      ? `Performance data — these themes hold attention on this channel; lean into ONE of them (without repeating a previous premise):\n${renderList(options.performance.provenThemes)}\n\n`
+      : `Exploration slot — deliberately avoid the proven themes listed below and try a fresh angle for this channel:\n${renderList(options.performance.provenThemes)}\n\n`
+    : "";
+  const user = `${performanceBlock}${renderOptionalBlock(
     "Premises already used on this channel — the new idea must NOT resemble any of these",
     renderList(options.avoidPremises),
   )}Generate the idea now.`;

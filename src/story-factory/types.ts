@@ -88,7 +88,7 @@ export type VisualStyleProfile = {
 
 export type StoryMode = "manual" | "assisted";
 
-export type StoryBudget = { maxCostPerStoryUsd: number };
+export type StoryBudget = { maxCostPerStoryUsd: number; maxCostPerMonthUsd: number };
 
 /** Snapshot of channel settings taken when the story is created, then editable per story. */
 export type StoryProjectConfig = {
@@ -454,6 +454,7 @@ export type ChannelCosts = {
   totalUsd: number;
   byKind: { llm: number; tts: number; image: number };
   byStory: Record<string, number>;
+  byMonth: Record<string, number>;
   updatedAt: string;
 };
 

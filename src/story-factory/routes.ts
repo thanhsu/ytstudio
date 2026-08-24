@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import type { JobKind } from "../jobs.ts";
 import { loadStudioConfig, type StudioConfig } from "../config.ts";
 import { readAiLog } from "./ai-log.ts";
+import { loadAnalytics, refreshChannelAnalytics } from "./analytics.ts";
+import { deleteCalendarEntry, loadCalendar, upsertCalendarEntry } from "./calendar.ts";
 import { loadChannelCosts, loadStoryCost } from "./cost.ts";
 import { exportStoryPackage, StoryApprovalRequiredError } from "./export.ts";
 import { loadStoryChannel, saveStoryChannel, normalizeTtsProfile } from "./channel.ts";
@@ -27,6 +29,7 @@ import { generateVoiceSample, listVoiceLabVoices } from "./voice-lab.ts";
 import { buildAuthUrl, rememberOAuthState } from "../youtube/oauth.ts";
 import { clearTokens, getFreshAccessToken, loadTokens } from "../youtube/token-store.ts";
 import { uploadVideo, setThumbnail } from "../youtube/upload.ts";
+import { fetchVideoStats } from "../youtube/analytics.ts";
 import { resolveProjectPath } from "../project-paths.ts";
 import { readFile } from "node:fs/promises";
 import { isStoryStageId, type StoryApprovalStage, type StoryProject, type StoryStageId } from "./types.ts";
@@ -130,6 +133,47 @@ export async function routeStoryFactory(options: {
   if (rest === "youtube/disconnect" && method === "POST") {
     await clearTokens(channelId);
     tools.sendJson(200, { ok: true, connected: false });
+    return;
+  }
+
+  if (rest === "analytics/refresh" && method === "POST") {
+    const clientId = process.env[config.youtube.clientIdEnv]?.trim() ?? "";
+    const clientSecret = process.env[config.youtube.clientSecretEnv]?.trim() ?? "";
+    if (!clientId || !clientSecret || !await loadTokens(channelId)) {
+      tools.sendError(409, { code: "youtube-not-connected", message: "Connect YouTube for this channel before refreshing analytics." });
+      return;
+    }
+    const accessToken = await getFreshAccessToken(channelId, { clientId, clientSecret });
+    const result = await refreshChannelAnalytics(channelId, {
+      fetchStats: (videoIds) => fetchVideoStats({ accessToken, videoIds }),
+    });
+    tools.sendJson(200, { ok: true, ...result });
+    return;
+  }
+
+  if (rest === "calendar" && method === "GET") {
+    tools.sendJson(200, { ok: true, calendar: await loadCalendar(channelId) });
+    return;
+  }
+  if (rest === "calendar" && method === "POST") {
+    const body = await tools.readBody();
+    try {
+      const calendar = await upsertCalendarEntry(channelId, {
+        id: optionalString(body.id),
+        date: String(body.date ?? ""),
+        storyId: typeof body.storyId === "string" ? body.storyId : null,
+        plannedPublishAt: typeof body.plannedPublishAt === "string" ? body.plannedPublishAt : null,
+        note: typeof body.note === "string" ? body.note : "",
+      });
+      tools.sendJson(200, { ok: true, calendar });
+    } catch (error: unknown) {
+      tools.sendError(400, { code: "calendar-entry-invalid", message: error instanceof Error ? error.message : String(error) });
+    }
+    return;
+  }
+  const calendarDelete = /^calendar\/([^/]+)$/.exec(rest);
+  if (calendarDelete && method === "DELETE") {
+    tools.sendJson(200, { ok: true, calendar: await deleteCalendarEntry(channelId, calendarDelete[1]) });
     return;
   }
 
@@ -251,6 +295,16 @@ async function routeStory(options: {
       totalCostUsd: cost.totalUsd,
       artifacts: artifactPaths(story),
     });
+    return;
+  }
+
+  if (storyRest === "analytics" && method === "GET") {
+    const analytics = await loadAnalytics(channelId, storyId);
+    if (!analytics) {
+      tools.sendError(404, { code: "analytics-missing", message: "No analytics snapshots exist for this story yet." });
+      return;
+    }
+    tools.sendJson(200, { ok: true, analytics });
     return;
   }
 
@@ -420,7 +474,8 @@ async function routeStory(options: {
     }
     const body = await tools.readBody();
     const privacyStatus = body.privacyStatus === "public" || body.privacyStatus === "unlisted" ? body.privacyStatus : "private";
-    const publishAt = typeof body.publishAt === "string" && body.publishAt.trim() ? body.publishAt.trim() : undefined;
+    const calendarEntry = body.publishAt ? null : (await loadCalendar(channelId)).entries.find((entry) => entry.storyId === storyId && entry.plannedPublishAt && Date.parse(entry.plannedPublishAt) > Date.now());
+    const publishAt = typeof body.publishAt === "string" && body.publishAt.trim() ? body.publishAt.trim() : calendarEntry?.plannedPublishAt ?? undefined;
     await tools.startChannelJob("story-publish", async ({ signal, update }) => {
       const current = await loadStory(channelId, storyId);
       await saveStageRun(channelId, storyId, "publish", { status: "running", startedAt: new Date().toISOString(), lastError: undefined });
