@@ -173,3 +173,40 @@ test("series details can be edited and deleting a series removes its episode pro
     }
   });
 });
+
+test("deleting one episode removes it from the plan along with its project folder", async () => {
+  await withTempCwd(async () => {
+    const running = await startStudioServer(createStudioServer(), { port: 0 });
+    try {
+      const created = await jsonRequest(`${running.url}/api/series`, running.url, "POST", {
+        id: "series-one",
+        title: "Series One",
+        show: "Test Show",
+        workflowType: "review-recap",
+        audience: "Viewers",
+        language: "Vietnamese",
+      });
+      assert.equal(created.status, 200);
+      const planned = await jsonRequest(`${running.url}/api/series/series-one/episode-plan`, running.url, "POST", {
+        count: 2,
+        startEpisode: 1,
+      });
+      assert.equal(planned.status, 200);
+
+      const deleted = await jsonRequest(`${running.url}/api/series/series-one/episodes/ep001`, running.url, "DELETE");
+      assert.equal(deleted.status, 200);
+      const deletedBody = await deleted.json();
+      assert.equal(deletedBody.removedProjectId, "series-one-ep001");
+      assert.deepEqual(deletedBody.series.episodes.map((episode: { id: string }) => episode.id), ["ep002"]);
+
+      await assert.rejects(() => access(join("projects", "series-one-ep001")));
+      await access(join("projects", "series-one-ep002"));
+
+      const missing = await jsonRequest(`${running.url}/api/series/series-one/episodes/ep001`, running.url, "DELETE");
+      assert.equal(missing.status, 404);
+      assert.equal((await missing.json()).code, "episode-not-found");
+    } finally {
+      await running.close();
+    }
+  });
+});

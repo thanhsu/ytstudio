@@ -564,19 +564,38 @@ function renderEpisodeRow(seriesId, episode) {
       ["ready", "Ready"],
       ["published", "Published"],
     ]),
-    episodeActions(episode),
+    episodeActions(seriesId, episode),
   );
   return row;
 }
 
-function episodeActions(episode) {
+function episodeActions(seriesId, episode) {
   const actions = document.createElement("div");
   actions.className = "episode-actions";
   actions.append(
     actionButton("Save", null, "submit", "primary"),
     actionButton("Perform task", () => performEpisodeTask(episode), "button"),
+    actionButton("Delete", () => deleteEpisode(seriesId, episode).catch((error) => setStatus(error.message)), "button"),
   );
   return actions;
+}
+
+async function deleteEpisode(seriesId, episode) {
+  const message = `Delete episode ${episode.id} "${episode.workingTitle}" and its project ${episode.episodeProjectId}? This cannot be undone.`;
+  if (!window.confirm(message)) return;
+  const response = await fetch(`/api/series/${encodeURIComponent(seriesId)}/episodes/${encodeURIComponent(episode.id)}`, {
+    method: "DELETE",
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    setStatus(`${data.code}: ${data.message}`);
+    return;
+  }
+  appState.selectedSeries = data.series;
+  await refreshAppData();
+  appState.selectedSeries = appState.series.find((series) => series.id === data.series.id) ?? data.series;
+  refreshSeriesScreen();
+  setStatus(`Deleted ${episode.id} and ${data.removedProjectId}.`);
 }
 
 async function createSeries(form, onCreated) {

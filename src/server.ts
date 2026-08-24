@@ -66,6 +66,7 @@ import { generateScript } from "./script.ts";
 import { saveStoryArc } from "./story-arc.ts";
 import {
   createSeriesProject,
+  deleteSeriesEpisode,
   deleteSeriesProject,
   generateEpisodePlan,
   listSeriesProjects,
@@ -781,6 +782,23 @@ async function routeRequest(
       });
       const episode = series.episodes.find((item) => item.id === episodeMatch[1]);
       sendJson(response, 200, { ok: true, series, episode });
+      return;
+    }
+    if (method === "DELETE" && episodeMatch) {
+      const series = await loadSeriesProject(seriesId);
+      const episode = series.episodes.find((item) => item.id === episodeMatch[1]);
+      if (!episode) {
+        sendError(response, 404, { code: "episode-not-found", message: `Episode not found: ${episodeMatch[1]}` });
+        return;
+      }
+      if (jobs.isBusy(episode.episodeProjectId)) {
+        sendError(response, 409, {
+          code: "episode-job-running",
+          message: `Wait for the running job on ${episode.episodeProjectId} to finish before deleting this episode.`,
+        });
+        return;
+      }
+      sendJson(response, 200, { ok: true, ...(await deleteSeriesEpisode(seriesId, episodeMatch[1])) });
       return;
     }
     sendError(response, 404, { code: "not-found", message: "Series route not found." });
