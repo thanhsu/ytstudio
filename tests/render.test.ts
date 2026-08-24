@@ -365,6 +365,104 @@ test("a watermarked segment does not corrupt the backgroundVideoPath ffmpeg inpu
   assert.doesNotMatch(filter, /\[4:v\]/);
 });
 
+test("slow motion video (speed < 1) stretches the output slice up to the scene duration and fills the remainder", () => {
+  const args = buildShortsRenderArgs({
+    ...sampleRenderInput(),
+    visualSegments: [{
+      ...videoSegment,
+      endSeconds: 6,
+      sourceDurationSeconds: 2,
+      effects: { ...DEFAULT_SEGMENT_EFFECTS, speed: 0.5 },
+    }],
+  });
+  const sourceTimeIndex = args.indexOf("-t");
+  // Available footage (2s) is well under the 5s ceiling, so the whole 2s is consumed.
+  assert.equal(args[sourceTimeIndex + 1], "2");
+  assert.match(args.join(";"), /setpts=PTS\/0\.5/);
+  const filter = args[args.indexOf("-filter_complex") + 1];
+  // 2s source / 0.5 speed = 4s output slice, inside the 6s scene.
+  assert.match(filter, /trim=duration=4,setpts=PTS-STARTPTS\[clip0\]/);
+  assert.match(filter, /color=c=#111827:s=1080x1920:d=2\[fill0\]/);
+  assert.match(filter, /concat=n=2:v=1:a=0/);
+});
+
+test("slow motion video output slice is capped at the scene duration when stretched beyond it", () => {
+  const args = buildShortsRenderArgs({
+    ...sampleRenderInput(),
+    visualSegments: [{
+      ...videoSegment,
+      endSeconds: 6,
+      sourceDurationSeconds: 5,
+      effects: { ...DEFAULT_SEGMENT_EFFECTS, speed: 0.5 },
+    }],
+  });
+  const filter = args[args.indexOf("-filter_complex") + 1];
+  // 5s source / 0.5 speed = 10s naive output, capped at the 6s scene duration.
+  assert.match(filter, /trim=duration=6,setpts=PTS-STARTPTS\[clip0\]/);
+  assert.doesNotMatch(filter, /\[fill0\]/);
+  assert.match(filter, /\[clip0\]null\[scene0\]/);
+});
+
+test("fades stay within a very short segment at the render-args level", () => {
+  const args = buildShortsRenderArgs({
+    ...sampleRenderInput(),
+    visualSegments: [{
+      ...imageSegment,
+      endSeconds: 0.6,
+      sourceDurationSeconds: 0.6,
+      effects: { ...DEFAULT_SEGMENT_EFFECTS, transitionIn: "fade", transitionOut: "fade" },
+    }],
+  });
+  const filter = args[args.indexOf("-filter_complex") + 1];
+  assert.match(filter, /fade=t=in:st=0:d=0\.3/);
+  assert.match(filter, /fade=t=out:st=0\.3:d=0\.3/);
+});
+
+test("a segment combining zoom, grayscale color, blur, watermark, and fade produces one valid filter graph with unique labels and no duplicate input indexes", () => {
+  const logo = eligibleLogoAsset();
+  const args = buildShortsRenderArgs({
+    ...sampleRenderInput(),
+    visualSegments: [{
+      ...videoSegment,
+      endSeconds: 10,
+      sourceDurationSeconds: 10,
+      effects: {
+        ...DEFAULT_SEGMENT_EFFECTS,
+        zoom: "slow-in",
+        color: { brightness: 0.1, contrast: 1.1, saturation: 0.9, grayscale: 0.5 },
+        blur: 8,
+        transitionIn: "fade",
+        transitionOut: "fade",
+        watermark: { assetId: logo.id, position: "bottom-right", scale: 0.15, opacity: 0.4 },
+      },
+      watermarkAsset: logo,
+    }],
+  });
+  const filter = args[args.indexOf("-filter_complex") + 1];
+
+  assert.equal((filter.match(/hue=s=/g) ?? []).length, 1);
+  assert.match(filter, /hue=s=0\.45/); // 0.9 * (1 - 0.5)
+  assert.doesNotMatch(filter, /hue=s=0\.9\b/);
+  assert.match(filter, /boxblur=8/);
+  assert.match(filter, /scale=w=/);
+  assert.match(filter, /movie=/);
+  assert.match(filter, /fade=t=in/);
+  assert.match(filter, /fade=t=out/);
+
+  const outputLabels = filter
+    .split(";")
+    .map((part) => /(\[[a-zA-Z0-9]+\])$/.exec(part.trim())?.[1])
+    .filter((label): label is string => !!label);
+  const seen = new Set<string>();
+  for (const label of outputLabels) {
+    assert.ok(!seen.has(label), `output label ${label} produced more than once`);
+    seen.add(label);
+  }
+
+  const realInputRefs = filter.match(/\[\d+:v\]/g) ?? [];
+  assert.equal(new Set(realInputRefs).size, realInputRefs.length, "no ffmpeg -i input index may be referenced twice");
+});
+
 test("buildSegmentArgs applies the same effect chain for the per-segment concat path", () => {
   const args = buildSegmentArgs(
     { ...videoSegment, endSeconds: 10, sourceDurationSeconds: 10, effects: { ...DEFAULT_SEGMENT_EFFECTS, speed: 2, transitionOut: "fade" } },
@@ -391,6 +489,41 @@ test("buildSegmentArgs leaves image speed untouched", () => {
   );
   const filter = args[args.indexOf("-filter_complex") + 1];
   assert.doesNotMatch(filter, /setpts=PTS\//);
+});
+
+test("buildSegmentArgs overlays a resolved watermark asset without an extra ffmpeg input", () => {
+  const logo = eligibleLogoAsset();
+  const args = buildSegmentArgs(
+    {
+      ...imageSegment,
+      effects: { ...DEFAULT_SEGMENT_EFFECTS, watermark: { assetId: logo.id, position: "bottom-left", scale: 0.12, opacity: 0.25 } },
+      watermarkAsset: logo,
+    },
+    "segment-000.mp4",
+    1080,
+    1920,
+    "sample-project",
+  );
+  const filter = args[args.indexOf("-filter_complex") + 1];
+  assert.match(filter, /movie=/);
+  assert.match(filter, /overlay=24:H-h-24/);
+  // Each buildSegmentArgs invocation is a standalone ffmpeg process with exactly one
+  // real -i (index 0); the watermark's movie= filter must not add a second one.
+  assert.equal(args.filter((argument) => argument === "-i").length, 1);
+});
+
+test("buildSegmentArgs throws when effects reference a watermark but no resolved asset was supplied", () => {
+  assert.throws(
+    () =>
+      buildSegmentArgs(
+        { ...imageSegment, effects: { ...DEFAULT_SEGMENT_EFFECTS, watermark: { assetId: "logo-1", position: "top-left", scale: 0.12, opacity: 0.2 } } },
+        "segment-000.mp4",
+        1080,
+        1920,
+        "sample-project",
+      ),
+    /watermark/i,
+  );
 });
 
 test("normalized visual effects change the render artifact source hash", async () => {

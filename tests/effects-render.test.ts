@@ -358,6 +358,42 @@ test("watermark overlay throws when rights status is user-confirmed only", () =>
   }, /not an eligible logo asset/);
 });
 
+test("composing zoom, grayscale color, blur, watermark, and fade for one segment yields one valid filter graph with unique labels", () => {
+  const asset = eligibleLogoAsset();
+  const combined: SegmentEffects = {
+    ...DEFAULT_SEGMENT_EFFECTS,
+    zoom: "slow-in",
+    color: { brightness: 0.1, contrast: 1.1, saturation: 0.8, grayscale: 0.5 },
+    blur: 6,
+    transitionIn: "fade",
+    transitionOut: "fade",
+    watermark: { assetId: asset.id, position: "top-left", scale: 0.12, opacity: 0.3 },
+  };
+  const visual = buildVisualEffectFilter("[fit0]", "[fx0]", combined, DIMENSIONS, 8, "video");
+  const watermark = buildWatermarkOverlayFilter("[fx0]", "[wm0]", combined.watermark!, "sample-project", [asset], DIMENSIONS, 8, 5);
+  const fade = buildFadeFilter("[wm0]", "[out0]", combined, 8);
+  const graph = [visual, watermark.filter, fade].join(";");
+
+  // Grayscale multiplies the explicit saturation into a single effective control;
+  // no second, independent saturation knob is emitted alongside it.
+  assert.equal((graph.match(/hue=s=/g) ?? []).length, 1);
+  assert.match(graph, /hue=s=0\.4\b/); // 0.8 * (1 - 0.5)
+  assert.match(graph, /boxblur=6/);
+  assert.match(graph, /scale=w=/); // video zoom motion
+  assert.match(graph, /movie=/); // watermark load
+  assert.match(graph, /fade=t=in/);
+  assert.match(graph, /fade=t=out/);
+
+  // Every filter stage's output label is produced exactly once.
+  const outputLabels = graph
+    .split(";")
+    .map((part) => /(\[[a-zA-Z0-9]+\])$/.exec(part.trim())?.[1])
+    .filter((label): label is string => !!label);
+  assert.ok(outputLabels.length >= 4, "expected multiple distinct filter stages");
+  assert.equal(new Set(outputLabels).size, outputLabels.length, "every filter stage must produce a distinct output label");
+  assert.equal(watermark.nextInputIndex, 6);
+});
+
 test("watermark overlay allocates unique labels across successive calls", () => {
   const asset = eligibleLogoAsset();
   const first = buildWatermarkOverlayFilter(

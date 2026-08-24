@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { buildNarrationScenes, generateVisualMapping, loadVisualMapping, saveVisualMapping, validateVisualMapping } from "../src/visual-mapping.ts";
 import { DEFAULT_SEGMENT_EFFECTS, isEligibleWatermarkAsset, patchSegmentEffects, validateSegmentEffects } from "../src/visual-effects.ts";
+import { buildSegmentEffectFilter } from "../src/effects-render.ts";
+import { buildShortsRenderArgs, type RenderVisualSegment } from "../src/render.ts";
 import type { AssetRecord } from "../src/assets.ts";
 
 const captions = `1\n00:00:00,000 --> 00:00:03,000\nQin Mu enters the village.\n\n2\n00:00:03,000 --> 00:00:07,000\nHis training makes him different.\n\n3\n00:00:07,000 --> 00:00:12,000\nCuriosity drives every decision.\n`;
@@ -88,6 +90,18 @@ test("patch rejects invalid values instead of clamping them", () => {
   assert.throws(() => patchSegmentEffects(undefined, { speed: 99 }), /speed/);
   assert.throws(() => patchSegmentEffects(undefined, { zoom: "spin" }), /zoom/);
   assert.throws(() => patchSegmentEffects(undefined, { blur: Number.NaN }), /blur/);
+});
+
+test("patch rejects non-finite numbers, an unsupported version, and unknown enum values", () => {
+  assert.throws(() => patchSegmentEffects(undefined, { speed: Number.POSITIVE_INFINITY }), /speed/);
+  assert.throws(() => patchSegmentEffects(undefined, { color: { saturation: Number.NEGATIVE_INFINITY } }), /saturation/);
+  assert.throws(() => patchSegmentEffects(undefined, { version: 2 }), /version/);
+  assert.throws(() => patchSegmentEffects(undefined, { transitionIn: "wipe" }), /transitionIn/);
+  assert.throws(() => patchSegmentEffects(undefined, { transitionOut: "wipe" }), /transitionOut/);
+  assert.throws(
+    () => patchSegmentEffects(undefined, { watermark: { assetId: "logo-1", position: "center", scale: 0.1, opacity: 0.1 } }),
+    /watermark\.position/,
+  );
 });
 
 test("patch clears a watermark when explicitly set to null", () => {
@@ -225,4 +239,74 @@ test("validateVisualMapping reports field-specific errors for invalid segment ef
   const result = validateVisualMapping(mapping, []);
   assert.equal(result.valid, false);
   assert.match(result.errors.join(" "), /contrast/);
+});
+
+test("a legacy mapping segment without effects normalizes to neutral defaults, renders a null filter, and leaves render args unchanged", async () => {
+  await withTempCwd(async () => {
+    const legacyMapping = {
+      version: 1,
+      status: "draft",
+      generatedAt: "2026-08-21T00:00:00.000Z",
+      inputFingerprint: "legacy-chain",
+      segments: [
+        {
+          id: "scene-001",
+          startSeconds: 0,
+          endSeconds: 5,
+          narration: "Qin Mu enters the village.",
+          keywords: [],
+          intent: "hook",
+          assetId: null,
+          mediaType: "image",
+          confidence: 0,
+          reason: "No eligible asset exceeded the match threshold.",
+          fitMode: "cover",
+          sourceStartSeconds: 0,
+          sourceDurationSeconds: 5,
+          muteSourceAudio: true,
+          selectionMode: "automatic",
+          fallback: "generated-background",
+          // no `effects` field at all: pre-effects mapping shape.
+        },
+      ],
+    };
+    await mkdir(join("projects", "sample-project", "workspace", "editing"), { recursive: true });
+    await writeFile(join("projects", "sample-project", "workspace", "editing", "visual-mapping.json"), JSON.stringify(legacyMapping), "utf8");
+
+    const reloaded = await loadVisualMapping("sample-project");
+    const effects = reloaded?.segments[0].effects;
+    assert.deepEqual(effects, DEFAULT_SEGMENT_EFFECTS);
+
+    // Neutral effects always collapse to a bare passthrough filter.
+    assert.equal(
+      buildSegmentEffectFilter("[v0]", "[v1]", effects!, { width: 1080, height: 1920 }, 5, "image"),
+      "[v0]null[v1]",
+    );
+
+    // A render args build using the normalized default effects must be identical, in filter
+    // terms, to one where the segment simply omits `effects` (the actual legacy shape).
+    const baseSegment: RenderVisualSegment = {
+      sceneId: "scene-001",
+      startSeconds: 0,
+      endSeconds: 5,
+      assetPath: "projects/sample-project/assets/images/card.png",
+      mediaType: "image",
+      fitMode: "cover",
+      sourceStartSeconds: 0,
+      sourceDurationSeconds: 5,
+      muteSourceAudio: true,
+    };
+    const renderInput = {
+      projectId: "sample-project",
+      title: "Why Qin Mu feels different",
+      durationSeconds: 5,
+      voicePath: "projects/sample-project/workspace/voice/draft.wav",
+      captionsPath: "projects/sample-project/workspace/captions/draft.srt",
+      outputPath: "projects/sample-project/workspace/renders/draft.mp4",
+      assetPaths: [],
+    };
+    const argsWithNormalizedEffects = buildShortsRenderArgs({ ...renderInput, visualSegments: [{ ...baseSegment, effects }] });
+    const argsWithNoEffectsField = buildShortsRenderArgs({ ...renderInput, visualSegments: [baseSegment] });
+    assert.deepEqual(argsWithNormalizedEffects, argsWithNoEffectsField);
+  });
 });

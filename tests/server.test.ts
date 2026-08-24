@@ -536,6 +536,10 @@ async function seedVisualMappingProject(): Promise<void> {
       id: "logo-ineligible", filename: "other.png", relativePath: "assets/images/other.png", mediaType: "image", mimeType: "image/png", sizeBytes: 10,
       rightsConfirmed: true, usagePurpose: "not a logo", createdAt: "2026-08-21T00:00:00.000Z",
     },
+    {
+      id: "logo-wrong-rights", filename: "unrights.png", relativePath: "assets/images/unrights.png", mediaType: "image", mimeType: "image/png", sizeBytes: 10,
+      rightsConfirmed: true, usagePurpose: "unlicensed logo", createdAt: "2026-08-21T00:00:00.000Z", role: "logo", rightsStatus: "user-confirmed",
+    },
   ] }), "utf8");
 }
 
@@ -600,6 +604,27 @@ test("visual-mapping effects PATCH rejects invalid values and missing resources"
       assert.match(invalidSpeedBody.message, /speed/i);
       assert.doesNotMatch(invalidSpeedBody.message, /[/\\]/);
 
+      // A JSON-serialized NaN or Infinity always arrives over the wire as `null`
+      // (JSON has no token for either), so this is the realistic wire-level
+      // equivalent of "the client tried to send a non-finite speed."
+      const nullSpeed = await fetch(`${running.url}/api/projects/sample-project/visual-mapping/segments/scene-001`, {
+        method: "PATCH", headers: { "content-type": "application/json", origin: running.url }, body: JSON.stringify({ effects: { speed: null } }),
+      });
+      assert.equal(nullSpeed.status, 400);
+      assert.match((await nullSpeed.json()).message, /speed/i);
+
+      const unsupportedVersion = await fetch(`${running.url}/api/projects/sample-project/visual-mapping/segments/scene-001`, {
+        method: "PATCH", headers: { "content-type": "application/json", origin: running.url }, body: JSON.stringify({ effects: { version: 2 } }),
+      });
+      assert.equal(unsupportedVersion.status, 400);
+      assert.match((await unsupportedVersion.json()).message, /version/i);
+
+      const unknownTransition = await fetch(`${running.url}/api/projects/sample-project/visual-mapping/segments/scene-001`, {
+        method: "PATCH", headers: { "content-type": "application/json", origin: running.url }, body: JSON.stringify({ effects: { transitionIn: "wipe" } }),
+      });
+      assert.equal(unknownTransition.status, 400);
+      assert.match((await unknownTransition.json()).message, /transitionIn/i);
+
       const missingSegmentPatch = await fetch(`${running.url}/api/projects/sample-project/visual-mapping/segments/missing`, {
         method: "PATCH", headers: { "content-type": "application/json", origin: running.url }, body: JSON.stringify({ effects: { speed: 1 } }),
       });
@@ -642,6 +667,16 @@ test("visual-mapping effects PATCH enforces watermark asset eligibility against 
       assert.equal(ineligibleAsset.status, 400);
       assert.match((await ineligibleAsset.json()).message, /watermark/i);
 
+      // Distinct from "wrong role": a logo-role asset whose rightsStatus isn't
+      // owned/licensed/generated must also be rejected, on the rights axis specifically.
+      const wrongRightsAsset = await fetch(`${running.url}/api/projects/sample-project/visual-mapping/segments/scene-001`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", origin: running.url },
+        body: JSON.stringify({ effects: { watermark: { assetId: "logo-wrong-rights", position: "top-left", scale: 0.12, opacity: 0.2 } } }),
+      });
+      assert.equal(wrongRightsAsset.status, 400);
+      assert.match((await wrongRightsAsset.json()).message, /eligible logo asset/i);
+
       const eligibleAsset = await fetch(`${running.url}/api/projects/sample-project/visual-mapping/segments/scene-001`, {
         method: "PATCH",
         headers: { "content-type": "application/json", origin: running.url },
@@ -649,6 +684,32 @@ test("visual-mapping effects PATCH enforces watermark asset eligibility against 
       });
       assert.equal(eligibleAsset.status, 200);
       assert.equal((await eligibleAsset.json()).segment.effects.watermark.assetId, "logo-eligible");
+    } finally { await running.close(); }
+  });
+});
+
+test("visual-mapping effects routes on a project with no mapping (or no project at all) return 404 instead of crashing", async () => {
+  await withTempCwd(async () => {
+    const running = await startStudioServer(createStudioServer(), { port: 0 });
+    try {
+      const patchOnUncreatedProject = await fetch(`${running.url}/api/projects/never-created-project/visual-mapping/segments/scene-001`, {
+        method: "PATCH", headers: { "content-type": "application/json", origin: running.url }, body: JSON.stringify({ effects: { speed: 1 } }),
+      });
+      assert.equal(patchOnUncreatedProject.status, 404);
+      assert.equal((await patchOnUncreatedProject.json()).code, "visual-mapping-missing");
+
+      const resetOnUncreatedProject = await fetch(`${running.url}/api/projects/never-created-project/visual-mapping/segments/scene-001/effects/reset`, {
+        method: "POST", headers: { "content-type": "application/json", origin: running.url }, body: "{}",
+      });
+      assert.equal(resetOnUncreatedProject.status, 404);
+      assert.equal((await resetOnUncreatedProject.json()).code, "visual-mapping-missing");
+
+      // sample-project exists (withTempCwd seeds it) but has never generated a mapping.
+      const patchWithNoMapping = await fetch(`${running.url}/api/projects/sample-project/visual-mapping/segments/scene-001`, {
+        method: "PATCH", headers: { "content-type": "application/json", origin: running.url }, body: JSON.stringify({ effects: { speed: 1 } }),
+      });
+      assert.equal(patchWithNoMapping.status, 404);
+      assert.equal((await patchWithNoMapping.json()).code, "visual-mapping-missing");
     } finally { await running.close(); }
   });
 });
