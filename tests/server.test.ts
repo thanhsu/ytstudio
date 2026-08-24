@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createStudioServer, resolveStaticFilePath, startStudioServer } from "../src/server.ts";
+import { DEFAULT_SEGMENT_EFFECTS } from "../src/visual-effects.ts";
 import { makeFakeExecutable, sampleCandidate, seedCandidate, writeStudioConfig } from "./helpers.ts";
 
 async function withTempCwd<T>(fn: () => Promise<T>): Promise<T> {
@@ -450,13 +451,26 @@ test("visual mapping API generates, edits, and approves caption-aligned scenes",
     try {
       const generated = await fetch(`${running.url}/api/projects/sample-project/visual-mapping/generate`, { method: "POST", headers: { origin: running.url } });
       assert.equal(generated.status, 200);
-      assert.equal((await generated.json()).mapping.segments[0].assetId, "image-1");
+      const generatedBody = await generated.json();
+      assert.equal(generatedBody.mapping.segments[0].assetId, "image-1");
+      assert.deepEqual(generatedBody.mapping.segments[0].effects, DEFAULT_SEGMENT_EFFECTS);
+
+      const firstApproval = await fetch(`${running.url}/api/projects/sample-project/visual-mapping/approve`, { method: "POST", headers: { origin: running.url } });
+      assert.equal(firstApproval.status, 200);
+      assert.equal((await firstApproval.json()).mapping.status, "approved");
 
       const edited = await fetch(`${running.url}/api/projects/sample-project/visual-mapping/segments/scene-001`, {
         method: "PATCH", headers: { "content-type": "application/json", origin: running.url }, body: JSON.stringify({ fitMode: "contain" }),
       });
       assert.equal(edited.status, 200);
-      assert.equal((await edited.json()).segment.selectionMode, "manual");
+      const editedBody = await edited.json();
+      assert.equal(editedBody.segment.selectionMode, "manual");
+      // The edit did not touch effects, but the persistence boundary still returns a complete
+      // normalized effects value (not the field dropped or left partial from a stale shape).
+      assert.deepEqual(editedBody.segment.effects, DEFAULT_SEGMENT_EFFECTS);
+      // Editing a segment marks the previously-approved mapping draft again, making the
+      // existing approval gate stale until it is re-approved.
+      assert.equal(editedBody.mapping.status, "draft");
 
       const approved = await fetch(`${running.url}/api/projects/sample-project/visual-mapping/approve`, { method: "POST", headers: { origin: running.url } });
       assert.equal(approved.status, 200);

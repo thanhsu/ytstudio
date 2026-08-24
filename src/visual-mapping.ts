@@ -5,7 +5,7 @@ import type { AssetRecord } from "./assets.ts";
 import { resolveProjectPath } from "./project-paths.ts";
 import { parseSrt } from "./srt.ts";
 import { extractAssetKeywords } from "./asset-analysis.ts";
-import { normalizeSegmentEffects, type SegmentEffects } from "./visual-effects.ts";
+import { normalizeSegmentEffects, validateSegmentEffects, type SegmentEffects } from "./visual-effects.ts";
 
 export type NarrationScene = { id: string; startSeconds: number; endSeconds: number; narration: string; keywords: string[]; intent: "hook" | "context" | "analysis" | "closing" };
 export type VisualMappingSegment = NarrationScene & { assetId: string | null; mediaType?: "image" | "video"; confidence: number; reason: string; fitMode: "cover" | "contain"; sourceStartSeconds: number; sourceDurationSeconds: number; muteSourceAudio: boolean; selectionMode: "automatic" | "manual"; fallback?: "generated-background"; effects?: SegmentEffects };
@@ -67,20 +67,47 @@ export function validateVisualMapping(mapping: VisualMapping, assets: AssetRecor
     if (segment.mediaType === "video" && segment.assetId && segment.assetId === previousVideo) errors.push(`${segment.id} repeats the same video in adjacent scenes.`);
     if (segment.assetId && !assets.some((asset) => asset.id === segment.assetId)) errors.push(`${segment.id} references a missing asset.`);
     if (!segment.assetId && !segment.fallback) errors.push(`${segment.id} has no asset or generated fallback.`);
+    if (segment.effects !== undefined) {
+      const effectsValidation = validateSegmentEffects(segment.effects, assets);
+      for (const message of effectsValidation.errors) errors.push(`${segment.id} effects: ${message}`);
+    }
     previousVideo = segment.mediaType === "video" ? segment.assetId : null;
   }
   return { valid: errors.length === 0, errors };
 }
 
+// Every segment must carry a complete, normalized effects value at the load/save boundary:
+// a segment missing `effects` (a mapping saved before effects existed) normalizes to neutral
+// defaults, but a segment with a present-but-invalid `effects` value is rejected with
+// field-specific errors rather than silently clamped.
+function canonicalizeMappingEffects(mapping: VisualMapping): VisualMapping {
+  return {
+    ...mapping,
+    segments: mapping.segments.map((segment) => {
+      if (segment.effects === undefined) {
+        return { ...segment, effects: normalizeSegmentEffects(undefined) };
+      }
+      const validation = validateSegmentEffects(segment.effects);
+      if (!validation.valid) {
+        throw new Error(`Invalid effects for segment ${segment.id}: ${validation.errors.join(" ")}`);
+      }
+      return { ...segment, effects: normalizeSegmentEffects(segment.effects) };
+    }),
+  };
+}
+
 export async function saveVisualMapping(projectId: string, mapping: VisualMapping): Promise<void> {
+  const normalized = canonicalizeMappingEffects(mapping);
   const path = resolveProjectPath(projectId, "workspace/editing/visual-mapping.json");
   await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, `${JSON.stringify(mapping, null, 2)}\n`, "utf8");
+  await writeFile(path, `${JSON.stringify(normalized, null, 2)}\n`, "utf8");
 }
 
 export async function loadVisualMapping(projectId: string): Promise<VisualMapping | null> {
-  try { return JSON.parse(await readFile(resolveProjectPath(projectId, "workspace/editing/visual-mapping.json"), "utf8")) as VisualMapping; }
+  let raw: VisualMapping;
+  try { raw = JSON.parse(await readFile(resolveProjectPath(projectId, "workspace/editing/visual-mapping.json"), "utf8")) as VisualMapping; }
   catch (error: unknown) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
+  return canonicalizeMappingEffects(raw);
 }
 
 function sceneFromGroup(group: ReturnType<typeof parseSrt>, index: number): NarrationScene {

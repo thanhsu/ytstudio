@@ -1,10 +1,26 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildNarrationScenes, generateVisualMapping, validateVisualMapping } from "../src/visual-mapping.ts";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { buildNarrationScenes, generateVisualMapping, loadVisualMapping, saveVisualMapping, validateVisualMapping } from "../src/visual-mapping.ts";
 import { DEFAULT_SEGMENT_EFFECTS, isEligibleWatermarkAsset, patchSegmentEffects, validateSegmentEffects } from "../src/visual-effects.ts";
 import type { AssetRecord } from "../src/assets.ts";
 
 const captions = `1\n00:00:00,000 --> 00:00:03,000\nQin Mu enters the village.\n\n2\n00:00:03,000 --> 00:00:07,000\nHis training makes him different.\n\n3\n00:00:07,000 --> 00:00:12,000\nCuriosity drives every decision.\n`;
+
+async function withTempCwd<T>(fn: () => Promise<T>): Promise<T> {
+  const previousCwd = process.cwd();
+  const root = await mkdtemp(join(tmpdir(), "yt-visual-mapping-"));
+  try {
+    process.chdir(root);
+    await mkdir("projects", { recursive: true });
+    return await fn();
+  } finally {
+    process.chdir(previousCwd);
+    await rm(root, { recursive: true, force: true });
+  }
+}
 
 test("groups captions into deterministic narration scenes", () => {
   const scenes = buildNarrationScenes(captions);
@@ -111,4 +127,102 @@ test("validateSegmentEffects rejects a watermark referencing a missing or inelig
   const ineligible = validateSegmentEffects({ ...watermarked, watermark: { ...watermarked.watermark, assetId: "clip-1" } }, [sourceClip]);
   assert.equal(ineligible.valid, false);
   assert.match(ineligible.errors.join(" "), /eligible logo asset/);
+});
+
+test("save and reload preserves normalized visual-mapping effects", async () => {
+  await withTempCwd(async () => {
+    const mapping = generateVisualMapping(buildNarrationScenes(captions), []);
+    mapping.segments[0].effects = patchSegmentEffects(mapping.segments[0].effects, { speed: 1.5 });
+    await saveVisualMapping("sample-project", mapping);
+    const reloaded = await loadVisualMapping("sample-project");
+    assert.equal(reloaded?.segments[0].effects?.speed, 1.5);
+    assert.equal(reloaded?.segments[0].effects?.color.saturation, 1);
+  });
+});
+
+test("loadVisualMapping fills legacy segments that predate effects with complete neutral defaults", async () => {
+  await withTempCwd(async () => {
+    const legacyMapping = {
+      version: 1,
+      status: "draft",
+      generatedAt: "2026-08-21T00:00:00.000Z",
+      inputFingerprint: "legacy",
+      segments: [
+        {
+          id: "scene-001",
+          startSeconds: 0,
+          endSeconds: 5,
+          narration: "Qin Mu enters the village.",
+          keywords: [],
+          intent: "hook",
+          assetId: null,
+          confidence: 0,
+          reason: "No eligible asset exceeded the match threshold.",
+          fitMode: "cover",
+          sourceStartSeconds: 0,
+          sourceDurationSeconds: 5,
+          muteSourceAudio: true,
+          selectionMode: "automatic",
+          fallback: "generated-background",
+          // no `effects` field at all: this is what a pre-effects mapping looked like.
+        },
+      ],
+    };
+    await mkdir(join("projects", "sample-project", "workspace", "editing"), { recursive: true });
+    await writeFile(join("projects", "sample-project", "workspace", "editing", "visual-mapping.json"), JSON.stringify(legacyMapping), "utf8");
+
+    const reloaded = await loadVisualMapping("sample-project");
+    assert.deepEqual(reloaded?.segments[0].effects, DEFAULT_SEGMENT_EFFECTS);
+  });
+});
+
+test("loadVisualMapping rejects invalid persisted effects instead of clamping them", async () => {
+  await withTempCwd(async () => {
+    const corrupted = {
+      version: 1,
+      status: "draft",
+      generatedAt: "2026-08-21T00:00:00.000Z",
+      inputFingerprint: "corrupted",
+      segments: [
+        {
+          id: "scene-001",
+          startSeconds: 0,
+          endSeconds: 5,
+          narration: "Qin Mu enters the village.",
+          keywords: [],
+          intent: "hook",
+          assetId: null,
+          confidence: 0,
+          reason: "No eligible asset exceeded the match threshold.",
+          fitMode: "cover",
+          sourceStartSeconds: 0,
+          sourceDurationSeconds: 5,
+          muteSourceAudio: true,
+          selectionMode: "automatic",
+          fallback: "generated-background",
+          effects: { ...DEFAULT_SEGMENT_EFFECTS, speed: 99 },
+        },
+      ],
+    };
+    await mkdir(join("projects", "sample-project", "workspace", "editing"), { recursive: true });
+    await writeFile(join("projects", "sample-project", "workspace", "editing", "visual-mapping.json"), JSON.stringify(corrupted), "utf8");
+
+    await assert.rejects(() => loadVisualMapping("sample-project"), /speed/);
+  });
+});
+
+test("saveVisualMapping rejects invalid segment effects instead of persisting them", async () => {
+  await withTempCwd(async () => {
+    const mapping = generateVisualMapping(buildNarrationScenes(captions), []);
+    mapping.segments[0].effects = { ...DEFAULT_SEGMENT_EFFECTS, blur: 999 };
+    await assert.rejects(() => saveVisualMapping("sample-project", mapping), /blur/);
+  });
+});
+
+test("validateVisualMapping reports field-specific errors for invalid segment effects", () => {
+  const mapping = generateVisualMapping(buildNarrationScenes(captions), []);
+  mapping.segments[0].effects = { ...DEFAULT_SEGMENT_EFFECTS, color: { ...DEFAULT_SEGMENT_EFFECTS.color, contrast: 9 } };
+  const result = validateVisualMapping(mapping, []);
+  assert.equal(result.valid, false);
+  assert.match(result.errors.join(" "), /contrast/);
 });
