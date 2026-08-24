@@ -56,7 +56,7 @@ export function renderProjects() {
   );
 }
 
-function renderWorkflowBoard() {
+export function renderWorkflowBoard() {
   const workflow = appState.projectSnapshot?.workflow;
   if (!workflow) {
     workflowTitle.textContent = "Workflow";
