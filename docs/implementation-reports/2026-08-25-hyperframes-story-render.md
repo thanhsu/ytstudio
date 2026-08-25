@@ -21,7 +21,7 @@ Branch: feature/hyperframes-story-render
 - `node --test tests\\story-pipeline.test.ts tests\\hyperframes-renderer.test.ts tests\\hyperframes-composition.test.ts tests\\story-visual-prompts.test.ts tests\\web-phases.test.ts` passed.
 - `node --test tests\\web.test.ts tests\\web-phases.test.ts` passed.
 - `node --test tests\\config.test.ts tests\\hyperframes-renderer.test.ts tests\\story-pipeline.test.ts tests\\web.test.ts tests\\web-phases.test.ts` passed.
-- `node --test --test-concurrency=1 tests\\*.test.ts` passed: 662/662.
+- `node --test --test-concurrency=1 tests\\*.test.ts` passed: 664/664.
 - `npm ls hyperframes` reports `hyperframes@0.8.13`.
 - `node -v` reports `v22.23.2`.
 
