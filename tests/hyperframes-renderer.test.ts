@@ -35,7 +35,7 @@ await writeFile(output, "video-bytes");
     assert.match(calls, /"--output"/);
     assert.match(calls, /"\."/);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await removeTreeEventually(root);
   }
 });
 
@@ -60,12 +60,39 @@ setInterval(() => {}, 1000);
       /timed out|aborted/i,
     );
     const pid = Number(await readFile(pidPath, "utf8"));
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await waitForProcessExit(pid);
     assert.throws(() => process.kill(pid, 0));
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await removeTreeEventually(root);
   }
 });
+
+async function waitForProcessExit(pid: number): Promise<void> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
+async function removeTreeEventually(path: string): Promise<void> {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    try {
+      await rm(path, { recursive: true, force: true });
+      return;
+    } catch (error: unknown) {
+      if (!isBusy(error) || attempt === 9) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+}
+
+function isBusy(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "EBUSY";
+}
 
 function baseComposition() {
   return buildHyperframesComposition({
