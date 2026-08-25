@@ -50,6 +50,93 @@ export function isStoryStageId(value: unknown): value is StoryStageId {
 }
 
 /**
+ * Which stages each kind of story actually runs, in order. These are explicit
+ * lists rather than a filter over STORY_STAGES: a story must never run a stage
+ * belonging to another kind, and an explicit list makes that impossible to get
+ * wrong when a stage is added later.
+ *
+ * `export` and `publish` are excluded from all three — packaging for upload is
+ * always a human click, per the studio's approval rule.
+ */
+export const ORIGINAL_STAGES: StoryStageId[] = [
+  "idea",
+  "hook",
+  "outline",
+  "bible",
+  "sections",
+  "continuity-qa",
+  "naturalize",
+  "originality-qa",
+  "tts-normalize",
+  "tts",
+  "scenes",
+  "images",
+  "bgm",
+  "render",
+  "metadata",
+  "thumbnail",
+  "final-qa",
+];
+
+/**
+ * A canon chapter stops at `images`: it produces the authoritative English text
+ * and the scene visuals every locale reuses, but never narration, render, or
+ * metadata — those belong to a publication, and a canon chapter is not one.
+ */
+export const CANON_STAGES: StoryStageId[] = [
+  "chapter-plan",
+  "canon-context",
+  "canon-write",
+  "canon-continuity",
+  "memory-extract",
+  "memory-apply",
+  "scenes",
+  "images",
+];
+
+/**
+ * A variant swaps the front half of the original pipeline for localization and
+ * keeps the entire production half. `scenes` and `images` still appear because
+ * their stages resolve the canon chapter's plan and rendered images first and
+ * only generate on a miss.
+ */
+export const VARIANT_STAGES: StoryStageId[] = [
+  "localize",
+  "naturalize",
+  "canon-alignment",
+  "originality-qa",
+  "tts-normalize",
+  "tts",
+  "scenes",
+  "images",
+  "bgm",
+  "render",
+  "metadata",
+  "thumbnail",
+  "final-qa",
+];
+
+/** The stages the pipeline runner executes, in order. */
+export function stagesForKind(kind: StoryKind): StoryStageId[] {
+  if (kind === "canon") return CANON_STAGES;
+  if (kind === "variant") return VARIANT_STAGES;
+  return ORIGINAL_STAGES;
+}
+
+/**
+ * Every stage that can EXIST on a story of this kind — the runnable ones plus
+ * the human-only tail. This is a different question from what the runner
+ * executes, and invalidation needs this one: an export package built from
+ * superseded metadata is stale even though no pipeline run ever produces it.
+ *
+ * A canon chapter has no tail at all; it is not a publication.
+ */
+export function allStagesForKind(kind: StoryKind): StoryStageId[] {
+  if (kind === "canon") return CANON_STAGES;
+  return [...stagesForKind(kind), "export", "publish"];
+}
+
+/**
  * Why a stage failed, so the operator knows the remedy without reading logs:
  * retryable → run it again; quota → wait or raise limits; provider → the model
  * or API returned something unusable; content → the material itself was refused

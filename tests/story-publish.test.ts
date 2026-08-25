@@ -17,6 +17,7 @@ test("a completed publish stage derives PUBLISHED above READY_TO_PUBLISH", async
     id: "story-001",
     channelId: "es-horror",
     title: "Title",
+    kind: "original" as const,
     config: {} as StoryProject["config"],
     stages: { export: { status: "done", attemptCount: 1, costUsd: 0 }, publish: { status: "done", attemptCount: 1, costUsd: 0 } },
     approvals: {},
