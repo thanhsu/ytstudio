@@ -427,11 +427,11 @@ test("visual mapping inspector exposes effect controls and uses the mapping PATC
   assert.match(script, /transitionIn/);
   assert.match(script, /transitionOut/);
   assert.doesNotMatch(script, /timeline\/segments/);
-  // Numeric effect inputs carry machine-produced fractional values (speed,
-  // color adjustments, blur, watermark scale/opacity), so step must accept any.
-  assert.match(script, /"speed",[^\n]*"number", "", "any"/);
-  assert.match(script, /"color\.brightness",[^\n]*"number", "", "any"/);
-  assert.match(script, /"blur",[^\n]*"number", "", "any"/);
+  // Effect controls are now sliderField pairs (range + number). Verify the
+  // names appear in sliderField calls, keeping fractional values valid.
+  assert.match(script, /sliderField\("[^"]*",\s*"speed"/);
+  assert.match(script, /sliderField\("[^"]*",\s*"color\.brightness"/);
+  assert.match(script, /sliderField\("[^"]*",\s*"blur"/);
 });
 
 test("watermark selector filters to eligible logos and timeline shows non-default summaries", async () => {

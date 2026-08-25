@@ -3,7 +3,7 @@ import {
   summaryGrid, formatBytes, checklist, wrapSection, uploadField, fileField,
   paragraph, sectionTitle, field, textareaField, checkboxField, selectField,
   actionButton, formValues, boolFormValues, strongText, confidenceMeter,
-  formatTimecode, formatSeconds,
+  formatTimecode, formatSeconds, sliderField,
 } from "../lib/dom.js";
 import { toast, paidVoiceDialog, paidScriptDialog } from "../lib/shell.js";
 import {
@@ -1185,26 +1185,45 @@ function renderMonitor(segment, assets) {
 }
 
 function renderInspector(segment, assets) {
-  // The server always sends complete normalized effects (Task 1), but a
-  // legacy or partially-loaded segment falls back to the neutral baseline
-  // rather than crashing on undefined fields.
+  // The server always sends complete normalized effects, but a legacy or
+  // partially-loaded segment falls back to the neutral baseline rather than
+  // crashing on undefined fields.
   const effects = segment.effects ?? NEUTRAL_SEGMENT_EFFECTS;
   const color = effects.color ?? NEUTRAL_SEGMENT_EFFECTS.color;
-  const watermarkIneligible = !!effects.watermark
-    && !eligibleWatermarkAssets(assets).some((asset) => asset.id === effects.watermark.assetId);
+  const watermarkIneligible =
+    !!effects.watermark &&
+    !eligibleWatermarkAssets(assets).some((asset) => asset.id === effects.watermark.assetId);
 
   const form = document.createElement("form");
   form.className = "render-inspector";
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    saveVisualMappingSegment(segment.id, form).catch((error) => toast("err", "Save failed", error.message, { persist: true }));
-  });
-  form.replaceChildren(
-    sectionTitle("Clip Inspector"),
-    paragraph(`${segment.id} · ${formatTimecode(segment.startSeconds)}-${formatTimecode(segment.endSeconds)}`),
+
+  // ── Tab bar ────────────────────────────────────────────────────────────────
+  const tabBar = document.createElement("div");
+  tabBar.className = "inspector-tabs";
+  const tabClip = document.createElement("button");
+  tabClip.type = "button";
+  tabClip.className = "inspector-tab active";
+  tabClip.textContent = "Clip";
+  const tabEffects = document.createElement("button");
+  tabEffects.type = "button";
+  tabEffects.className = "inspector-tab";
+  tabEffects.textContent = "Effects";
+  tabBar.append(tabClip, tabEffects);
+
+  // ── Clip panel ─────────────────────────────────────────────────────────────
+  const clipPanel = document.createElement("div");
+  clipPanel.className = "inspector-panel";
+  const narrationEl = paragraph(segment.narration);
+  narrationEl.className = "inspector-narration";
+  clipPanel.append(
+    sectionTitle(`${segment.id} · ${formatTimecode(segment.startSeconds)}–${formatTimecode(segment.endSeconds)}`),
+    narrationEl,
     confidenceMeter(segment.confidence),
     paragraph(segment.reason),
-    selectField("Asset", "assetId", segment.assetId ?? "", [["", "Generated background"], ...assets.map((asset) => [asset.id, asset.filename])]),
+    selectField("Asset", "assetId", segment.assetId ?? "", [
+      ["", "Generated background"],
+      ...assets.map((asset) => [asset.id, asset.filename]),
+    ]),
     selectField("Fit", "fitMode", segment.fitMode, [["cover", "Cover"], ["contain", "Contain"]]),
     // Visual mapping produces fractional seconds, so the default step="1" would
     // make native validation reject the value and silently block the submit.
@@ -1212,34 +1231,83 @@ function renderInspector(segment, assets) {
     field("Source duration (max 5s for video)", "sourceDurationSeconds", String(segment.sourceDurationSeconds), "number", "", "any"),
     checkboxField("Mute source audio", "muteSourceAudio", segment.muteSourceAudio),
     actionButton("Save mapping", null, "submit", "primary"),
-    sectionTitle("Effects"),
-    paragraph("Effects render only into an exported draft. Saving or resetting effects does not approve the mapping — approve it again before rendering."),
-    field("Speed", "speed", String(effects.speed), "number", "", "any", "0.5", "2"),
+  );
+
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    saveVisualMappingSegment(segment.id, form).catch((error) =>
+      toast("err", "Save failed", error.message, { persist: true }),
+    );
+  });
+
+  // ── Effects panel ──────────────────────────────────────────────────────────
+  const effectsPanel = document.createElement("div");
+  effectsPanel.className = "inspector-panel";
+  effectsPanel.hidden = true;
+
+  const effectsNote = paragraph(
+    "Effects render only into an exported draft. Saving or resetting does not approve the mapping — approve again before rendering.",
+  );
+  effectsNote.className = "inspector-note";
+
+  effectsPanel.append(
+    effectsNote,
+    sectionTitle("Motion"),
+    sliderField("Speed (0.5 – 2.0)", "speed", effects.speed, 0.5, 2, 0.05),
     selectField("Zoom", "zoom", effects.zoom, ZOOM_OPTIONS),
     selectField("Flip", "flip", effects.flip ?? "none", FLIP_OPTIONS),
+    sectionTitle("Transitions"),
     selectField("Transition in", "transitionIn", effects.transitionIn, TRANSITION_OPTIONS),
     selectField("Transition out", "transitionOut", effects.transitionOut, TRANSITION_OPTIONS),
-    field("Brightness", "color.brightness", String(color.brightness), "number", "", "any", "-1", "1"),
-    field("Contrast", "color.contrast", String(color.contrast), "number", "", "any", "0", "2"),
-    field("Saturation", "color.saturation", String(color.saturation), "number", "", "any", "0", "2"),
-    field("Grayscale", "color.grayscale", String(color.grayscale), "number", "", "any", "0", "1"),
-    field("Blur", "blur", String(effects.blur), "number", "", "any", "0", "40"),
-    selectField("Watermark asset", "watermark.assetId", effects.watermark?.assetId ?? "", watermarkAssetOptions(assets, effects.watermark)),
+    sectionTitle("Color"),
+    sliderField("Brightness (−1 – 1)", "color.brightness", color.brightness, -1, 1, 0.05),
+    sliderField("Contrast (0 – 2)", "color.contrast", color.contrast, 0, 2, 0.05),
+    sliderField("Saturation (0 – 2)", "color.saturation", color.saturation, 0, 2, 0.05),
+    sliderField("Grayscale (0 – 1)", "color.grayscale", color.grayscale, 0, 1, 0.05),
+    sliderField("Blur (0 – 40)", "blur", effects.blur, 0, 40, 1),
+    sectionTitle("Watermark"),
+    selectField("Logo asset", "watermark.assetId", effects.watermark?.assetId ?? "", watermarkAssetOptions(assets, effects.watermark)),
     ...(watermarkIneligible
-      ? [assetWarning("This clip's saved watermark asset is not an eligible logo (needs role logo and owned/licensed/generated rights). Pick a valid logo or clear the watermark — saving keeps the current value until the server rejects or you change it.")]
+      ? [assetWarning("Saved watermark asset is not an eligible logo (needs role logo and owned/licensed/generated rights). Pick a valid logo or clear it.")]
       : []),
-    selectField("Watermark position", "watermark.position", effects.watermark?.position ?? "bottom-right", WATERMARK_POSITION_OPTIONS),
-    field("Watermark scale", "watermark.scale", String(effects.watermark?.scale ?? 0.12), "number", "", "any", "0.05", "0.5"),
-    field("Watermark opacity", "watermark.opacity", String(effects.watermark?.opacity ?? 0.2), "number", "", "any", "0", "1"),
+    selectField("Position", "watermark.position", effects.watermark?.position ?? "bottom-right", WATERMARK_POSITION_OPTIONS),
+    field("Scale (0.05 – 0.5)", "watermark.scale", String(effects.watermark?.scale ?? 0.12), "number", "", "any", "0.05", "0.5"),
+    field("Opacity (0 – 1)", "watermark.opacity", String(effects.watermark?.opacity ?? 0.2), "number", "", "any", "0", "1"),
+  );
+
+  const effectsActions = document.createElement("div");
+  effectsActions.className = "inspector-actions";
+  effectsActions.append(
     actionButton("Save effects", () => {
       const patch = buildEffectsPatch(form, effects);
       if (!patch) return;
-      saveVisualMappingEffects(segment.id, patch).catch((error) => toast("err", "Save failed", error.message, { persist: true }));
-    }),
+      saveVisualMappingEffects(segment.id, patch).catch((error) =>
+        toast("err", "Save failed", error.message, { persist: true }),
+      );
+    }, "button", "primary"),
     actionButton("Reset effects", () => {
-      resetVisualMappingEffects(segment.id).catch((error) => toast("err", "Reset failed", error.message, { persist: true }));
+      resetVisualMappingEffects(segment.id).catch((error) =>
+        toast("err", "Reset failed", error.message, { persist: true }),
+      );
     }),
   );
+  effectsPanel.append(effectsActions);
+
+  // ── Tab switching ─────────────────────────────────────────────────────────
+  tabClip.addEventListener("click", () => {
+    tabClip.classList.add("active");
+    tabEffects.classList.remove("active");
+    clipPanel.hidden = false;
+    effectsPanel.hidden = true;
+  });
+  tabEffects.addEventListener("click", () => {
+    tabEffects.classList.add("active");
+    tabClip.classList.remove("active");
+    clipPanel.hidden = true;
+    effectsPanel.hidden = false;
+  });
+
+  form.append(tabBar, clipPanel, effectsPanel);
   return form;
 }
 
