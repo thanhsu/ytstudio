@@ -128,8 +128,17 @@ export function renderConfig(container = configHost) {
     configSection("Render", renderReady[0], renderReady[1], [
       field("FFmpeg path", "render.ffmpegPath", config.render.ffmpegPath),
       field("FFprobe path", "render.ffprobePath", config.render.ffprobePath),
+      selectField("Story video engine", "render.storyEngine", config.render.storyEngine, [
+        ["ffmpeg", "FFmpeg"],
+        ["hyperframes", "Hyperframes"],
+      ]),
+      field("Hyperframes command", "render.hyperframesCommand", config.render.hyperframesCommand),
+      textareaField("Hyperframes args", "render.hyperframesArgs", (config.render.hyperframesArgs ?? []).join("\n")),
+      field("Hyperframes timeout minutes", "render.hyperframesTimeoutMinutes", String(config.render.hyperframesTimeoutMinutes), "number"),
       field("Shorts width", "render.shortsWidth", String(config.render.shortsWidth), "number"),
       field("Shorts height", "render.shortsHeight", String(config.render.shortsHeight), "number"),
+      field("Story width", "render.longformWidth", String(config.render.longformWidth), "number"),
+      field("Story height", "render.longformHeight", String(config.render.longformHeight), "number"),
       selectField("Story transition", "render.storyTransition", config.render.storyTransition, [["fade", "Fade"], ["xfade", "Crossfade"]]),
       field("Transition seconds", "render.storyTransitionSeconds", String(config.render.storyTransitionSeconds), "number", "", "any"),
     ]),
@@ -239,7 +248,7 @@ async function saveConfig(form) {
 function configInputValue(input) {
   if (input.type === "number") return Number(input.value);
   if (input.type === "checkbox") return input.checked;
-  if (input.name === "sources.ytDlpArgs" || input.name === "sources.subtitleLanguages") return lines(input.value);
+  if (input.name === "sources.ytDlpArgs" || input.name === "sources.subtitleLanguages" || input.name === "render.hyperframesArgs") return lines(input.value);
   return input.value;
 }
 

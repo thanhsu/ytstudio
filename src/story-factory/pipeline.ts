@@ -1,4 +1,5 @@
 import type { StudioConfig } from "../config.ts";
+import { createHash } from "node:crypto";
 import { createConfiguredImageProvider } from "../images/gemini.ts";
 import type { ImageProvider } from "../images/types.ts";
 import { probeDuration as probeDurationDefault } from "../media.ts";
@@ -6,15 +7,17 @@ import { runProcess } from "../process.ts";
 import { resolveProjectPath } from "../project-paths.ts";
 import { createGoogleTtsProvider } from "../tts/google.ts";
 import type { TtsProvider } from "../tts/types.ts";
-import { writeFile } from "node:fs/promises";
+import { copyFile, readFile, writeFile } from "node:fs/promises";
 import { mkdir } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, relative } from "node:path";
 import { loadStoryChannel } from "./channel.ts";
 import { assertWithinBudget, addStoryCost, BudgetExceededError, estimateGoogleTtsCost } from "./cost.ts";
 import { StoryContentError } from "./errors.ts";
 import type { RenderStageArtifact } from "./export.ts";
 import { storyPath, storyRelativePath } from "./paths.ts";
 import { buildBgmPlan, normalizeBgmPlan } from "./bgm.ts";
+import { buildHyperframesComposition, detectHyperframesVersion } from "./hyperframes-composition.ts";
+import { renderHyperframesStoryVideo } from "./hyperframes-renderer.ts";
 import { renderStoryVideo, buildStorySegments } from "./render-story.ts";
 import type { ChatFn } from "./stage-llm.ts";
 import { STAGE_ROLES } from "./stage-llm.ts";
@@ -62,6 +65,7 @@ import {
   buildMergeArgs,
   synthesizeChunks,
 } from "./tts-chunking.ts";
+import { buildVisualPromptArtifact, buildVisualPromptSourceHash } from "./visual-prompts.ts";
 import { googleTtsConfigFromStudio } from "./voice-lab.ts";
 import { loadPromptOverrides } from "./prompt-overrides.ts";
 import type {
@@ -77,6 +81,7 @@ import type {
   StoryStageId,
   TtsChunkManifest,
   TtsNormalizedText,
+  VisualPromptArtifact,
 } from "./types.ts";
 import { ORIGINAL_STAGES } from "./types.ts";
 
@@ -385,6 +390,9 @@ async function executeStage(stage: StoryStageId, ctx: StageContext, options: Sin
     case "bgm":
       await runBgmStage(ctx);
       return;
+    case "visual-prompts":
+      await runVisualPromptsStage(ctx);
+      return;
     case "render":
       await runRenderStage(ctx);
       return;
@@ -630,6 +638,28 @@ async function runBgmStage(ctx: StageContext): Promise<void> {
   await writeStageArtifact(ctx.channelId, ctx.storyId, "bgm", plan);
 }
 
+async function runVisualPromptsStage(ctx: StageContext): Promise<void> {
+  const naturalized = await readStageArtifact<NaturalizedScript>(ctx.channelId, ctx.storyId, "naturalize");
+  const scenes = await readStageArtifact<SceneList>(ctx.channelId, ctx.storyId, "scenes");
+  const tts = await readStageArtifact<TtsChunkManifest>(ctx.channelId, ctx.storyId, "tts");
+  if (!naturalized || !scenes || !tts) {
+    throw new Error("Visual prompts need naturalized text, scenes, and narration timing.");
+  }
+  const sourceHash = buildVisualPromptSourceHash({
+    naturalizedText: naturalized.fullText,
+    scenes: scenes.scenes,
+    ttsChunks: ttsChunkTiming(tts),
+    captions: ttsChunkCaptions(tts),
+  });
+  const artifact = buildVisualPromptArtifact({
+    sourceHash,
+    durationSeconds: tts.totalDurationSeconds,
+    text: naturalized.fullText,
+    scenes: scaleScenesToDuration(scenes, tts.totalDurationSeconds),
+  });
+  await writeStageArtifact(ctx.channelId, ctx.storyId, "visual-prompts", artifact);
+}
+
 /**
  * Scene-change stinger placement: one event per interior scene boundary
  * (the first scene starts at 0 — nothing to mark there), at the SCALED
@@ -651,8 +681,9 @@ async function runRenderStage(ctx: StageContext): Promise<void> {
   const images = await readStageArtifact<ImageManifest>(ctx.channelId, ctx.storyId, "images");
   const tts = await readStageArtifact<TtsChunkManifest>(ctx.channelId, ctx.storyId, "tts");
   const bgmArtifact = await readStageArtifact<Partial<BgmPlan>>(ctx.channelId, ctx.storyId, "bgm");
-  if (!scenes || !images || !tts || !bgmArtifact) {
-    throw new Error("Rendering needs scenes, images, narration, and a bgm plan.");
+  const visualPrompts = await readStageArtifact<VisualPromptArtifact>(ctx.channelId, ctx.storyId, "visual-prompts");
+  if (!scenes || !images || !tts || !bgmArtifact || !visualPrompts) {
+    throw new Error("Rendering needs scenes, images, narration, a bgm plan, and visual prompts.");
   }
   const bgmPlan = normalizeBgmPlan(bgmArtifact);
   const actualDuration = tts.totalDurationSeconds;
@@ -685,20 +716,64 @@ async function runRenderStage(ctx: StageContext): Promise<void> {
   const width = ctx.config.render.longformWidth;
   const height = ctx.config.render.longformHeight;
   const outputPath = storyPath(ctx.channelId, ctx.storyId, "workspace", "render", "story.mp4");
-  await renderStoryVideo({
-    segments,
-    narrationPath: resolveProjectPath(ctx.channelId, tts.mergedPath),
-    bgm,
-    outputPath,
-    durationSeconds: actualDuration,
-    width,
-    height,
-    ffmpegPath: resolveFfmpeg(ctx),
-    ffmpegPrefixArgs: ctx.ffmpegPrefixArgs,
-    signal: ctx.signal,
-    update: async (completed, total) => ctx.update?.(`Rendered segment ${completed}/${total}.`),
-    transition: { kind: ctx.config.render.storyTransition, seconds: ctx.config.render.storyTransitionSeconds },
-  });
+  let engine: RenderStageArtifact["engine"] = "ffmpeg";
+  let compositionPath: string | undefined;
+
+  if (ctx.config.render.storyEngine === "hyperframes") {
+    engine = "hyperframes";
+    const hyperframesWorkspace = storyPath(ctx.channelId, ctx.storyId, "workspace", "render", "hyperframes");
+    await mkdir(hyperframesWorkspace, { recursive: true });
+    const relativeImages = new Map(
+      [...imagePaths].map(([sceneId, imagePath]) => [sceneId, toPosix(relative(hyperframesWorkspace, imagePath))]),
+    );
+    const composition = buildHyperframesComposition({
+      compositionId: "story",
+      width,
+      height,
+      durationSeconds: actualDuration,
+      sourceHash: visualPrompts.sourceHash,
+      hyperframesVersion: await detectHyperframesVersion(),
+      narrationRelativePath: toPosix(relative(hyperframesWorkspace, resolveProjectPath(ctx.channelId, tts.mergedPath))),
+      cues: visualPrompts.cues,
+      imagesBySceneId: relativeImages,
+      bgmTracks: bgm.tracks.map((track) => ({
+        ...track,
+        path: relativeAssetPath(hyperframesWorkspace, track.path),
+      })),
+      sfxEvents: bgm.events.map((event) => ({
+        ...event,
+        path: relativeAssetPath(hyperframesWorkspace, event.path),
+      })),
+    });
+    const result = await renderHyperframesStoryVideo({
+      workspacePath: hyperframesWorkspace,
+      command: ctx.config.render.hyperframesCommand,
+      args: ctx.config.render.hyperframesArgs,
+      timeoutMinutes: ctx.config.render.hyperframesTimeoutMinutes,
+      composition,
+      outputFileName: "..\\story.mp4",
+      signal: ctx.signal,
+    });
+    compositionPath = storyRelativePath(ctx.storyId, "workspace", "render", "hyperframes", "index.html");
+    if (result.videoPath !== outputPath) {
+      await copyFile(result.videoPath, outputPath);
+    }
+  } else {
+    await renderStoryVideo({
+      segments,
+      narrationPath: resolveProjectPath(ctx.channelId, tts.mergedPath),
+      bgm,
+      outputPath,
+      durationSeconds: actualDuration,
+      width,
+      height,
+      ffmpegPath: resolveFfmpeg(ctx),
+      ffmpegPrefixArgs: ctx.ffmpegPrefixArgs,
+      signal: ctx.signal,
+      update: async (completed, total) => ctx.update?.(`Rendered segment ${completed}/${total}.`),
+      transition: { kind: ctx.config.render.storyTransition, seconds: ctx.config.render.storyTransitionSeconds },
+    });
+  }
 
   const artifact: RenderStageArtifact = {
     version: 1,
@@ -706,8 +781,56 @@ async function runRenderStage(ctx: StageContext): Promise<void> {
     durationSeconds: actualDuration,
     width,
     height,
+    engine,
   };
+  const outputSha256 = await trySha256File(outputPath);
+  if (outputSha256) artifact.outputSha256 = outputSha256;
+  if (compositionPath) artifact.compositionPath = compositionPath;
   await writeStageArtifact(ctx.channelId, ctx.storyId, "render", artifact);
+}
+
+function scaleScenesToDuration(scenes: SceneList, durationSeconds: number): Array<{ sceneId: string; startSeconds: number; endSeconds: number }> {
+  const estimatedEnd = scenes.scenes[scenes.scenes.length - 1]?.endSeconds ?? 0;
+  const scale = estimatedEnd > 0 ? durationSeconds / estimatedEnd : 1;
+  return scenes.scenes.map((scene) => ({
+    sceneId: scene.sceneId,
+    startSeconds: scene.startSeconds * scale,
+    endSeconds: scene.endSeconds * scale,
+  }));
+}
+
+function ttsChunkTiming(tts: TtsChunkManifest): Array<{ index: number; startSeconds: number; endSeconds: number }> {
+  let cursor = 0;
+  return tts.chunks.map((chunk) => {
+    const startSeconds = cursor;
+    cursor += chunk.durationSeconds;
+    return { index: chunk.index, startSeconds, endSeconds: cursor };
+  });
+}
+
+function ttsChunkCaptions(tts: TtsChunkManifest): Array<{ startSeconds: number; endSeconds: number; text: string }> {
+  let cursor = 0;
+  return tts.chunks.map((chunk) => {
+    const startSeconds = cursor;
+    cursor += chunk.durationSeconds;
+    return { startSeconds, endSeconds: cursor, text: chunk.text };
+  });
+}
+
+async function trySha256File(path: string): Promise<string | null> {
+  try {
+    return createHash("sha256").update(await readFile(path)).digest("hex");
+  } catch {
+    return null;
+  }
+}
+
+function toPosix(path: string): string {
+  return path.replaceAll("\\", "/");
+}
+
+function relativeAssetPath(fromPath: string, assetPath: string): string {
+  return assetPath.trim() ? toPosix(relative(fromPath, assetPath)) : assetPath;
 }
 
 async function runThumbnailStage(ctx: StageContext): Promise<void> {

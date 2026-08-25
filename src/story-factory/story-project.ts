@@ -48,7 +48,8 @@ export const STAGE_DEPS: Record<StoryStageId, StoryStageId[]> = {
   scenes: ["sections"],
   images: ["scenes"],
   bgm: ["tts"],
-  render: ["tts", "images", "bgm"],
+  "visual-prompts": ["naturalize", "tts", "scenes"],
+  render: ["tts", "images", "bgm", "visual-prompts"],
   metadata: ["sections"],
   // Only the drawtext overlay depends on metadata; the stage reuses an existing
   // background image, so a metadata edit re-runs the cheap overlay pass only.
@@ -91,6 +92,7 @@ export const STAGE_ARTIFACT_FILES: Record<StoryStageId, string> = {
   scenes: "scenes.json",
   images: "images.json",
   bgm: "bgm.json",
+  "visual-prompts": "visual-prompts.json",
   render: "render.json",
   thumbnail: "thumbnail.json",
   metadata: "metadata.json",

@@ -4,6 +4,10 @@ export const SCRIPT_PROVIDERS = ["dry-run", "openai-compatible"] as const;
 
 export type ScriptProvider = (typeof SCRIPT_PROVIDERS)[number];
 
+export const STORY_RENDER_ENGINES = ["ffmpeg", "hyperframes"] as const;
+
+export type StoryRenderEngine = (typeof STORY_RENDER_ENGINES)[number];
+
 export function isKnownScriptProvider(value: unknown): value is ScriptProvider {
   return typeof value === "string" && (SCRIPT_PROVIDERS as readonly string[]).includes(value);
 }
@@ -188,6 +192,10 @@ export type StudioConfig = {
     // and blended in one filtergraph pass — see render-story.ts.
     storyTransition: "fade" | "xfade";
     storyTransitionSeconds: number;
+    storyEngine: StoryRenderEngine;
+    hyperframesCommand: string;
+    hyperframesArgs: string[];
+    hyperframesTimeoutMinutes: number;
   };
   youtube: {
     clientIdEnv: string;
@@ -204,7 +212,7 @@ export type StudioConfig = {
     /** Root folder for downloaded sources; empty keeps ./sources (or the env override). */
     downloadDir: string;
     subtitleLanguages: string[];
-    defaultSearchPlatform: "youtube" | "bilibili" | "tiktok" | "douyin" | "facebook";
+    defaultSearchPlatform: "youtube" | "bilibili" | "tiktok" | "douyin" | "facebook" | "seedance";
     searchLimit: number;
     searchPrefixes: {
       youtube: string;
@@ -324,6 +332,10 @@ export const DEFAULT_STUDIO_CONFIG: StudioConfig = {
     longformHeight: 1080,
     storyTransition: "fade",
     storyTransitionSeconds: 0.5,
+    storyEngine: "ffmpeg",
+    hyperframesCommand: "node",
+    hyperframesArgs: ["./node_modules/hyperframes/bin/hyperframes.mjs"],
+    hyperframesTimeoutMinutes: 90,
   },
   youtube: {
     clientIdEnv: "YOUTUBE_CLIENT_ID",
@@ -520,6 +532,18 @@ export function normalizeStudioConfig(value: unknown): StudioConfig {
         0.1,
         2,
       ),
+      storyEngine: enumValue(candidate.render?.storyEngine, STORY_RENDER_ENGINES, DEFAULT_STUDIO_CONFIG.render.storyEngine),
+      hyperframesCommand: stringValue(
+        candidate.render?.hyperframesCommand,
+        DEFAULT_STUDIO_CONFIG.render.hyperframesCommand,
+      ),
+      hyperframesArgs: stringArrayValue(candidate.render?.hyperframesArgs, DEFAULT_STUDIO_CONFIG.render.hyperframesArgs),
+      hyperframesTimeoutMinutes: rangeValue(
+        candidate.render?.hyperframesTimeoutMinutes,
+        DEFAULT_STUDIO_CONFIG.render.hyperframesTimeoutMinutes,
+        1,
+        360,
+      ),
     },
     youtube: {
       clientIdEnv: stringValue(candidate.youtube?.clientIdEnv, DEFAULT_STUDIO_CONFIG.youtube.clientIdEnv),
@@ -537,7 +561,7 @@ export function normalizeStudioConfig(value: unknown): StudioConfig {
       ),
       defaultSearchPlatform: enumValue(
         candidate.sources?.defaultSearchPlatform,
-        ["youtube", "bilibili", "tiktok", "douyin", "facebook"],
+        ["youtube", "bilibili", "tiktok", "douyin", "facebook", "seedance"],
         DEFAULT_STUDIO_CONFIG.sources.defaultSearchPlatform,
       ),
       searchLimit: rangeValue(candidate.sources?.searchLimit, DEFAULT_STUDIO_CONFIG.sources.searchLimit, 1, 25),

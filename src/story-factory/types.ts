@@ -19,6 +19,7 @@ export const STORY_STAGES = [
   "scenes",
   "images",
   "bgm",
+  "visual-prompts",
   "render",
   // Metadata precedes the thumbnail: the overlay text comes from metadata.
   "metadata",
@@ -535,6 +536,28 @@ export type BgmPlan = {
   sceneChangeSfx: { path: string; volumeDb: number } | null;
   /** Concrete SFX cues to mix in, at absolute (already-scaled) story seconds. */
   events: Array<{ path: string; atSeconds: number; volumeDb: number }>;
+};
+
+export type VisualPromptMood = "calm" | "tense" | "mysterious" | "reveal" | "action";
+
+export type VisualPromptMotion = "slow-push" | "slow-pull" | "drift-left" | "drift-right" | "hold";
+
+export type VisualPromptCue = {
+  sceneId: string;
+  startSeconds: number;
+  endSeconds: number;
+  narrationExcerpt: string;
+  visualPrompt: string;
+  mood: VisualPromptMood;
+  captionEmphasis: string[];
+  motion: VisualPromptMotion;
+  overlayText: string;
+};
+
+export type VisualPromptArtifact = {
+  version: 1;
+  sourceHash: string;
+  cues: VisualPromptCue[];
 };
 
 export type ThumbnailArtifact = {

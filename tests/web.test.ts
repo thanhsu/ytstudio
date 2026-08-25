@@ -58,6 +58,7 @@ test("web shell and app expose the AI story factory screens", async () => {
     "storyFactory.enabled",
     "tts.google.apiKeyEnv",
     "images.provider",
+    "visual-prompts",
   ]) {
     assert.match(script, new RegExp(marker));
   }
@@ -285,6 +286,26 @@ test("the config screen exposes source search settings", async () => {
   assert.match(script, /sources\.searchPrefixes\.douyin/);
   assert.match(script, /Facebook search prefix/);
   assert.match(script, /sources\.searchPrefixes\.facebook/);
+  assert.match(script, /BestSeedancePrompts video assets/);
+});
+
+test("the config and story video screens expose Hyperframes rendering controls", async () => {
+  const script = await readWebScripts();
+
+  assert.match(script, /Story video engine/);
+  assert.match(script, /render\.storyEngine/);
+  assert.match(script, /Hyperframes command/);
+  assert.match(script, /render\.hyperframesCommand/);
+  assert.match(script, /Hyperframes args/);
+  assert.match(script, /render\.hyperframesArgs/);
+  assert.match(script, /Hyperframes timeout minutes/);
+  assert.match(script, /render\.hyperframesTimeoutMinutes/);
+  assert.match(script, /render\.longformWidth/);
+  assert.match(script, /render\.longformHeight/);
+  assert.match(script, /artifact\.engine/);
+  assert.match(script, /artifact\.outputSha256/);
+  assert.match(script, /artifact\.compositionPath/);
+  assert.match(script, /seriesLinkButton\(channelId, "Hyperframes composition", artifact\.compositionPath\)/);
 });
 
 test("the sources screen exposes paste, rights, score, download, and delete", async () => {
@@ -312,6 +333,7 @@ test("the sources screen exposes keyword search before tracking a source", async
   assert.match(script, /Search Sources/);
   assert.match(script, /\/api\/sources\/search/);
   assert.match(script, /Track Source/);
+  assert.match(script, /searchResult: result/);
   assert.match(script, /thumbnailUrl/);
   assert.match(script, /source-thumbnail/);
   assert.match(script, /sourceSearchResults/);

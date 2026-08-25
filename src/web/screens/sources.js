@@ -18,6 +18,7 @@ export function sourcePlatformOptions() {
     ["tiktok", "TikTok (URL-only unless search prefix is configured)"],
     ["douyin", "Douyin (URL-only unless search prefix is configured)"],
     ["facebook", "Facebook (URL-only unless search prefix is configured)"],
+    ["seedance", "BestSeedancePrompts video assets"],
   ];
 }
 
@@ -176,7 +177,7 @@ function renderSourceSearchResults(results) {
     link.textContent = result.url;
     const actions = document.createElement("div");
     actions.className = "source-actions";
-    actions.append(actionButton("Track Source", () => trackSource(result.url), "button", "primary"));
+    actions.append(actionButton("Track Source", () => trackSource(result), "button", "primary"));
     card.append(...children, title, meta, badge, matched, link, actions);
     wrapper.append(card);
   }
@@ -288,10 +289,10 @@ function triageSourceSearchResult(result) {
   return { label: "review-friendly", risk: "ok", reason: "Metadata looks usable for human review triage." };
 }
 
-async function trackSource(url) {
+async function trackSource(result) {
   try {
-    const data = await postJson("/api/sources", { url });
-    appState.sourceSearchResults = appState.sourceSearchResults.filter((result) => result.url !== url);
+    const data = await postJson("/api/sources", { url: result.url, searchResult: result });
+    appState.sourceSearchResults = appState.sourceSearchResults.filter((item) => item.url !== result.url);
     setStatus(data.created ? `Tracking ${data.candidate.title}.` : `Already tracked: ${data.candidate.title}.`);
     await renderSources();
   } catch (error) {

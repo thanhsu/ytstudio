@@ -7,6 +7,7 @@ import {
   type SourceCandidate,
   type SourceRights,
 } from "./store.ts";
+import type { SeedanceSearchResult } from "./seedance.ts";
 import { fetchSourceMetadata, type YtDlpOptions } from "./yt-dlp.ts";
 
 export type AddCandidateResult = { candidate: SourceCandidate; created: boolean };
@@ -71,6 +72,56 @@ export async function addCandidate(url: string, options: YtDlpOptions): Promise<
       uploader: metadata.uploader,
       durationSeconds: metadata.durationSeconds,
       description: metadata.description,
+      addedAt: new Date().toISOString(),
+      status: "metadata",
+      rights: "unknown",
+      rightsNote: "",
+    };
+    await saveCandidate(candidate);
+    return { candidate, created: true };
+  });
+}
+
+export async function addCandidateFromSearchResult(result: SeedanceSearchResult): Promise<AddCandidateResult> {
+  if (result.platform !== "SeedancePrompt") {
+    throw new Error(`Unsupported source search result platform ${JSON.stringify(result.platform)}.`);
+  }
+  if (!/^https?:\/\//i.test(result.url)) {
+    throw new Error("A Seedance video URL is required.");
+  }
+  const id = deriveSourceId(result.platform, result.platformVideoId);
+
+  return withCandidateLock(id, async () => {
+    const existing = await loadCandidate(id);
+    if (existing) {
+      if (existing.platform === result.platform && existing.platformVideoId === result.platformVideoId) {
+        return { candidate: existing, created: false };
+      }
+      throw new Error(
+        `Source id ${id} already holds ${existing.platform}:${existing.platformVideoId}, ` +
+          `which is not ${result.platform}:${result.platformVideoId}.`,
+      );
+    }
+
+    if (await candidateDirectoryExists(id)) {
+      throw new Error(`The directory for source ${id} exists but holds no candidate file.`);
+    }
+
+    const details = [
+      result.description.trim(),
+      result.sourcePageUrl ? `Source page: ${result.sourcePageUrl}` : "",
+      result.categories.length ? `Categories: ${result.categories.join(", ")}` : "",
+    ].filter(Boolean);
+    const candidate: SourceCandidate = {
+      version: 1,
+      id,
+      canonicalUrl: result.url,
+      platform: result.platform,
+      platformVideoId: result.platformVideoId,
+      title: result.title,
+      uploader: result.uploader,
+      durationSeconds: result.durationSeconds,
+      description: details.join("\n\n"),
       addedAt: new Date().toISOString(),
       status: "metadata",
       rights: "unknown",

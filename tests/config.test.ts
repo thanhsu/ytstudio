@@ -93,6 +93,60 @@ test("studio config defaults story transitions to a plain 0.5s fade", async () =
   });
 });
 
+test("render config defaults to ffmpeg and pinned local Hyperframes CLI", async () => {
+  await withTempCwd(async () => {
+    const config = await loadStudioConfig();
+
+    assert.equal(config.render.storyEngine, "ffmpeg");
+    assert.equal(config.render.hyperframesCommand, "node");
+    assert.deepEqual(config.render.hyperframesArgs, ["./node_modules/hyperframes/bin/hyperframes.mjs"]);
+    assert.equal(config.render.hyperframesTimeoutMinutes, 90);
+  });
+});
+
+test("package metadata pins Hyperframes because the CLI is pre-1.0", async () => {
+  const packageJson = JSON.parse(await readFile("package.json", "utf8"));
+
+  assert.equal(packageJson.devDependencies.hyperframes, "0.8.13");
+});
+
+test("render config accepts hyperframes and normalizes malformed values", async () => {
+  await withTempCwd(async () => {
+    await writeFile(
+      "studio.config.json",
+      JSON.stringify({
+        render: {
+          storyEngine: "hyperframes",
+          hyperframesCommand: "node",
+          hyperframesArgs: ["./node_modules/hyperframes/bin/hyperframes.mjs"],
+          hyperframesTimeoutMinutes: 15,
+        },
+      }),
+      "utf8",
+    );
+    const config = await loadStudioConfig();
+    assert.equal(config.render.storyEngine, "hyperframes");
+    assert.deepEqual(config.render.hyperframesArgs, ["./node_modules/hyperframes/bin/hyperframes.mjs"]);
+    assert.equal(config.render.hyperframesTimeoutMinutes, 15);
+
+    await writeFile(
+      "studio.config.json",
+      JSON.stringify({
+        render: {
+          storyEngine: "bad",
+          hyperframesArgs: "npx hyperframes",
+          hyperframesTimeoutMinutes: -1,
+        },
+      }),
+      "utf8",
+    );
+    const repaired = await loadStudioConfig();
+    assert.equal(repaired.render.storyEngine, "ffmpeg");
+    assert.deepEqual(repaired.render.hyperframesArgs, ["./node_modules/hyperframes/bin/hyperframes.mjs"]);
+    assert.equal(repaired.render.hyperframesTimeoutMinutes, 90);
+  });
+});
+
 test("a valid xfade transition setting is saved and reloaded as-is", async () => {
   await withTempCwd(async () => {
     const saved = await saveStudioConfig({
@@ -310,7 +364,7 @@ test("the sources block defaults, and rejects entries that are not usable string
           downloadDir: "D:/media/downloads",
           subtitleLanguages: ["vi", "", 7],
           ytDlpArgs: "nope",
-          defaultSearchPlatform: "douyin",
+          defaultSearchPlatform: "seedance",
           searchLimit: 12,
           searchPrefixes: { bilibili: "custombili", youtube: "", tiktok: "customtiktok", douyin: "customdouyin", facebook: "customfacebook" },
         },
@@ -322,7 +376,7 @@ test("the sources block defaults, and rejects entries that are not usable string
     assert.equal(loaded.sources.downloadDir, "D:/media/downloads");
     assert.deepEqual(loaded.sources.subtitleLanguages, ["vi"]);
     assert.deepEqual(loaded.sources.ytDlpArgs, []);
-    assert.equal(loaded.sources.defaultSearchPlatform, "douyin");
+    assert.equal(loaded.sources.defaultSearchPlatform, "seedance");
     assert.equal(loaded.sources.searchLimit, 12);
     assert.equal(loaded.sources.searchPrefixes.youtube, "ytsearch");
     assert.equal(loaded.sources.searchPrefixes.bilibili, "custombili");

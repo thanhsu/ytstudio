@@ -20,6 +20,7 @@
   "devDependencies": {
     "@types/busboy": "^1.5.4",
     "@types/node": "^26.2.0",
+    "hyperframes": "0.8.13",
     "typescript": "^7.0.2"
   }
 }
