@@ -80,7 +80,9 @@ export type ArtifactKind =
   | "render"
   | "cut"
   | "voiceover-segments"
-  | "voiceover-track";
+  | "voiceover-track"
+  | "youtube-metadata"
+  | "youtube-captions";
 
 export type ArtifactRecord = {
   kind: ArtifactKind;

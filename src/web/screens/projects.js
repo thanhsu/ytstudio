@@ -1,7 +1,7 @@
 import { appState, refreshAppData } from "../lib/state.js";
 import { fetchJsonOrNull, storyApiUrl } from "../lib/api.js";
 import { setStatus, view, setBreadcrumb, setActiveNav } from "../lib/shell.js";
-import { actionButton, field, selectField, textareaField, formValues, gateNotice } from "../lib/dom.js";
+import { actionButton, field, selectField, textareaField, checkboxField, formValues, boolFormValues, gateNotice } from "../lib/dom.js";
 import { navigate } from "../lib/router.js";
 import { renderCreateProjectForm } from "./review-project.js";
 import { renderCreateSeriesForm } from "./series.js";
@@ -101,6 +101,7 @@ function renderProjectsScreen() {
   toolbar.append(
     filterField,
     searchField,
+    actionButton("Reup Wizard", () => toggleCreate("reup"), "button", "primary"),
     actionButton("New Review Project", () => toggleCreate("review")),
     actionButton("New Series", () => toggleCreate("series")),
     actionButton("New Story Channel", () => toggleCreate("channel")),
@@ -112,6 +113,7 @@ function renderProjectsScreen() {
 
   const createHost = document.createElement("div");
   createHost.className = "projects-create";
+  if (screenState.creating === "reup") createHost.append(renderReupWizardForm());
   if (screenState.creating === "review") createHost.append(renderCreateProjectForm(() => mountProjects({ screen: "projects" })));
   if (screenState.creating === "series") createHost.append(renderCreateSeriesForm(() => mountProjects({ screen: "projects" })));
   if (screenState.creating === "channel") {
@@ -167,6 +169,49 @@ function renderProjectRows() {
 function toggleCreate(kind) {
   screenState.creating = screenState.creating === kind ? null : kind;
   renderProjectsScreen();
+}
+
+function renderReupWizardForm() {
+  const form = document.createElement("form");
+  form.className = "subpanel form-grid";
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    startReupWizard(form).catch((error) => setStatus(error.message));
+  });
+  form.replaceChildren(
+    gateNotice(
+      "Reup Wizard",
+      "Point it at a source folder holding the film (.mp4), the subtitle (.srt), the voiceover segment folder (0001.wav, ...) and an optional cover image. It creates the project, imports everything, and renders the final video in one background job.",
+      "info",
+    ),
+    field("Project id", "id", "", "text", "su-150-3"),
+    field("Source folder path", "folderPath", "", "text", "D:\\path\\to\\150.3 su"),
+    field("Topic (optional, defaults to the video name)", "topic", "", "text"),
+    selectField("Copy branding from", "templateProjectId", "", [["", "None"], ...appState.projects.map((id) => [id, id])]),
+    checkboxField("Render final video at the end", "finalRender", true),
+    actionButton("Run Reup Wizard", null, "submit", "primary"),
+  );
+  return form;
+}
+
+async function startReupWizard(form) {
+  const values = boolFormValues(form);
+  const response = await fetch("/api/reup-wizard", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      id: values.id,
+      folderPath: values.folderPath,
+      topic: values.topic,
+      templateProjectId: values.templateProjectId,
+      finalRender: values.finalRender === true,
+    }),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
+  setStatus(`Reup wizard started for ${values.id}. Watch it in the Jobs tab.`);
+  screenState.creating = null;
+  navigate("#/jobs");
 }
 
 function toggleEdit(row) {

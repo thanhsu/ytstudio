@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="vi">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nạp Video, SRT &amp; Voiceover</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+</head><body>
+  :root {
+    --bg: #0e1116; --surface: #14181f; --raise: #1a2029;
+    --line: rgba(255,255,255,0.09); --text: #e6edf3; --muted: #9aa4b2;
+    --accent: #6ca5ff; --accent-solid: #1f6feb; --ok: #3fb950; --warn: #d29922;
+    --mono: "IBM Plex Mono", ui-monospace, monospace;
+  }
+  body { background: var(--bg); color: var(--text); font-family: "IBM Plex Sans", "Segoe UI", sans-serif; font-size: 15.5px; line-height: 1.65; margin: 0; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 48px 24px 80px; }
+  h1, h2 { font-family: "Space Grotesk", sans-serif; letter-spacing: -0.02em; text-wrap: balance; }
+  h1 { font-size: 34px; margin: 0 0 6px; }
+  .sub { color: var(--muted); margin: 0 0 34px; }
+  h2 { font-size: 20px; margin: 0; display: flex; align-items: center; gap: 12px; }
+  .stepnum { flex-shrink: 0; width: 30px; height: 30px; border-radius: 8px; background: var(--accent-solid); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 700; font-family: "Space Grotesk", sans-serif; }
+  section { margin: 0 0 40px; display: flex; flex-direction: column; gap: 14px; }
+  p { margin: 0; }
+  .muted { color: var(--muted); }
+  .path { font-family: var(--mono); font-size: 12.5px; background: var(--surface); border: 1px solid var(--line); border-radius: 7px; padding: 8px 12px; overflow-x: auto; white-space: nowrap; color: #a5c8ff; }
+  .callout { border: 1px solid rgba(210,153,34,0.35); background: rgba(210,153,34,0.08); border-radius: 10px; padding: 14px 16px; font-size: 14.5px; }
+  .callout.ok { border-color: rgba(63,185,80,0.35); background: rgba(63,185,80,0.07); }
+  .callout strong { color: var(--warn); }
+  .callout.ok strong { color: var(--ok); }
+
+  /* App-fragment mockups, styled to match the studio's Editor Dark UI */
+  .ui { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); overflow: hidden; }
+  .ui-bar { display: flex; align-items: center; gap: 7px; padding: 9px 14px; border-bottom: 1px solid var(--line); background: #10151c; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: rgba(255,255,255,0.14); }
+  .ui-bar span { font-family: var(--mono); font-size: 11.5px; color: var(--muted); margin-left: 8px; }
+  .ui-body { padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .btn { display: inline-flex; align-items: center; padding: 8px 14px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.16); background: var(--surface); font-size: 13.5px; font-weight: 500; }
+  .btn.primary { background: var(--accent-solid); border-color: var(--accent); color: #fff; font-weight: 600; }
+  .btn.active { background: rgba(31,111,235,0.16); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .pointer { position: relative; }
+  .pointer::after { content: "👈 bấm vào đây"; position: absolute; left: calc(100% + 10px); top: 50%; transform: translateY(-50%); white-space: nowrap; font-size: 12.5px; color: var(--warn); font-weight: 600; }
+  .field { display: flex; flex-direction: column; gap: 5px; }
+  .field label { font-size: 12px; font-weight: 600; color: var(--muted); }
+  .input { border: 1px solid rgba(255,255,255,0.14); background: #0e1116; border-radius: 7px; padding: 8px 11px; font-size: 13px; color: var(--text); }
+  .input.mono { font-family: var(--mono); font-size: 12px; color: #a5c8ff; overflow-x: auto; white-space: nowrap; }
+  .select { color: var(--accent); font-weight: 600; }
+  .rail { display: flex; flex-direction: column; gap: 4px; width: 170px; flex-shrink: 0; }
+  .rail .btn { justify-content: flex-start; }
+  .split { display: flex; gap: 16px; align-items: flex-start; }
+  .grow { flex-grow: 1; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .sect-label { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .status-chip { display: inline-flex; padding: 3px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 700; }
+  .status-chip.ok { background: rgba(63,185,80,0.15); color: var(--ok); }
+  code { font-family: var(--mono); font-size: 0.88em; background: var(--raise); border-radius: 4px; padding: 1px 6px; }
+  .flow { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: 13px; color: var(--muted); }
+  .flow b { color: var(--text); }
+  ul { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 6px; }
+</style>
+
+<div class="wrap">
+  <h1>Nạp Video, SRT &amp; Voiceover</h1>
+  <p class="sub">Đưa phim <b>150.1 爹娘双尊我躺赢</b> vào YT Review Studio theo workflow Sub Translate / Render — từng bước theo đúng giao diện.</p>
+
+  <div class="callout" style="margin-bottom: 34px;">
+    <strong>Trước khi bắt đầu:</strong> <code>ep01</code> anh/chị vừa tạo là <b>Story Channel</b> (dành cho AI audio story) nên không nhận video/SRT — vì vậy mới thấy lỗi "story-factory-disabled". Cứ để đó hoặc xóa ở tab Projects (dòng <b>Series · ep01</b> → Delete). Việc nạp phim cần một <b>Review Project</b>, tạo ở Bước 1.
+  </div>
+
+  <section>
+    <h2><span class="stepnum">1</span>Tạo Review Project với workflow "Sub Translate / Render"</h2>
+    <p>Vào tab <b>Projects</b> → bấm <b>New Review Project</b> → điền form. Quan trọng nhất là ô <b>Workflow type</b> — phải chọn <b>Sub Translate / Render</b> thì mới có các bước Media / Subtitles.</p>
+    <div class="ui">
+      <div class="ui-bar"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span>127.0.0.1:3000/#/projects</span></div>
+      <div class="ui-body">
+        <div class="field"><label>Project id</label><div class="input mono">su-150-1</div></div>
+        <div class="field"><label>Topic</label><div class="input">爹娘双尊我躺赢 — bản thuyết minh tiếng Anh</div></div>
+        <div class="field"><label>Format</label><div class="input select">Longform</div></div>
+        <div class="field"><label>Workflow type</label><div class="input select pointer">Sub Translate / Render</div></div>
+        <div class="field"><label>Language</label><div class="input">English</div></div>
+        <div class="row"><span class="btn primary">Create Project</span></div>
+      </div>
+    </div>
+    <p class="muted">Sau khi tạo, bấm <b>Open</b> ở dòng project vừa xuất hiện trong danh sách.</p>
+  </section>
+
+  <section>
+    <h2><span class="stepnum">2</span>Upload video — phase Content, stage Media</h2>
+    <p>Trong workspace của project: chọn phase <b>Content</b> trên thanh ngang → chọn <b>Media</b> ở rail bên trái → bấm <b>Import Media</b> và chọn file:</p>
+    <div class="path">D:\DOCS\SUPHAM\New folder\su 150.1-20260824T025728Z-1-001\su 150.1\150.1爹娘双尊我躺赢_全集_reaudio.mp4</div>
+    <div class="ui">
+      <div class="ui-bar"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span>#/project/su-150-1/content</span></div>
+      <div class="ui-body">
+        <div class="row"><span class="btn">Overview</span><span class="btn active">Content</span><span class="btn">Edit</span><span class="btn">Publish</span></div>
+        <div class="split">
+          <div class="rail">
+            <span class="sect-label" style="padding: 2px 4px;">Content</span>
+            <span class="btn">Brief</span>
+            <span class="btn active">Media</span>
+            <span class="btn">ASR/OCR</span>
+            <span class="btn">Subtitles</span>
+            <span class="btn">Translation</span>
+          </div>
+          <div class="grow">
+            <span class="btn primary pointer" style="align-self: flex-start;">Import Media</span>
+            <p class="muted" style="font-size: 13.5px;">File 1.07 GB — dưới giới hạn 3 GB. Upload qua localhost mất khoảng nửa phút đến vài phút; chờ đến khi status góc phải hiện <b>"Imported: workspace/media/…"</b> rồi mới chuyển bước.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="stepnum">3</span>Upload SRT — stage Subtitles</h2>
+    <p>Vẫn trong phase Content, chọn <b>Subtitles</b> ở rail trái → bấm <b>Import Source SRT</b> và chọn file:</p>
+    <div class="path">D:\DOCS\SUPHAM\New folder\su 150.1-20260824T025728Z-1-001\su 150.1\150_1_English_QA_fixed.srt</div>
+    <p class="muted">Vì đã có SRT chuẩn nên <b>bỏ qua stage ASR/OCR</b> — không cần chạy nhận dạng giọng nói.</p>
+  </section>
+
+  <section>
+    <h2><span class="stepnum">4</span>Nạp folder audio thuyết minh — mục Voiceover</h2>
+    <p>Ngay dưới phần Import SRT trong stage <b>Subtitles</b> có mục <b>Voiceover</b>. Folder 2112 file wav không upload qua browser — chỉ cần <b>dán đường dẫn</b>, server đọc thẳng từ ổ đĩa:</p>
+    <div class="ui">
+      <div class="ui-bar"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span>#/project/su-150-1/content · Subtitles</span></div>
+      <div class="ui-body">
+        <span class="sect-label">Voiceover</span>
+        <div class="field"><label>Audio folder path</label><div class="input mono">D:\DOCS\SUPHAM\New folder\su 150.1-20260824T025728Z-1-001\su 150.1\audio_usa\audio_usa</div></div>
+        <div class="field"><label>Timing SRT path (optional)</label><div class="input mono muted" style="color: #6b7280;">— để trống: tự dùng source SRT vừa upload —</div></div>
+        <div class="row">
+          <span class="btn primary">Import Voiceover Segments</span>
+          <span class="btn">Render Voiceover Track</span>
+        </div>
+        <p style="font-size: 13.5px;">Status sẽ báo <span class="status-chip ok">Imported 2112/2112 segments</span> — file <code>0001.wav</code> khớp cue 1, <code>0002.wav</code> khớp cue 2… Nếu báo missing/unmatched, kiểm tra số lượng cue trong SRT có khớp số file không.</p>
+      </div>
+    </div>
+    <p>Import xong bấm <b>Render Voiceover Track</b> — job chạy nền, ghép 2112 đoạn thành một track audio theo đúng timeline SRT. Theo dõi tiến độ ở status góc phải trên.</p>
+  </section>
+
+  <section>
+    <h2><span class="stepnum">5</span>Các bước còn lại</h2>
+    <div class="flow"><b>Translation</b> (nếu cần dịch phụ đề) → <b>Publish › Source Risk</b> (xác nhận trách nhiệm nguồn — bắt buộc trước khi render) → <b>Edit › Render</b> → <b>Publish › Export</b>.</div>
+    <ul class="muted" style="font-size: 14px;">
+      <li>Mọi thao tác chậm (render, import lớn) đều chạy nền — đừng đóng tab, status góc phải hiện phần trăm.</li>
+      <li>Muốn sửa/xóa project: tab Projects có nút <b>Edit</b> / <b>Delete</b> ngay trên từng dòng.</li>
+    </ul>
+    <div class="callout ok"><strong>Tóm tắt:</strong> Tạo project workflow <b>Sub Translate / Render</b> → Media: chọn file mp4 → Subtitles: chọn file SRT → Voiceover: dán đường dẫn folder audio → Import → Render Voiceover Track.</div>
+  </section>
+</div>
+</body></html>

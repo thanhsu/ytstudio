@@ -13,6 +13,7 @@ export function parseRoute(hash) {
   if (parts.length === 0 || parts[0] === "projects") return { screen: "projects" };
   if (parts[0] === "sources") return { screen: "sources" };
   if (parts[0] === "config") return { screen: "config" };
+  if (parts[0] === "jobs") return { screen: "jobs" };
   if (parts[0] === "youtube") {
     return parts[1]
       ? { screen: "youtube", id: decodeURIComponent(parts[1]), view: parts[2] || "overview" }
@@ -40,6 +41,7 @@ function normalizePhase(part) {
 export function routeHash(route) {
   if (route.screen === "sources") return "#/sources";
   if (route.screen === "config") return "#/config";
+  if (route.screen === "jobs") return "#/jobs";
   if (route.screen === "youtube") return `#/youtube/${encodeURIComponent(route.id)}/${route.view ?? "overview"}`;
   if (route.screen === "review-project") return `#/project/${encodeURIComponent(route.id)}/${route.phase ?? "overview"}`;
   if (route.screen === "series") return `#/series/${encodeURIComponent(route.id)}/${route.phase ?? "overview"}`;
