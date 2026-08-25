@@ -22,13 +22,16 @@ import {
 import type { ChatFn } from "../src/story-factory/stage-llm.ts";
 import { resolveProjectPath } from "../src/project-paths.ts";
 import {
+  approvalState,
   approveStoryStage,
   createStory,
   deriveStoryStatus,
   loadStory,
   readStageArtifact,
+  writeStageArtifact,
 } from "../src/story-factory/story-project.ts";
-import type { NaturalizedScript } from "../src/story-factory/types.ts";
+import type { RenderStageArtifact } from "../src/story-factory/export.ts";
+import type { NaturalizedScript, VisualPromptArtifact } from "../src/story-factory/types.ts";
 import { makeFakeExecutable } from "./helpers.ts";
 
 const IDEA_LOGLINE = "El ascensor del hospital abandonado baja solo cada madrugada.";
@@ -256,7 +259,7 @@ test("an assisted run generates everything, auto-passes QA gates, and stops befo
     assert.equal(outcome.completed, true);
 
     const story = outcome.story;
-    for (const stage of ["idea", "hook", "outline", "bible", "sections", "continuity-qa", "naturalize", "originality-qa", "tts-normalize", "tts", "scenes", "images", "bgm", "render", "thumbnail", "metadata", "final-qa"] as const) {
+    for (const stage of ["idea", "hook", "outline", "bible", "sections", "continuity-qa", "naturalize", "originality-qa", "tts-normalize", "tts", "scenes", "images", "bgm", "visual-prompts", "render", "thumbnail", "metadata", "final-qa"] as const) {
       assert.equal(story.stages[stage]?.status, "done", `${stage} should be done`);
     }
     // Export is a human click, never part of the pipeline.
@@ -281,6 +284,44 @@ test("an assisted run generates everything, auto-passes QA gates, and stops befo
     const log = await readAiLog("es-horror", "story-001");
     assert.equal(log.length, 14);
     assert.ok(log.every((entry) => entry.ok && entry.usage?.promptTokens === 1000 && entry.promptVersion));
+  });
+});
+
+test("hyperframes story engine renders through a generated composition and records output provenance", async () => {
+  await withStory(async ({ deps, config }) => {
+    const fakeHyperframes = await makeFakeExecutable(`
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
+const outputIndex = process.argv.indexOf("--output");
+if (process.argv.includes("npx")) process.exit(64);
+if (outputIndex < 0) process.exit(65);
+const outputPath = resolve(process.cwd(), process.argv[outputIndex + 1]);
+await mkdir(dirname(outputPath), { recursive: true });
+await writeFile(outputPath, "hyperframes-video", "utf8");
+`);
+    config.render.storyEngine = "hyperframes";
+    config.render.hyperframesCommand = process.execPath;
+    config.render.hyperframesArgs = [fakeHyperframes];
+    config.render.hyperframesTimeoutMinutes = 1;
+
+    const outcome = await runStoryPipeline("es-horror", "story-001", deps);
+    assert.equal(outcome.completed, true);
+
+    const visualPrompts = await readStageArtifact<VisualPromptArtifact>("es-horror", "story-001", "visual-prompts");
+    assert.equal(visualPrompts?.cues.length, 3);
+
+    const render = await readStageArtifact<RenderStageArtifact>("es-horror", "story-001", "render");
+    assert.equal(render?.engine, "hyperframes");
+    assert.equal(render?.compositionPath, "stories/story-001/workspace/render/hyperframes/index.html");
+    assert.match(render?.outputSha256 ?? "", /^[a-f0-9]{64}$/);
+
+    await approveStoryStage("es-horror", "story-001", "final", "render reviewed");
+    assert.equal(approvalState(await loadStory("es-horror", "story-001"), "final"), "approved");
+    await writeStageArtifact("es-horror", "story-001", "render", {
+      ...render,
+      outputSha256: "0".repeat(64),
+    });
+    assert.equal(approvalState(await loadStory("es-horror", "story-001"), "final"), "stale");
   });
 });
 
@@ -411,7 +452,7 @@ test("regenerating the script cascades staleness but cached media is never repai
     const outcome = await runSingleStage("es-horror", "story-001", "sections", deps, { regenerate: true });
     assert.equal(outcome.completed, true);
     let story = outcome.story;
-    for (const stage of ["continuity-qa", "naturalize", "tts", "scenes", "images", "render", "final-qa"] as const) {
+    for (const stage of ["continuity-qa", "naturalize", "tts", "scenes", "images", "visual-prompts", "render", "final-qa"] as const) {
       assert.equal(story.stages[stage]?.status, "stale", `${stage} should be stale`);
     }
 

@@ -42,6 +42,9 @@ export type RenderStageArtifact = {
   durationSeconds: number;
   width: number;
   height: number;
+  engine?: "ffmpeg" | "hyperframes";
+  outputSha256?: string;
+  compositionPath?: string;
 };
 
 export async function exportStoryPackage(channelId: string, storyId: string): Promise<ExportManifest> {
