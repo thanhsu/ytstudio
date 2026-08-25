@@ -286,6 +286,7 @@ test("the config screen exposes source search settings", async () => {
   assert.match(script, /sources\.searchPrefixes\.douyin/);
   assert.match(script, /Facebook search prefix/);
   assert.match(script, /sources\.searchPrefixes\.facebook/);
+  assert.match(script, /BestSeedancePrompts video assets/);
 });
 
 test("the config and story video screens expose Hyperframes rendering controls", async () => {
@@ -332,6 +333,7 @@ test("the sources screen exposes keyword search before tracking a source", async
   assert.match(script, /Search Sources/);
   assert.match(script, /\/api\/sources\/search/);
   assert.match(script, /Track Source/);
+  assert.match(script, /searchResult: result/);
   assert.match(script, /thumbnailUrl/);
   assert.match(script, /source-thumbnail/);
   assert.match(script, /sourceSearchResults/);

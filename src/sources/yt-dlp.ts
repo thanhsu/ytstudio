@@ -11,7 +11,7 @@ export type SourceMetadata = {
   description: string;
 };
 
-export type SourceSearchPlatform = "youtube" | "bilibili" | "tiktok" | "douyin" | "facebook";
+export type SourceSearchPlatform = "youtube" | "bilibili" | "tiktok" | "douyin" | "facebook" | "seedance";
 
 export type SourceSearchResult = {
   platform: string;
@@ -68,6 +68,7 @@ const DEFAULT_SEARCH_PREFIXES: Record<SourceSearchPlatform, string> = {
   tiktok: "",
   douyin: "",
   facebook: "",
+  seedance: "",
 };
 
 export function requireYtDlpPath(ytDlpPath?: string): string {
@@ -258,7 +259,7 @@ function resultUrl(payload: YtDlpPayload, platform: SourceSearchPlatform, id: st
 }
 
 function searchPlatform(value: SourceSearchPlatform): SourceSearchPlatform {
-  if (value === "youtube" || value === "bilibili" || value === "tiktok" || value === "douyin" || value === "facebook") return value;
+  if (value === "youtube" || value === "bilibili" || value === "tiktok" || value === "douyin" || value === "facebook" || value === "seedance") return value;
   throw new Error(`Unsupported source search platform ${JSON.stringify(value)}.`);
 }
 

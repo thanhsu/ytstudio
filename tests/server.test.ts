@@ -1332,6 +1332,49 @@ test("source search returns discoverable results without adding candidates", asy
   );
 });
 
+test("source search can list Seedance video assets and track the selected result", async () => {
+  await withSourcesServer(async (running) => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url === "https://www.bestseedanceprompts.com/") {
+        return new Response(
+          `<script>{"prompts":[{"slug":"seedance-market","title":"Seedance Night Market","description":"market video asset","authorName":"Sairah","thumbnail":"https://img.example/market.jpg","videoUrl":"https://cms-assets.youmind.com/media/market.mp4","categories":["cinematic-film"]}]}</script>`,
+        );
+      }
+      return originalFetch(input, init);
+    }) as typeof fetch;
+
+    try {
+      const response = await originalFetch(`${running.url}/api/sources/search`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: running.url },
+        body: JSON.stringify({ query: "night market", platform: "seedance", limit: 3 }),
+      });
+
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.results[0].platform, "SeedancePrompt");
+      assert.equal(body.results[0].url, "https://cms-assets.youmind.com/media/market.mp4");
+      assert.deepEqual((await (await originalFetch(`${running.url}/api/sources`)).json()).sources, []);
+
+      const tracked = await originalFetch(`${running.url}/api/sources`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: running.url },
+        body: JSON.stringify({ url: body.results[0].url, searchResult: body.results[0] }),
+      });
+
+      assert.equal(tracked.status, 200);
+      const trackedBody = await tracked.json();
+      assert.equal(trackedBody.candidate.id, "seedanceprompt-seedance-market");
+      assert.equal(trackedBody.candidate.canonicalUrl, "https://cms-assets.youmind.com/media/market.mp4");
+      assert.equal(trackedBody.candidate.rights, "unknown");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
 test("reading a candidate that does not exist is a 404, not an empty object", async () => {
   await withSourcesServer(async (running) => {
     const response = await fetch(`${running.url}/api/sources/youtube-missing`);

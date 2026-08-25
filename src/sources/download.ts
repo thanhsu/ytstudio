@@ -1,4 +1,4 @@
-import { readdir, rm } from "node:fs/promises";
+import { readdir, rm, writeFile } from "node:fs/promises";
 import { loadStudioConfig } from "../config.ts";
 import { ProcessError, runProcess } from "../process.ts";
 import { redact } from "../redact.ts";
@@ -17,11 +17,13 @@ export type DownloadOptions = {
   /** Absent means subtitles are not converted, not that the download fails. */
   ffmpegPath?: string;
   signal?: AbortSignal;
+  fetch?: DirectVideoFetch;
   update?: (progress: number, message: string) => Promise<void>;
   onCommand?: (executable: string, args: string[]) => void;
 };
 
 export type SubtitleChoice = { path: string; language: string };
+type DirectVideoFetch = (input: string, init?: { signal?: AbortSignal }) => Promise<Response>;
 
 const CANDIDATE_FILE = "candidate.json";
 const SUBTITLE_PATTERN = /^video\.([a-z]{2,3}(?:-[A-Za-z0-9]+)?)(\.auto)?\.(srt|vtt|ass)$/;
@@ -66,6 +68,9 @@ export async function downloadCandidate(id: string, options: DownloadOptions): P
   const safeId = validateSourceId(id);
   const candidate = await requireCandidate(safeId);
   assertDownloadable(candidate);
+  if (candidate.platform === "SeedancePrompt") {
+    return downloadDirectVideoCandidate(safeId, candidate, options);
+  }
 
   const config = await loadStudioConfig().catch(() => null);
   const executable = requireYtDlpPath(options.ytDlpPath ?? config?.sources.ytDlpPath ?? "");
@@ -147,6 +152,62 @@ export async function downloadCandidate(id: string, options: DownloadOptions): P
       downloadedAt: new Date().toISOString(),
     },
   }));
+}
+
+async function downloadDirectVideoCandidate(
+  id: string,
+  candidate: SourceCandidate,
+  options: DownloadOptions,
+): Promise<SourceCandidate> {
+  const fetcher = options.fetch ?? fetch;
+  await clearDownloadedFiles(id);
+  await patchCandidate(id, (current) => ({ ...current, status: "downloading", error: undefined, media: undefined }));
+
+  try {
+    await options.update?.(5, `Downloading ${candidate.title}`);
+    const response = await fetcher(candidate.canonicalUrl, { signal: options.signal });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const extension = directVideoExtension(candidate.canonicalUrl, response.headers.get("content-type") ?? "");
+    const fileName = `video.${extension}`;
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    await writeFile(resolveSourcePath(id, fileName), bytes);
+    await options.update?.(100, `Saved ${resolveSourcePath(id, fileName)}`);
+    return patchCandidate(id, (current) => ({
+      ...current,
+      status: "downloaded",
+      error: undefined,
+      media: {
+        videoRelativePath: fileName,
+        downloadedAt: new Date().toISOString(),
+      },
+    }));
+  } catch (error: unknown) {
+    await removeQuietly(() => clearDownloadedFiles(id));
+    if (isAbort(error, options.signal)) {
+      await patchCandidate(id, (current) => ({ ...current, status: "metadata", error: undefined }));
+      throw error;
+    }
+    const message = redact(failureDetail(error));
+    await patchCandidate(id, (current) => ({ ...current, status: "failed", error: message }));
+    throw new Error(`Seedance video could not download ${id}: ${message}`);
+  }
+}
+
+function directVideoExtension(url: string, contentType: string): string {
+  const fromType = /^video\/([a-z0-9-]+)/i.exec(contentType)?.[1];
+  if (fromType === "quicktime") return "mov";
+  if (fromType === "mp4" || fromType === "webm" || fromType === "x-matroska") {
+    return fromType === "x-matroska" ? "mkv" : fromType;
+  }
+  try {
+    const suffix = /\.([a-z0-9]{2,5})$/i.exec(new URL(url).pathname)?.[1]?.toLowerCase();
+    if (suffix === "mp4" || suffix === "webm" || suffix === "mov" || suffix === "mkv") return suffix;
+  } catch {
+    // Fall through to the safest default the renderer accepts.
+  }
+  return "mp4";
 }
 
 async function patchCandidate(

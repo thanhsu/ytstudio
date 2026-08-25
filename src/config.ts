@@ -163,7 +163,7 @@ export type StudioConfig = {
     /** Root folder for downloaded sources; empty keeps ./sources (or the env override). */
     downloadDir: string;
     subtitleLanguages: string[];
-    defaultSearchPlatform: "youtube" | "bilibili" | "tiktok" | "douyin" | "facebook";
+    defaultSearchPlatform: "youtube" | "bilibili" | "tiktok" | "douyin" | "facebook" | "seedance";
     searchLimit: number;
     searchPrefixes: {
       youtube: string;
@@ -488,7 +488,7 @@ export function normalizeStudioConfig(value: unknown): StudioConfig {
       ),
       defaultSearchPlatform: enumValue(
         candidate.sources?.defaultSearchPlatform,
-        ["youtube", "bilibili", "tiktok", "douyin", "facebook"],
+        ["youtube", "bilibili", "tiktok", "douyin", "facebook", "seedance"],
         DEFAULT_STUDIO_CONFIG.sources.defaultSearchPlatform,
       ),
       searchLimit: rangeValue(candidate.sources?.searchLimit, DEFAULT_STUDIO_CONFIG.sources.searchLimit, 1, 25),

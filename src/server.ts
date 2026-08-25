@@ -38,9 +38,10 @@ import {
   loadEditManifest,
 } from "./edit-manifest.ts";
 import { saveEpisodeAnalysis, type EpisodeAnalysis } from "./episode-analysis.ts";
-import { addCandidate, assertDownloadable, requireCandidate, setCandidateRights } from "./sources/candidates.ts";
+import { addCandidate, addCandidateFromSearchResult, assertDownloadable, requireCandidate, setCandidateRights } from "./sources/candidates.ts";
 import { downloadCandidate } from "./sources/download.ts";
 import { scoreCandidate } from "./sources/score.ts";
+import { searchSeedanceVideoAssets, type SeedanceSearchResult } from "./sources/seedance.ts";
 import { listCandidates, resolveSourcePath, type SourceRights } from "./sources/store.ts";
 import { searchSourceMetadata, type SourceSearchPlatform, type YtDlpOptions } from "./sources/yt-dlp.ts";
 import { exportReviewPackage } from "./export-package.ts";
@@ -1401,13 +1402,21 @@ async function routeSourceRequest(
     const body = await readJsonBody(request);
     const config = await loadStudioConfig();
     try {
-      const results = await searchSourceMetadata(requiredString(body.query, "query"), {
-        platform: sourceSearchPlatformBody(body.platform, config.sources.defaultSearchPlatform),
-        limit: numberBody(body.limit, config.sources.searchLimit),
-        ytDlpPath: config.sources.ytDlpPath || undefined,
-        ytDlpArgs: config.sources.ytDlpArgs,
-        searchPrefixes: config.sources.searchPrefixes,
-      });
+      const platform = sourceSearchPlatformBody(body.platform, config.sources.defaultSearchPlatform);
+      const limit = numberBody(body.limit, config.sources.searchLimit);
+      const query = requiredString(body.query, "query");
+      let results;
+      if (platform === "seedance") {
+        results = await searchSeedanceVideoAssets(query, { limit });
+      } else {
+        results = await searchSourceMetadata(query, {
+          platform,
+          limit,
+          ytDlpPath: config.sources.ytDlpPath || undefined,
+          ytDlpArgs: config.sources.ytDlpArgs,
+          searchPrefixes: config.sources.searchPrefixes,
+        });
+      }
       sendJson(response, 200, { ok: true, results });
     } catch (error: unknown) {
       sendSourceError(response, error);
@@ -1422,7 +1431,10 @@ async function routeSourceRequest(
       return;
     }
     try {
-      const result = await addCandidate(body.url, await ytDlpOptionsFromConfig());
+      const searchResult = seedanceSearchResultBody(body.searchResult);
+      const result = searchResult
+        ? await addCandidateFromSearchResult(searchResult)
+        : await addCandidate(body.url, await ytDlpOptionsFromConfig());
       sendJson(response, 200, { ok: true, created: result.created, candidate: result.candidate });
     } catch (error: unknown) {
       sendSourceError(response, error);
@@ -1822,9 +1834,30 @@ function recordStringBody(value: unknown): Record<string, string> | undefined {
 }
 
 function sourceSearchPlatformBody(value: unknown, fallback: SourceSearchPlatform): SourceSearchPlatform {
-  if (value === "youtube" || value === "bilibili" || value === "tiktok" || value === "douyin" || value === "facebook") return value;
+  if (value === "youtube" || value === "bilibili" || value === "tiktok" || value === "douyin" || value === "facebook" || value === "seedance") return value;
   if (value === undefined || value === null || value === "") return fallback;
   throw new Error(`Unsupported source search platform ${JSON.stringify(value)}.`);
+}
+
+function seedanceSearchResultBody(value: unknown): SeedanceSearchResult | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  if (record.platform !== "SeedancePrompt") return null;
+  return {
+    platform: "SeedancePrompt",
+    platformVideoId: requiredString(record.platformVideoId, "searchResult.platformVideoId"),
+    url: requiredString(record.url, "searchResult.url"),
+    title: requiredString(record.title, "searchResult.title"),
+    uploader: typeof record.uploader === "string" ? record.uploader : "",
+    durationSeconds: Math.max(0, Math.floor(Number(record.durationSeconds) || 0)),
+    viewCount: Math.max(0, Math.floor(Number(record.viewCount) || 0)),
+    thumbnailUrl: typeof record.thumbnailUrl === "string" ? record.thumbnailUrl : "",
+    sourcePageUrl: typeof record.sourcePageUrl === "string" ? record.sourcePageUrl : "",
+    description: typeof record.description === "string" ? record.description : "",
+    categories: Array.isArray(record.categories)
+      ? record.categories.filter((item): item is string => typeof item === "string")
+      : [],
+  };
 }
 
 function episodeStatusBody(value: unknown): EpisodeStatus | undefined {

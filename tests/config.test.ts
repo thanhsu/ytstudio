@@ -364,7 +364,7 @@ test("the sources block defaults, and rejects entries that are not usable string
           downloadDir: "D:/media/downloads",
           subtitleLanguages: ["vi", "", 7],
           ytDlpArgs: "nope",
-          defaultSearchPlatform: "douyin",
+          defaultSearchPlatform: "seedance",
           searchLimit: 12,
           searchPrefixes: { bilibili: "custombili", youtube: "", tiktok: "customtiktok", douyin: "customdouyin", facebook: "customfacebook" },
         },
@@ -376,7 +376,7 @@ test("the sources block defaults, and rejects entries that are not usable string
     assert.equal(loaded.sources.downloadDir, "D:/media/downloads");
     assert.deepEqual(loaded.sources.subtitleLanguages, ["vi"]);
     assert.deepEqual(loaded.sources.ytDlpArgs, []);
-    assert.equal(loaded.sources.defaultSearchPlatform, "douyin");
+    assert.equal(loaded.sources.defaultSearchPlatform, "seedance");
     assert.equal(loaded.sources.searchLimit, 12);
     assert.equal(loaded.sources.searchPrefixes.youtube, "ytsearch");
     assert.equal(loaded.sources.searchPrefixes.bilibili, "custombili");
