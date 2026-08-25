@@ -10,6 +10,12 @@ import { ProjectJobManager } from "../src/jobs.ts";
 import { createStory, loadStory, readStageArtifact } from "../src/story-factory/story-project.ts";
 
 test("scheduled publish normalizes an ISO timestamp to UTC and private visibility", () => {
+  // Build a timestamp one day ahead so the "must be in the future" guard
+  // never turns this test into a time bomb.
+  const future = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  future.setUTCMilliseconds(0);
+  const expectedUtc = future.toISOString();
+  const localWithOffset = `${new Date(future.getTime() + 7 * 60 * 60 * 1000).toISOString().slice(0, 19)}+07:00`;
   const input = normalizePublishInput({
     sourceKind: "story",
     sourceId: "story-001",
@@ -19,11 +25,11 @@ test("scheduled publish normalizes an ISO timestamp to UTC and private visibilit
     tags: ["review"],
     thumbnailPath: "stories/story-001/workspace/export/thumbnail.png",
     privacyStatus: "public",
-    publishAt: "2026-08-25T10:00:00+07:00",
+    publishAt: localWithOffset,
   });
   assert.equal(input.privacyStatus, "private");
-  assert.equal(input.publishAt, "2026-08-25T03:00:00.000Z");
-  assert.equal(normalizePublishAt("2026-08-25T10:00:00+07:00"), "2026-08-25T03:00:00.000Z");
+  assert.equal(input.publishAt, expectedUtc);
+  assert.equal(normalizePublishAt(localWithOffset), expectedUtc);
 });
 
 test("publishing persists one completed job and duplicate prevention reuses its video id", async () => {
