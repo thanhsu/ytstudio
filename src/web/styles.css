@@ -125,6 +125,131 @@ select:focus-visible {
   color: var(--status-warn-fg);
 }
 
+.jobs-screen {
+  display: grid;
+  gap: 0.75rem;
+  max-width: 1100px;
+}
+
+.jobs-rows {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.job-row {
+  display: grid;
+  grid-template-columns: 110px minmax(160px, 0.8fr) minmax(0, 1.4fr) auto;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.job-title {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.job-title small {
+  color: var(--text-muted);
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 0.75rem;
+}
+
+.job-progress {
+  display: grid;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.job-progress small {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-progress-track {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.job-progress-fill {
+  height: 6px;
+  border-radius: 999px;
+  background: #1f6feb;
+  transition: width 400ms ease;
+}
+
+.job-progress-fill.succeeded {
+  background: var(--status-done-fg);
+}
+
+.job-progress-fill.failed {
+  background: var(--status-block-fg);
+}
+
+.job-progress-fill.cancelled {
+  background: var(--status-neutral-fg);
+}
+
+.job-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.youtube-metadata {
+  display: grid;
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+}
+
+.youtube-metadata textarea {
+  width: 100%;
+  background: #0e1116;
+  color: #e6edf3;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.metadata-title-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.25rem 0.75rem;
+  align-items: center;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.metadata-title-row small {
+  grid-column: 2;
+  color: var(--text-muted);
+}
+
+.caption-links {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.metadata-tags {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
 .asset-warning {
   color: var(--status-warn-fg);
   background: var(--status-warn-bg);

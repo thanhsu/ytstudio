@@ -18,6 +18,9 @@ export type JobKind =
   | "story-publish"
   | "compilation-render"
   | "voiceover-render"
+  | "final-render"
+  | "youtube-metadata"
+  | "reup-wizard"
   | "youtube-publish";
 export type JobStatus = "running" | "succeeded" | "failed" | "cancelled";
 
@@ -149,6 +152,34 @@ export class ProjectJobManager {
       return null;
     }
     return running.done;
+  }
+
+  /**
+   * Every persisted job across all owners, newest update first. Backs the
+   * studio's Jobs screen; the on-disk record is current because every progress
+   * update is persisted before it is emitted.
+   */
+  async listRecent(limit = 50): Promise<JobRecord[]> {
+    let owners: string[] = [];
+    try {
+      owners = (await readdir(this.resolveProjectsRoot(), { withFileTypes: true }))
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name);
+    } catch {
+      return [];
+    }
+    const all: JobRecord[] = [];
+    for (const owner of owners) {
+      try {
+        all.push(...(await this.listJobs(owner)));
+      } catch {
+        // A malformed record in one project must not hide every other job.
+      }
+    }
+    return all
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .slice(0, limit)
+      .map(cloneJob);
   }
 
   async recoverInterrupted(projectId: string): Promise<JobRecord[]> {

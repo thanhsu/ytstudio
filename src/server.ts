@@ -52,6 +52,17 @@ import { compositeOwner, ProjectJobManager, type JobKind, type JobOperation } fr
 import { extractAudioForAsr, importMedia } from "./media-ingest.ts";
 import { importSourceIntoProject } from "./source-link.ts";
 import { importVoiceoverSegments, renderVoiceoverTrack } from "./voiceover.ts";
+import {
+  checkFinalRenderPrerequisites,
+  loadBranding,
+  renderFinalVideo,
+  saveBrandingImage,
+  updateBrandingSettings,
+  type BrandingImageKind,
+} from "./final-render.ts";
+import { findSourceSubtitlePath, generateYoutubeMetadata, loadYoutubeMetadata } from "./youtube-metadata.ts";
+import { prepareYoutubeCaptions } from "./youtube-captions.ts";
+import { runReupWizard, scanReupFolder } from "./reup-wizard.ts";
 import { applySourcesDownloadDir, projectsRoot, sourcesRoot } from "./fs.ts";
 import { loadProjectState } from "./project-state.ts";
 import { resolveProjectPath, validateProjectId } from "./project-paths.ts";
@@ -268,6 +279,53 @@ async function routeRequest(
 
   if (method === "GET" && url.pathname === "/api/projects") {
     await sendProjects(response);
+    return;
+  }
+
+  if (method === "GET" && url.pathname === "/api/jobs") {
+    sendJson(response, 200, { jobs: await jobs.listRecent(60) });
+    return;
+  }
+
+  if (method === "POST" && url.pathname === "/api/reup-wizard") {
+    const body = await readJsonBody(request);
+    const projectId = validateProjectId(requiredString(body.id, "id"));
+    const folderPath = requiredString(body.folderPath, "folderPath");
+    let scan;
+    try {
+      scan = await scanReupFolder(folderPath);
+    } catch {
+      sendError(response, 400, { code: "reup-folder-invalid", message: "The folder does not exist or cannot be read." });
+      return;
+    }
+    if (scan.missing.length > 0) {
+      sendError(response, 400, {
+        code: "reup-folder-invalid",
+        message: `The folder is missing: ${scan.missing.join(", ")}.`,
+        details: { missing: scan.missing },
+      });
+      return;
+    }
+    try {
+      await stat(resolveProjectPath(projectId, "brief.json"));
+      sendError(response, 409, { code: "project-exists", message: `Project ${projectId} already exists. Pick a new id.` });
+      return;
+    } catch {
+      // A fresh id is exactly what the wizard wants.
+    }
+    const config = await loadStudioConfig();
+    const ffmpegPath = config.render.ffmpegPath || process.env.FFMPEG_PATH || "ffmpeg";
+    await startProjectJob(response, projectId, "reup-wizard", ({ signal, update }) =>
+      runReupWizard({
+        projectId,
+        folderPath,
+        topic: optionalString(body.topic),
+        templateProjectId: optionalString(body.templateProjectId) || undefined,
+        finalRender: body.finalRender !== false,
+        ffmpegPath,
+        signal,
+        onProgress: update,
+      }));
     return;
   }
 
@@ -973,7 +1031,7 @@ async function routeRequest(
 
   const fileMatch = /^files\/(.+)$/.exec(rest);
   if (method === "GET" && fileMatch) {
-    await sendProjectFile(response, projectId, decodeURIComponent(fileMatch[1]));
+    await sendProjectFile(request, response, projectId, decodeURIComponent(fileMatch[1]));
     return;
   }
 
@@ -1351,6 +1409,120 @@ async function routeRequest(
     return;
   }
 
+  if (method === "GET" && rest === "branding") {
+    sendJson(response, 200, { ok: true, branding: await loadBranding(projectId) });
+    return;
+  }
+
+  if (method === "PATCH" && rest === "branding") {
+    const body = await readJsonBody(request);
+    try {
+      const branding = await updateBrandingSettings(projectId, {
+        position: optionalString(body.position),
+        logoHeight: typeof body.logoHeight === "number" || typeof body.logoHeight === "string" ? Number(body.logoHeight) : undefined,
+        margin: typeof body.margin === "number" || typeof body.margin === "string" ? Number(body.margin) : undefined,
+        watermarkText: optionalString(body.watermarkText),
+        watermarkOpacity: typeof body.watermarkOpacity === "number" || typeof body.watermarkOpacity === "string" ? Number(body.watermarkOpacity) : undefined,
+        watermarkSize: typeof body.watermarkSize === "number" || typeof body.watermarkSize === "string" ? Number(body.watermarkSize) : undefined,
+        burnSubtitles: typeof body.burnSubtitles === "boolean" ? body.burnSubtitles : body.burnSubtitles === "true" ? true : body.burnSubtitles === "false" ? false : undefined,
+        subtitleSize: typeof body.subtitleSize === "number" || typeof body.subtitleSize === "string" ? Number(body.subtitleSize) : undefined,
+        subtitleBackdrop: optionalString(body.subtitleBackdrop),
+        backdropHeight: typeof body.backdropHeight === "number" || typeof body.backdropHeight === "string" ? Number(body.backdropHeight) : undefined,
+        keepOriginalAudio: typeof body.keepOriginalAudio === "boolean" ? body.keepOriginalAudio : body.keepOriginalAudio === "true" ? true : body.keepOriginalAudio === "false" ? false : undefined,
+        originalAudioVolume: typeof body.originalAudioVolume === "number" || typeof body.originalAudioVolume === "string" ? Number(body.originalAudioVolume) : undefined,
+      });
+      sendJson(response, 200, { ok: true, branding });
+    } catch (error: unknown) {
+      sendError(response, 400, { code: "branding-invalid", message: error instanceof Error ? error.message : String(error) });
+    }
+    return;
+  }
+
+  const brandingImageMatch = /^branding\/(logo|cover)$/.exec(rest);
+  if (method === "POST" && brandingImageMatch) {
+    const uploaded = await saveMultipartUpload(request, projectId, `branding-${brandingImageMatch[1]}-upload`);
+    try {
+      const saved = await saveBrandingImage(
+        projectId,
+        brandingImageMatch[1] as BrandingImageKind,
+        uploaded.path,
+        uploaded.filename,
+      );
+      sendJson(response, 200, { ok: true, artifact: { relativePath: saved.relativePath }, branding: saved.branding });
+    } catch (error: unknown) {
+      sendError(response, 400, { code: "branding-image-invalid", message: error instanceof Error ? error.message : String(error) });
+    } finally {
+      await rm(uploaded.path, { force: true });
+    }
+    return;
+  }
+
+  if (method === "POST" && rest === "youtube-captions") {
+    try {
+      sendJson(response, 200, { ok: true, captions: await prepareYoutubeCaptions(projectId) });
+    } catch (error: unknown) {
+      sendError(response, 409, {
+        code: "youtube-captions-prerequisites",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+    return;
+  }
+
+  if (method === "GET" && rest === "youtube-metadata") {
+    const metadata = await loadYoutubeMetadata(projectId);
+    if (!metadata) {
+      sendError(response, 404, { code: "youtube-metadata-missing", message: "Generate YouTube metadata first." });
+      return;
+    }
+    sendJson(response, 200, { ok: true, metadata });
+    return;
+  }
+
+  if (method === "POST" && rest === "youtube-metadata") {
+    const body = await readJsonBody(request);
+    if (!(await findSourceSubtitlePath(projectId))) {
+      sendError(response, 409, {
+        code: "youtube-metadata-prerequisites",
+        message: "Import a source SRT before generating YouTube metadata.",
+      });
+      return;
+    }
+    const config = await loadStudioConfig();
+    if (config.script.provider === "openai-compatible" && config.script.paid && body.confirmedPaidRequest !== true) {
+      sendError(response, 409, {
+        code: "paid-confirmation-required",
+        message: "The configured script model is paid and requires explicit confirmation.",
+        action: "confirm-paid-request",
+      });
+      return;
+    }
+    await startProjectJob(response, projectId, "youtube-metadata", ({ signal, update }) =>
+      generateYoutubeMetadata(projectId, {
+        confirmedPaidRequest: body.confirmedPaidRequest === true,
+        signal,
+        onProgress: update,
+      }));
+    return;
+  }
+
+  if (method === "POST" && rest === "voiceover/final-render") {
+    const prerequisites = await checkFinalRenderPrerequisites(projectId);
+    if (!prerequisites.ready) {
+      sendError(response, 409, {
+        code: "final-render-prerequisites",
+        message: prerequisites.reasons.join(" "),
+        details: { reasons: prerequisites.reasons },
+      });
+      return;
+    }
+    const config = await loadStudioConfig();
+    const ffmpegPath = config.render.ffmpegPath || process.env.FFMPEG_PATH || "ffmpeg";
+    await startProjectJob(response, projectId, "final-render", ({ update }) =>
+      renderFinalVideo({ projectId, ffmpegPath, onProgress: update }));
+    return;
+  }
+
   if (method === "POST" && rest === "subtitles/source") {
     const uploaded = await saveMultipartUpload(request, projectId, "subtitle-upload");
     try {
@@ -1643,6 +1815,7 @@ async function sendProject(response: ServerResponse, projectId: string): Promise
     pipeline: await projectPipelineStatus(projectId),
     renderGate: await evaluateProjectRenderGate(projectId),
     editRenderGate: await evaluateEditRenderGate(projectId),
+    branding: await loadBranding(projectId),
     workflow: {
       ...template,
       steps: deriveWorkflowStepStates(template.type, state),
@@ -1663,17 +1836,52 @@ async function loadProjectMetadata(projectId: string): Promise<unknown> {
   }
 }
 
-async function sendProjectFile(response: ServerResponse, projectId: string, relativePath: string): Promise<void> {
+async function sendProjectFile(
+  request: IncomingMessage,
+  response: ServerResponse,
+  projectId: string,
+  relativePath: string,
+): Promise<void> {
   const filePath = resolveProjectPath(projectId, relativePath);
   const info = await stat(filePath);
   if (!info.isFile()) {
     sendError(response, 404, { code: "not-found", message: "File not found." });
     return;
   }
-  response.writeHead(200, {
+  const headers: Record<string, string | number> = {
     "content-type": contentTypeFor(filePath),
     "cache-control": "no-store",
-  });
+    "accept-ranges": "bytes",
+  };
+
+  // Video previews seek by byte range; without 206 answers the player can only
+  // stream a two-hour file from the start.
+  const rangeMatch = /^bytes=(\d*)-(\d*)$/.exec(request.headers.range ?? "");
+  if (rangeMatch && (rangeMatch[1] !== "" || rangeMatch[2] !== "")) {
+    let start: number;
+    let end: number;
+    if (rangeMatch[1] === "") {
+      start = Math.max(0, info.size - Number(rangeMatch[2]));
+      end = info.size - 1;
+    } else {
+      start = Number(rangeMatch[1]);
+      end = rangeMatch[2] === "" ? info.size - 1 : Math.min(Number(rangeMatch[2]), info.size - 1);
+    }
+    if (start >= info.size || start > end) {
+      response.writeHead(416, { "content-range": `bytes */${info.size}` });
+      response.end();
+      return;
+    }
+    response.writeHead(206, {
+      ...headers,
+      "content-range": `bytes ${start}-${end}/${info.size}`,
+      "content-length": end - start + 1,
+    });
+    createReadStream(filePath, { start, end }).pipe(response);
+    return;
+  }
+
+  response.writeHead(200, { ...headers, "content-length": info.size });
   createReadStream(filePath).pipe(response);
 }
 
@@ -1971,6 +2179,9 @@ async function sendProjectEvents(response: ServerResponse, projectId: string): P
 
 if (process.argv[1] && process.argv[1].endsWith("server.ts")) {
   const port = Number(process.env.PORT ?? 3000);
-  const running = await startStudioServer(createStudioServer(), { port });
+  // HOST=0.0.0.0 exposes the studio on the LAN. There is no authentication, so
+  // bind beyond loopback only on a trusted network.
+  const host = process.env.HOST || "127.0.0.1";
+  const running = await startStudioServer(createStudioServer(), { port, host });
   console.log(`YT Review Studio listening on ${running.url}`);
 }

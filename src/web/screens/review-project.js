@@ -394,8 +394,80 @@ function renderSubtitles(snapshot) {
       "button",
       "primary",
     ),
-    artifactList(snapshot.state?.artifacts ?? {}, ["voiceover-segments", "voiceover-track"]),
+    sectionTitle("Branding & Final Render"),
+    paragraph("Optional: burn a channel logo onto the video and attach a cover image, then render the final video with the voiceover track."),
+    uploadField("Logo (png/webp, transparent works best)", "branding-logo-file", ".png,.jpg,.jpeg,.webp", () => uploadProjectFile("branding-logo-file", "branding/logo")),
+    uploadField("Cover / thumbnail image", "branding-cover-file", ".png,.jpg,.jpeg,.webp", () => uploadProjectFile("branding-cover-file", "branding/cover")),
+    brandingSettingsForm(snapshot.branding),
+    actionButton(
+      "Render Final Video",
+      () => postProjectAction("voiceover/final-render", {}, "Final render started."),
+      "button",
+      "primary",
+    ),
+    artifactList(snapshot.state?.artifacts ?? {}, ["voiceover-segments", "voiceover-track", "render"]),
   );
+}
+
+function brandingSettingsForm(branding) {
+  const current = branding ?? { position: "top-right", logoHeight: 64, margin: 20, watermarkText: "", watermarkOpacity: 0.25, watermarkSize: 36 };
+  const form = document.createElement("form");
+  form.className = "form-grid";
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    saveBrandingSettings(form).catch((error) => setStatus(error.message));
+  });
+  form.replaceChildren(
+    selectField("Logo position", "position", current.position, [
+      ["top-left", "Top left"],
+      ["top-right", "Top right"],
+      ["bottom-left", "Bottom left"],
+      ["bottom-right", "Bottom right"],
+    ]),
+    field("Logo height (px)", "logoHeight", String(current.logoHeight), "number"),
+    field("Margin (px)", "margin", String(current.margin), "number"),
+    field("Watermark text (empty = off)", "watermarkText", current.watermarkText ?? "", "text", "Ten kenh cua ban"),
+    field("Watermark opacity (0.05-1)", "watermarkOpacity", String(current.watermarkOpacity ?? 0.25), "number", "", "0.05"),
+    field("Watermark size (px)", "watermarkSize", String(current.watermarkSize ?? 36), "number"),
+    checkboxField("Burn subtitles from the source SRT", "burnSubtitles", current.burnSubtitles === true),
+    field("Subtitle size", "subtitleSize", String(current.subtitleSize ?? 18), "number"),
+    selectField("Subtitle backdrop (covers old hardsubs)", "subtitleBackdrop", current.subtitleBackdrop ?? "none", [
+      ["none", "None"],
+      ["box", "Box behind text"],
+      ["bar", "Bottom bar (full width)"],
+    ]),
+    field("Bar height (% of video height)", "backdropHeight", String(current.backdropHeight ?? 14), "number"),
+    checkboxField("Keep original video audio (mixed under the voiceover)", "keepOriginalAudio", current.keepOriginalAudio !== false),
+    field("Original audio volume (0-2)", "originalAudioVolume", String(current.originalAudioVolume ?? 1), "number", "", "0.05"),
+    actionButton("Save branding settings", null, "submit"),
+  );
+  return form;
+}
+
+async function saveBrandingSettings(form) {
+  const values = boolFormValues(form);
+  const response = await fetch(projectApiUrl("branding"), {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      position: values.position,
+      logoHeight: Number(values.logoHeight),
+      margin: Number(values.margin),
+      watermarkText: values.watermarkText ?? "",
+      watermarkOpacity: Number(values.watermarkOpacity),
+      watermarkSize: Number(values.watermarkSize),
+      burnSubtitles: values.burnSubtitles === true,
+      subtitleSize: Number(values.subtitleSize),
+      subtitleBackdrop: values.subtitleBackdrop,
+      backdropHeight: Number(values.backdropHeight),
+      keepOriginalAudio: values.keepOriginalAudio === true,
+      originalAudioVolume: Number(values.originalAudioVolume),
+    }),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
+  const watermark = data.branding.watermarkText ? `watermark "${data.branding.watermarkText}"` : "no watermark";
+  setStatus(`Branding saved: logo ${data.branding.position}, ${data.branding.logoHeight}px, ${watermark}.`);
 }
 
 // The segment folder holds thousands of files, so the server reads it straight
@@ -1186,12 +1258,110 @@ function selectMappingScene(sceneId) {
 
 function renderExport(snapshot) {
   const render = snapshot.state?.artifacts?.render;
+  const metadataHost = document.createElement("div");
+  metadataHost.className = "youtube-metadata";
   stageContent.replaceChildren(
     paragraph("Export is the handoff screen for the generated files and upload checklist."),
     render ? linkButton("Open Render File", render.relativePath) : paragraph("No render artifact yet."),
+    sectionTitle("YouTube Metadata (SEO)"),
+    paragraph("Reads the source SRT and generates title options, a description with chapters, and tags using the configured script model."),
+    actionButton("Generate YouTube Metadata", () => requestYoutubeMetadata(false).catch((error) => setStatus(error.message)), "button", "primary"),
+    metadataHost,
+    sectionTitle("Subtitles for YouTube"),
+    paragraph("Sanitizes the source SRT (strips inline markup) and prepares .srt + .vtt caption files ready for the YouTube Studio subtitle upload."),
+    actionButton("Prepare YouTube Subtitles", () => prepareCaptionsForYoutube().catch((error) => setStatus(error.message)), "button", "primary"),
+    captionLinks(snapshot),
     sectionTitle("Publish Checklist"),
     checklist(["Thumbnail ready", "Title/description reviewed", "Copyright risk accepted", "Upload scheduled at fixed time"]),
   );
+  void fillYoutubeMetadata(metadataHost);
+}
+
+async function requestYoutubeMetadata(confirmedPaidRequest) {
+  const response = await fetch(projectApiUrl("youtube-metadata"), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ confirmedPaidRequest }),
+  });
+  const data = await response.json();
+  if (response.status === 409 && data.code === "paid-confirmation-required") {
+    if (window.confirm("The configured script model is paid and this request will spend money. Continue?")) {
+      await requestYoutubeMetadata(true);
+    }
+    return;
+  }
+  if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
+  setStatus("YouTube metadata generation started.");
+}
+
+async function fillYoutubeMetadata(host) {
+  const response = await fetch(projectApiUrl("youtube-metadata"));
+  if (!response.ok) {
+    host.replaceChildren(paragraph("No metadata generated yet."));
+    return;
+  }
+  const { metadata } = await response.json();
+  const rows = metadata.titles.map((title) => {
+    const row = document.createElement("div");
+    row.className = "metadata-title-row";
+    const label = document.createElement("strong");
+    label.textContent = `[${title.type.toUpperCase()}] ${title.title}`;
+    const reason = document.createElement("small");
+    reason.textContent = title.reason;
+    row.append(copyButton(title.title), label, reason);
+    return row;
+  });
+
+  const description = document.createElement("textarea");
+  description.readOnly = true;
+  description.rows = 10;
+  description.value = metadata.description;
+
+  const tags = document.createElement("p");
+  tags.className = "metadata-tags";
+  tags.textContent = metadata.tags.join(", ");
+
+  host.replaceChildren(
+    paragraph(`Generated by ${metadata.provider} · ${metadata.model}.`),
+    ...rows,
+    sectionTitle("Description"),
+    copyButton(metadata.description, "Copy description"),
+    description,
+    sectionTitle("Tags"),
+    copyButton(metadata.tags.join(", "), "Copy tags"),
+    tags,
+  );
+}
+
+function captionLinks(snapshot) {
+  const captions = snapshot.state?.artifacts?.["youtube-captions"];
+  const host = document.createElement("div");
+  host.className = "caption-links";
+  if (!captions) {
+    host.append(paragraph("No caption files prepared yet."));
+    return host;
+  }
+  host.append(
+    linkButton("Download captions.srt", captions.relativePath),
+    linkButton("Download captions.vtt", captions.metadata?.vttRelativePath ?? "workspace/youtube/captions.vtt"),
+    paragraph(`${captions.metadata?.cueCount ?? "?"} cues, prepared ${new Date(captions.createdAt).toLocaleString()}.`),
+  );
+  return host;
+}
+
+async function prepareCaptionsForYoutube() {
+  const response = await fetch(projectApiUrl("youtube-captions"), { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+  const data = await response.json();
+  if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
+  setStatus(`YouTube captions ready: ${data.captions.cueCount} cues.`);
+  await refreshProjectView();
+}
+
+function copyButton(text, label = "Copy") {
+  return actionButton(label, async () => {
+    await navigator.clipboard.writeText(text);
+    setStatus("Copied to clipboard.");
+  });
 }
 
 export async function runAvailableTasks() {

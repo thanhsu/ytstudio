@@ -7,6 +7,7 @@ import { mountChannel } from "./screens/story-factory.js";
 import { mountSources } from "./screens/sources.js";
 import { mountConfig } from "./screens/config.js";
 import { mountYouTube } from "./screens/youtube.js";
+import { mountJobs } from "./screens/jobs.js";
 
 const SCREENS = {
   projects: mountProjects,
@@ -16,6 +17,7 @@ const SCREENS = {
   sources: mountSources,
   config: mountConfig,
   youtube: mountYouTube,
+  jobs: mountJobs,
 };
 
 bindShell();

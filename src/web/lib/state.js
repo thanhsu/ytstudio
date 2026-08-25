@@ -38,6 +38,9 @@ export const JOB_LABELS = {
   "story-stage": "Story stage",
   "story-export": "Story export",
   "voiceover-render": "Voiceover render",
+  "final-render": "Final render",
+  "youtube-metadata": "YouTube metadata",
+  "reup-wizard": "Reup wizard",
 };
 
 const jobEventHandlers = new Set();
