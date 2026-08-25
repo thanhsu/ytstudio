@@ -22,8 +22,18 @@
         <a href="#/config" data-nav="config">Config</a>
         <a href="#/youtube" data-nav="youtube">YouTube</a>
       </nav>
-      <div id="status" class="status" aria-live="polite">Loading studio...</div>
     </header>
+
+    <div id="toast-shelf" aria-live="polite" aria-atomic="false"></div>
+
+    <div id="job-bar" hidden>
+      <div class="job-bar-inner">
+        <span class="jb-label"></span>
+        <div class="jb-track"><div class="jb-fill"></div></div>
+        <span class="jb-pct">0%</span>
+        <button class="jb-cancel" type="button" aria-label="Cancel job">✕</button>
+      </div>
+    </div>
 
     <nav id="breadcrumb" class="breadcrumb" aria-label="Breadcrumb"></nav>
 
