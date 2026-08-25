@@ -19,7 +19,8 @@ export type AudioArtifact = {
   createdAt: string;
 };
 
-const ALLOWED_MEDIA_EXTENSIONS = new Set([".mp4", ".mov", ".mkv", ".webm", ".m4v"]);
+// .m4a/.mp3 cover audio-only source downloads; audio extraction and ASR accept them.
+const ALLOWED_MEDIA_EXTENSIONS = new Set([".mp4", ".mov", ".mkv", ".webm", ".m4v", ".m4a", ".mp3"]);
 
 export async function importMedia(projectId: string, sourcePath: string): Promise<MediaArtifact> {
   const extension = extname(sourcePath).toLowerCase();

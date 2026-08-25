@@ -518,3 +518,9 @@ test("the sources screen shows live download progress and offers audio-only down
   assert.match(script, /audioOnly/);
   assert.match(script, /sources\.downloadDir/);
 });
+
+test("a downloaded source can be sent into a project for transcription and scripting", async () => {
+  const script = await readWebScripts();
+  assert.match(script, /media\/from-source/);
+  assert.match(script, /Use in project/);
+});

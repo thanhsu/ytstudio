@@ -50,6 +50,7 @@ import { consumeOAuthState, exchangeCode } from "./youtube/oauth.ts";
 import { saveTokens, storedTokensFromResponse } from "./youtube/token-store.ts";
 import { compositeOwner, ProjectJobManager, type JobKind, type JobOperation } from "./jobs.ts";
 import { extractAudioForAsr, importMedia } from "./media-ingest.ts";
+import { importSourceIntoProject } from "./source-link.ts";
 import { importVoiceoverSegments, renderVoiceoverTrack } from "./voiceover.ts";
 import { applySourcesDownloadDir, projectsRoot, sourcesRoot } from "./fs.ts";
 import { loadProjectState } from "./project-state.ts";
@@ -1283,6 +1284,24 @@ async function routeRequest(
       sendJson(response, 200, { ok: true, artifact });
     } finally {
       await rm(uploaded.path, { force: true });
+    }
+    return;
+  }
+
+  if (method === "POST" && rest === "media/from-source") {
+    const body = await readJsonBody(request);
+    if (typeof body.sourceId !== "string" || !body.sourceId.trim()) {
+      sendError(response, 400, { code: "source-id-required", message: "Provide the sourceId of a downloaded source." });
+      return;
+    }
+    try {
+      const result = await importSourceIntoProject(projectId, body.sourceId);
+      sendJson(response, 200, { ok: true, ...result });
+    } catch (error: unknown) {
+      sendError(response, 409, {
+        code: "source-import-failed",
+        message: error instanceof Error ? error.message : String(error),
+      });
     }
     return;
   }

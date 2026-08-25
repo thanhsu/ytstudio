@@ -378,9 +378,54 @@ function renderSourceRow(candidate) {
     audioDownload,
     actionButton("Delete", () => deleteSource(candidate.id, candidate.title)),
   );
+  if (candidate.status === "downloaded") {
+    actions.append(useInProjectControl(candidate));
+  }
 
   item.replaceChildren(...children, rightsForm, actions);
   return item;
+}
+
+function useInProjectControl(candidate) {
+  const wrap = document.createElement("span");
+  wrap.className = "source-use-in-project";
+  const select = document.createElement("select");
+  select.setAttribute("aria-label", "Target project");
+  for (const project of appState.projects ?? []) {
+    const option = document.createElement("option");
+    option.value = project.id;
+    option.textContent = project.id;
+    select.append(option);
+  }
+  const button = actionButton("Use in project", () => sendSourceToProject(candidate.id, select.value), "button");
+  if (!select.options.length) {
+    button.disabled = true;
+    button.title = "Create a project first.";
+  }
+  wrap.append(select, button);
+  return wrap;
+}
+
+async function sendSourceToProject(sourceId, projectId) {
+  if (!projectId) return;
+  try {
+    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/media/from-source`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sourceId }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      setStatus(`${data.code}: ${data.message}`);
+      return;
+    }
+    const subtitleNote = data.subtitle
+      ? `subtitle ready (${data.subtitle.cueCount} cues)`
+      : "no subtitle — extract audio and run ASR in the project";
+    setStatus(`Imported into ${projectId}: ${data.media.relativePath}; ${subtitleNote}. Continue in the project's Media, ASR, and Script stages.`);
+  } catch (error) {
+    setStatus(error.message);
+  }
 }
 
 /**
