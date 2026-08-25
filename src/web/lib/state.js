@@ -1,4 +1,4 @@
-import { setStatus } from "./shell.js";
+import { toast, startJobBar, updateJobBar, stopJobBar } from "./shell.js";
 
 export const appState = {
   projects: [],
@@ -71,17 +71,19 @@ function handleJobEvent(job) {
   const label = JOB_LABELS[job.kind] ?? job.kind;
   if (job.status === "running") {
     appState.activeJob = job;
-    setStatus(`${label}: ${job.message} (${job.progress}%)`);
+    startJobBar(`${label}: ${job.message}`, job.progress);
     return;
   }
 
+  stopJobBar();
   appState.activeJob = null;
+
   if (job.status === "succeeded") {
-    setStatus(`${label} finished.`);
+    toast("ok", `${label} finished`, job.message ?? "");
   } else if (job.status === "cancelled") {
-    setStatus(`${label} cancelled.`);
+    toast("warn", `${label} cancelled`, "");
   } else {
-    setStatus(`${label} failed: ${job.error ?? "unknown error"}`);
+    toast("err", `${label} failed`, job.error ?? "Unknown error", { persist: true });
   }
   for (const handler of jobEventHandlers) {
     handler(job);
@@ -93,11 +95,9 @@ function handleJobEvent(job) {
  * caller should wait for the event stream instead of reading an artifact.
  */
 export function reportedAsJob(response, data) {
-  if (response.status !== 202) {
-    return false;
-  }
+  if (response.status !== 202) return false;
   const label = JOB_LABELS[data.job?.kind] ?? data.job?.kind ?? "Job";
-  setStatus(`${label} started.`);
+  toast("info", `${label} started`);
   return true;
 }
 

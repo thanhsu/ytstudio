@@ -1,4 +1,4 @@
-import { bindShell, setStatus, confirmPaidVoice, confirmPaidScript } from "./lib/shell.js";
+import { bindShell, toast, confirmPaidVoice, confirmPaidScript } from "./lib/shell.js";
 import { startRouter, navigate } from "./lib/router.js";
 import { mountProjects } from "./screens/projects.js";
 import { mountReviewProject, requestVoice, requestScript } from "./screens/review-project.js";
@@ -30,7 +30,7 @@ confirmPaidScript.addEventListener("click", () => requestScript(true));
 startRouter((route) => {
   const mount = SCREENS[route.screen] ?? mountProjects;
   Promise.resolve(mount(route)).catch((error) => {
-    setStatus(error.message);
+    toast("err", "Navigation error", error.message, { persist: true });
     if (route.screen !== "projects") navigate("#/projects");
   });
 });

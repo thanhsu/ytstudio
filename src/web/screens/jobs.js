@@ -1,5 +1,5 @@
 import { JOB_LABELS } from "../lib/state.js";
-import { setStatus, view, setBreadcrumb, setActiveNav } from "../lib/shell.js";
+import { toast, view, setBreadcrumb, setActiveNav } from "../lib/shell.js";
 import { actionButton, paragraph, sectionTitle, gateNotice } from "../lib/dom.js";
 import { navigate } from "../lib/router.js";
 
@@ -51,7 +51,6 @@ export async function mountJobs() {
     }
     refreshJobs().catch(() => {});
   }, 3000);
-  setStatus("Jobs loaded.");
 }
 
 async function refreshJobs() {
@@ -100,7 +99,7 @@ function renderJobRows(jobs) {
     actions.className = "job-actions";
     actions.append(actionButton("Open", () => openJobOwner(job)));
     if (job.status === "succeeded" && REVIEW_ARTIFACTS[job.kind]) {
-      actions.append(actionButton("Review result", () => reviewJob(job).catch((error) => setStatus(error.message)), "button", "primary"));
+      actions.append(actionButton("Review result", () => reviewJob(job).catch((error) => toast("err", "Failed to open result", error.message)), "button", "primary"));
     }
 
     row.append(pill, title, progress, actions);
@@ -131,7 +130,7 @@ async function reviewJob(job) {
   if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
   const artifact = data.state?.artifacts?.[REVIEW_ARTIFACTS[job.kind]];
   if (!artifact) {
-    setStatus("The result artifact is no longer registered; open the project instead.");
+    toast("warn", "Artifact not found", "The result artifact is no longer registered. Open the project instead.");
     return;
   }
   window.open(
