@@ -5,7 +5,7 @@ import {
   actionButton, formValues, boolFormValues, strongText, confidenceMeter,
   formatTimecode, formatSeconds,
 } from "../lib/dom.js";
-import { setStatus, paidVoiceDialog, paidScriptDialog } from "../lib/shell.js";
+import { toast, paidVoiceDialog, paidScriptDialog } from "../lib/shell.js";
 import {
   seriesPanel, workflowTitle, workflowDescription, workflowSteps,
   stageRail, stageTitle, stageContent, audioPreview, videoPreview,
@@ -26,7 +26,7 @@ import { navigate, parseRoute } from "../lib/router.js";
 onJobEvent((job) => {
   if (job.kind.startsWith("story-")) return;
   if (appState.selectedProject) {
-    void refreshProjectView().catch((error) => setStatus(error.message));
+    void refreshProjectView().catch((error) => toast("err", "Refresh failed", error.message, { persist: true }));
   }
 });
 
@@ -71,7 +71,6 @@ export async function mountReviewProject(route) {
     renderStage();
   }
   renderPreviews(appState.projectSnapshot);
-  setStatus(`Loaded ${route.id}.`);
 }
 
 /**
@@ -213,7 +212,7 @@ export async function selectProjectData(projectId, { navigateOnFailure = true } 
   ]);
   const data = await response.json();
   if (!response.ok) {
-    setStatus(data.message ?? `Project ${projectId} not found.`);
+    toast("warn", "Project not found", data.message ?? `Project ${projectId} not found.`);
     if (navigateOnFailure) navigate("#/projects");
     return false;
   }
@@ -264,7 +263,7 @@ export function renderCreateProjectForm(onCreated) {
   form.className = "form-grid";
   form.addEventListener("submit", (event) => {
     event.preventDefault();
-    createProject(form, onCreated).catch((error) => setStatus(error.message));
+    createProject(form, onCreated).catch((error) => toast("err", "Create project failed", error.message, { persist: true }));
   });
   form.replaceChildren(
     field("Project id", "id", "", "text", "muc-than-ky-001"),
@@ -298,7 +297,7 @@ async function createProject(form, onCreated) {
   const data = await response.json();
   if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
   await refreshAppData();
-  setStatus(`Created ${data.brief.id}.`);
+  toast("ok", "Project created", data.brief.id);
   if (onCreated) {
     await onCreated(data.brief.id);
     return;
@@ -415,7 +414,7 @@ function brandingSettingsForm(branding) {
   form.className = "form-grid";
   form.addEventListener("submit", (event) => {
     event.preventDefault();
-    saveBrandingSettings(form).catch((error) => setStatus(error.message));
+    saveBrandingSettings(form).catch((error) => toast("err", "Save failed", error.message, { persist: true }));
   });
   form.replaceChildren(
     selectField("Logo position", "position", current.position, [
@@ -467,7 +466,7 @@ async function saveBrandingSettings(form) {
   const data = await response.json();
   if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
   const watermark = data.branding.watermarkText ? `watermark "${data.branding.watermarkText}"` : "no watermark";
-  setStatus(`Branding saved: logo ${data.branding.position}, ${data.branding.logoHeight}px, ${watermark}.`);
+  toast("ok", "Branding saved", `Logo ${data.branding.position}, ${data.branding.logoHeight}px, ${watermark}.`);
 }
 
 // The segment folder holds thousands of files, so the server reads it straight
@@ -477,7 +476,7 @@ function voiceoverImportForm() {
   form.className = "form-grid";
   form.addEventListener("submit", (event) => {
     event.preventDefault();
-    importVoiceover(form).catch((error) => setStatus(error.message));
+    importVoiceover(form).catch((error) => toast("err", "Import failed", error.message, { persist: true }));
   });
   form.replaceChildren(
     field("Audio folder path", "folderPath", "", "text", "D:\\path\\to\\audio_usa"),
@@ -497,7 +496,7 @@ async function importVoiceover(form) {
   if (summary.extraFiles.length > 0) {
     parts.push(`Unmatched files: ${summary.extraFiles.length}.`);
   }
-  setStatus(parts.join(" "));
+  toast("ok", "Voiceover imported", parts.join(" "));
   await refreshProjectView();
 }
 
@@ -507,7 +506,7 @@ function renderTranslation(snapshot) {
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     postProjectAction("subtitles/translation-prompt", formValues(form), "Translation prompt created.").catch((error) =>
-      setStatus(error.message),
+      toast("err", "Action failed", error.message, { persist: true }),
     );
   });
   form.replaceChildren(
@@ -543,9 +542,9 @@ function renderSegmentEditor() {
       appState.editManifest = data.manifest;
       appState.editExport = null;
       renderTranslation(appState.projectSnapshot);
-      setStatus(`Edit manifest created with ${data.manifest.segments.length} cues.`);
+      toast("ok", "Edit manifest created", `${data.manifest.segments.length} cues.`);
     } catch (error) {
-      setStatus(error.message);
+      toast("err", "Create failed", error.message, { persist: true });
     }
   });
   createForm.replaceChildren(
@@ -578,9 +577,9 @@ function renderSegmentEditor() {
       appState.editManifest = data.manifest;
       appState.editExport = null;
       renderTranslation(appState.projectSnapshot);
-      setStatus("Keep/remove decisions saved.");
+      toast("ok", "Decisions saved", "Keep/remove decisions saved.");
     } catch (error) {
-      setStatus(error.message);
+      toast("err", "Save failed", error.message, { persist: true });
     }
   });
   removeForm.replaceChildren(
@@ -593,9 +592,9 @@ function renderSegmentEditor() {
       const data = await runProjectRoute("edit-manifest/export", {});
       appState.editExport = data.exported;
       renderTranslation(appState.projectSnapshot);
-      setStatus(`Exported ${data.exported.keptCueCount} kept cues.`);
+      toast("ok", "Export complete", `${data.exported.keptCueCount} kept cues.`);
     } catch (error) {
-      setStatus(error.message);
+      toast("err", "Export failed", error.message, { persist: true });
     }
   });
   children.push(decisionStatus, removeForm, exportButton, renderSegmentDecisionTable(manifest));
@@ -684,7 +683,7 @@ function renderAssets(snapshot) {
   form.className = "form-grid";
   form.addEventListener("submit", (event) => {
     event.preventDefault();
-    uploadAsset(form).catch((error) => setStatus(error.message));
+    uploadAsset(form).catch((error) => toast("err", "Upload failed", error.message, { persist: true }));
   });
   form.replaceChildren(
     selectField("Media type", "mediaType", "image", [
@@ -715,7 +714,7 @@ function uploadedAssetList(assets) {
     form.className = "subpanel form-grid";
     form.addEventListener("submit", (event) => {
       event.preventDefault();
-      saveAssetMetadata(asset.id, form).catch((error) => setStatus(error.message));
+      saveAssetMetadata(asset.id, form).catch((error) => toast("err", "Save failed", error.message, { persist: true }));
     });
 
     const link = document.createElement("a");
@@ -748,7 +747,7 @@ function renderCopyright(snapshot) {
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     postProjectAction("copyright-check", boolFormValues(form), "Copyright Check saved.").catch((error) =>
-      setStatus(error.message),
+      toast("err", "Action failed", error.message, { persist: true }),
     );
   });
   form.replaceChildren(
@@ -895,7 +894,7 @@ function renderBackgroundLoopPanel(mapping, assets) {
   form.className = "render-inspector";
   form.addEventListener("submit", (event) => {
     event.preventDefault();
-    saveBackgroundLoop(form).catch((error) => setStatus(error.message));
+    saveBackgroundLoop(form).catch((error) => toast("err", "Save failed", error.message, { persist: true }));
   });
 
   const children = [
@@ -932,9 +931,13 @@ async function saveBackgroundLoop(form) {
   });
   const data = await response.json();
   if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
-  setStatus(assetId
-    ? "Background loop saved. Approve the mapping again before rendering."
-    : "Background loop cleared; the scene timeline is active again. Approve the mapping again before rendering.");
+  toast(
+    "ok",
+    assetId ? "Background loop saved" : "Background loop cleared",
+    assetId
+      ? "Approve the mapping again before rendering."
+      : "The scene timeline is active again. Approve the mapping again before rendering.",
+  );
   await refreshProjectView();
 }
 
@@ -1091,7 +1094,7 @@ function resolveEffectNumberFields(form, currentEffects) {
 function buildEffectsPatch(form, currentEffects) {
   const { values, errors } = resolveEffectNumberFields(form, currentEffects);
   if (errors.length > 0) {
-    setStatus(errors.join(" "));
+    toast("warn", "Validation error", errors.join(" "));
     return null;
   }
   const watermarkAssetId = form.elements["watermark.assetId"]?.value ?? "";
@@ -1127,7 +1130,7 @@ async function saveVisualMappingEffects(sceneId, effectsPatch) {
   });
   const data = await response.json();
   if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
-  setStatus(`Saved effects for ${sceneId}. This does not approve the mapping — approve it again before rendering.`);
+  toast("ok", "Effects saved", `${sceneId} — approve the mapping again before rendering.`);
   await refreshProjectView();
 }
 
@@ -1139,7 +1142,7 @@ async function resetVisualMappingEffects(sceneId) {
   });
   const data = await response.json();
   if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
-  setStatus(`Reset effects for ${sceneId}. This does not approve the mapping — approve it again before rendering.`);
+  toast("ok", "Effects reset", `${sceneId} — approve the mapping again before rendering.`);
   await refreshProjectView();
 }
 
@@ -1194,7 +1197,7 @@ function renderInspector(segment, assets) {
   form.className = "render-inspector";
   form.addEventListener("submit", (event) => {
     event.preventDefault();
-    saveVisualMappingSegment(segment.id, form).catch((error) => setStatus(error.message));
+    saveVisualMappingSegment(segment.id, form).catch((error) => toast("err", "Save failed", error.message, { persist: true }));
   });
   form.replaceChildren(
     sectionTitle("Clip Inspector"),
@@ -1231,10 +1234,10 @@ function renderInspector(segment, assets) {
     actionButton("Save effects", () => {
       const patch = buildEffectsPatch(form, effects);
       if (!patch) return;
-      saveVisualMappingEffects(segment.id, patch).catch((error) => setStatus(error.message));
+      saveVisualMappingEffects(segment.id, patch).catch((error) => toast("err", "Save failed", error.message, { persist: true }));
     }),
     actionButton("Reset effects", () => {
-      resetVisualMappingEffects(segment.id).catch((error) => setStatus(error.message));
+      resetVisualMappingEffects(segment.id).catch((error) => toast("err", "Reset failed", error.message, { persist: true }));
     }),
   );
   return form;
@@ -1334,11 +1337,11 @@ function renderExport(snapshot) {
     render ? linkButton("Open Render File", render.relativePath) : paragraph("No render artifact yet."),
     sectionTitle("YouTube Metadata (SEO)"),
     paragraph("Reads the source SRT and generates title options, a description with chapters, and tags using the configured script model."),
-    actionButton("Generate YouTube Metadata", () => requestYoutubeMetadata(false).catch((error) => setStatus(error.message)), "button", "primary"),
+    actionButton("Generate YouTube Metadata", () => requestYoutubeMetadata(false).catch((error) => toast("err", "Request failed", error.message, { persist: true })), "button", "primary"),
     metadataHost,
     sectionTitle("Subtitles for YouTube"),
     paragraph("Sanitizes the source SRT (strips inline markup) and prepares .srt + .vtt caption files ready for the YouTube Studio subtitle upload."),
-    actionButton("Prepare YouTube Subtitles", () => prepareCaptionsForYoutube().catch((error) => setStatus(error.message)), "button", "primary"),
+    actionButton("Prepare YouTube Subtitles", () => prepareCaptionsForYoutube().catch((error) => toast("err", "Request failed", error.message, { persist: true })), "button", "primary"),
     captionLinks(snapshot),
     sectionTitle("Publish Checklist"),
     checklist(["Thumbnail ready", "Title/description reviewed", "Copyright risk accepted", "Upload scheduled at fixed time"]),
@@ -1360,7 +1363,7 @@ async function requestYoutubeMetadata(confirmedPaidRequest) {
     return;
   }
   if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
-  setStatus("YouTube metadata generation started.");
+  toast("info", "YouTube metadata generation started");
 }
 
 async function fillYoutubeMetadata(host) {
@@ -1422,27 +1425,27 @@ async function prepareCaptionsForYoutube() {
   const response = await fetch(projectApiUrl("youtube-captions"), { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
   const data = await response.json();
   if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
-  setStatus(`YouTube captions ready: ${data.captions.cueCount} cues.`);
+  toast("ok", "YouTube captions ready", `${data.captions.cueCount} cues.`);
   await refreshProjectView();
 }
 
 function copyButton(text, label = "Copy") {
   return actionButton(label, async () => {
     await navigator.clipboard.writeText(text);
-    setStatus("Copied to clipboard.");
+    toast("ok", "Copied to clipboard");
   });
 }
 
 export async function runAvailableTasks() {
   const workflow = appState.projectSnapshot?.workflow;
   if (!workflow || !appState.selectedProject) {
-    setStatus("Select a project first.");
+    toast("warn", "No project selected", "Select a project first.");
     return;
   }
 
   const runnable = workflow.steps.filter((step) => step.canRun && taskActionForStep(step));
   if (runnable.length === 0) {
-    setStatus("No UI-runnable tasks are ready. Complete the current manual step first.");
+    toast("warn", "No tasks ready", "Complete the current manual step first.");
     return;
   }
 
@@ -1452,18 +1455,18 @@ export async function runAvailableTasks() {
     return map;
   }, new Map());
   const groupLabel = [...groups.entries()].map(([group, steps]) => `${group}: ${steps.map((step) => step.title).join(", ")}`);
-  setStatus(`Running available tasks. ${groupLabel.join(" | ")}`);
+  toast("info", "Running available tasks", groupLabel.join(" | "));
 
   const results = await Promise.allSettled(runnable.map((step) => runStepTask(step)));
   const failures = results.filter((result) => result.status === "rejected");
   const started = results.filter((result) => result.status === "fulfilled" && result.value?.job).length;
   await refreshProjectView();
   if (failures.length > 0) {
-    setStatus(`${runnable.length - failures.length}/${runnable.length} tasks completed. ${failures[0].reason.message}`);
+    toast("warn", `${runnable.length - failures.length}/${runnable.length} tasks completed`, failures[0].reason.message);
     return;
   }
   const background = started > 0 ? ` ${started} running in the background.` : "";
-  setStatus(`${runnable.length - started} available task(s) completed.${background}${pendingApprovalNotice()}`);
+  toast("ok", `${runnable.length - started} task(s) completed`, `${background}${pendingApprovalNotice()}`.trim());
 }
 
 function pendingApprovalNotice() {
@@ -1544,13 +1547,13 @@ export async function requestVoice(confirmedPaidRequest) {
   });
   const data = await response.json();
   if (!response.ok) {
-    setStatus(`${data.code}: ${data.message}`);
+    toast("err", "Voice request failed", `${data.code}: ${data.message}`, { persist: true });
     return;
   }
   if (reportedAsJob(response, data)) {
     return;
   }
-  setStatus(`Voice ready: ${data.artifact.relativePath}`);
+  toast("ok", "Voice ready", data.artifact.relativePath);
   await refreshProjectView();
 }
 
@@ -1576,13 +1579,13 @@ export async function requestScript(confirmedPaidRequest) {
     return;
   }
   if (!response.ok) {
-    setStatus(`${data.code}: ${data.message}`);
+    toast("err", "Script request failed", `${data.code}: ${data.message}`, { persist: true });
     return;
   }
   if (reportedAsJob(response, data)) {
     return;
   }
-  setStatus("Script generated.");
+  toast("ok", "Script generated");
   await refreshProjectView();
 }
 
@@ -1594,13 +1597,13 @@ async function requestRender() {
   });
   const data = await response.json();
   if (!response.ok) {
-    setStatus(`${data.code}: ${data.message || (data.details?.reasons ?? []).join(", ")}`);
+    toast("err", "Render failed", `${data.code}: ${data.message || (data.details?.reasons ?? []).join(", ")}`, { persist: true });
     return;
   }
   if (reportedAsJob(response, data)) {
     return;
   }
-  setStatus(`Rendered: ${data.artifact.relativePath}`);
+  toast("ok", "Rendered", data.artifact.relativePath);
   await refreshProjectView();
 }
 
@@ -1612,13 +1615,13 @@ async function requestCutRender() {
   });
   const data = await response.json();
   if (!response.ok) {
-    setStatus(`${data.code}: ${data.message || (data.details?.reasons ?? []).join(", ")}`);
+    toast("err", "Cut render failed", `${data.code}: ${data.message || (data.details?.reasons ?? []).join(", ")}`, { persist: true });
     return;
   }
   if (reportedAsJob(response, data)) {
     return;
   }
-  setStatus(`Cut rendered: ${data.artifact.relativePath}`);
+  toast("ok", "Cut rendered", data.artifact.relativePath);
   await refreshProjectView();
 }
 
@@ -1626,7 +1629,7 @@ async function requestVisualMapping() {
   const response = await fetch(projectApiUrl("visual-mapping/generate"), { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
   const data = await response.json();
   if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
-  setStatus(`Generated mapping for ${data.mapping.segments.length} scenes.`);
+  toast("ok", "Mapping generated", `${data.mapping.segments.length} scenes.`);
   await refreshProjectView();
 }
 
@@ -1634,7 +1637,7 @@ async function approveVisualMapping() {
   const response = await fetch(projectApiUrl("visual-mapping/approve"), { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
   const data = await response.json();
   if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
-  setStatus("Visual mapping approved.");
+  toast("ok", "Visual mapping approved");
   await refreshProjectView();
 }
 
@@ -1656,7 +1659,7 @@ async function saveVisualMappingSegment(sceneId, form) {
   });
   const data = await response.json();
   if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
-  setStatus(`Saved ${sceneId}. Mapping approval is now required again.`);
+  toast("ok", "Mapping saved", `${sceneId} — approve the mapping again before rendering.`);
   await refreshProjectView();
 }
 
@@ -1664,7 +1667,7 @@ async function uploadProjectFile(inputId, route) {
   const input = document.querySelector(`#${inputId}`);
   const file = input?.files?.[0];
   if (!file) {
-    setStatus("Choose a file first.");
+    toast("warn", "Choose a file first");
     return;
   }
   const body = new FormData();
@@ -1672,10 +1675,10 @@ async function uploadProjectFile(inputId, route) {
   const response = await fetch(projectApiUrl(route), { method: "POST", body });
   const data = await response.json();
   if (!response.ok) {
-    setStatus(`${data.code}: ${data.message}`);
+    toast("err", "Import failed", `${data.code}: ${data.message}`, { persist: true });
     return;
   }
-  setStatus(`Imported: ${(data.artifact ?? data.asset).relativePath}`);
+  toast("ok", "Imported", (data.artifact ?? data.asset).relativePath);
   await refreshProjectView();
 }
 
@@ -1693,7 +1696,7 @@ async function uploadAsset(form) {
   const data = await response.json();
   if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
   const warning = data.asset.sizeWarning ? ` Warning: ${data.asset.sizeWarning}` : "";
-  setStatus(`Upload Asset complete: ${data.asset.relativePath}.${warning}`);
+  toast("ok", "Asset uploaded", `${data.asset.relativePath}${warning}`);
   await refreshProjectView();
 }
 
@@ -1726,7 +1729,7 @@ async function saveAssetMetadata(assetId, form) {
   });
   const data = await response.json();
   if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
-  setStatus(`Saved asset details for ${data.asset.filename}. Approve Assets again when ready.`);
+  toast("ok", "Asset details saved", `${data.asset.filename} — approve Assets again when ready.`);
   await refreshProjectView();
 }
 
@@ -1738,14 +1741,14 @@ async function postProjectAction(route, body, successMessage) {
   });
   const data = await response.json();
   if (!response.ok) {
-    setStatus(`${data.code}: ${data.message}`);
+    toast("err", "Action failed", `${data.code}: ${data.message}`, { persist: true });
     return;
   }
   if (reportedAsJob(response, data)) {
     return;
   }
   const artifact = data.artifact ?? data.asset ?? data.check ?? data.draft;
-  setStatus(artifact?.relativePath ? `${successMessage} ${artifact.relativePath}` : successMessage);
+  toast("ok", successMessage, artifact?.relativePath ?? "");
   await refreshProjectView();
 }
 
