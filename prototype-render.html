@@ -1,0 +1,878 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>YT Review Studio — Render & Edit Prototype</title>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg:         #0e1116;
+      --surface:    #14181f;
+      --surface-2:  #1a2029;
+      --surface-3:  #10151c;
+      --border:     rgba(255,255,255,.08);
+      --border-med: rgba(255,255,255,.14);
+      --text:       #e6edf3;
+      --text-muted: #9aa4b2;
+      --text-dim:   #6b7280;
+      --accent:     #1f6feb;
+      --accent-lt:  #6ca5ff;
+      --s-done:     #3fb950; --s-done-bg: rgba(63,185,80,.15);
+      --s-info:     #6ca5ff; --s-info-bg: rgba(31,111,235,.16);
+      --s-warn:     #d29922; --s-warn-bg: rgba(210,153,34,.16);
+      --s-err:      #f85149; --s-err-bg:  rgba(248,81,73,.14);
+      --s-neutral:  #9aa4b2; --s-neutral-bg: rgba(139,148,158,.16);
+      --r-sm: 6px; --r-md: 8px; --r-lg: 10px;
+      --shadow: 0 1px 2px rgba(0,0,0,.4),0 6px 16px rgba(0,0,0,.25);
+    }
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:"IBM Plex Sans",system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.5;font-size:14px}
+    h1,h2,h3,h4,h5{font-family:"Space Grotesk",system-ui,sans-serif;letter-spacing:-.01em}
+    button{font:inherit;cursor:pointer;border-radius:var(--r-sm);border:1px solid var(--border-med);background:var(--surface);color:var(--text);padding:.38rem .65rem;transition:background 130ms,border-color 130ms}
+    button:hover{background:var(--surface-2);border-color:rgba(255,255,255,.22)}
+    button.pri{background:var(--accent);border-color:var(--accent-lt);color:#fff;font-weight:600}
+    button.pri:hover{background:#1a5fd0}
+    button.ghost{background:transparent;border-color:transparent;color:var(--text-muted)}
+    button.ghost:hover{background:var(--surface-2);color:var(--text)}
+    button.danger{background:var(--s-err-bg);border-color:rgba(248,81,73,.3);color:var(--s-err)}
+    input,select,textarea{font:inherit;background:var(--surface-3);color:var(--text);border:1px solid var(--border-med);border-radius:var(--r-sm);padding:.38rem .6rem;width:100%}
+    input[type=range]{padding:0;height:20px;accent-color:var(--accent-lt)}
+    input:focus,select:focus{outline:2px solid var(--accent-lt);outline-offset:1px}
+    label{font-size:.8rem;color:var(--text-muted);font-weight:500;display:block;margin-bottom:.25rem}
+    .pill{display:inline-flex;align-items:center;gap:.28rem;border-radius:999px;padding:.12rem .45rem;font-size:.7rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap}
+    .pill-done{background:var(--s-done-bg);color:var(--s-done)}
+    .pill-info{background:var(--s-info-bg);color:var(--s-info)}
+    .pill-warn{background:var(--s-warn-bg);color:var(--s-warn)}
+    .pill-err{background:var(--s-err-bg);color:var(--s-err)}
+    .pill-neutral{background:var(--s-neutral-bg);color:var(--s-neutral)}
+    .dot{width:5px;height:5px;border-radius:50%;background:currentColor}
+    .dot-pulse{animation:pulse 1.4s ease-in-out infinite}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+
+    /* ── TOP NAV ── */
+    .topnav{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:1rem;padding:.65rem 1.1rem;border-bottom:1px solid var(--border);background:rgba(20,24,31,.96);backdrop-filter:blur(8px);position:sticky;top:0;z-index:100}
+    .topnav-brand{display:flex;align-items:center;gap:.55rem}
+    .logo{width:26px;height:26px;background:linear-gradient(135deg,var(--accent),var(--accent-lt));border-radius:5px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.8rem;color:#fff;flex-shrink:0}
+    .topnav-brand h1{font-size:.95rem;font-weight:700}
+    .topnav-links{display:flex;justify-content:center;gap:.15rem}
+    .topnav-links a{color:var(--text-muted);font-weight:600;padding:.35rem .65rem;border-radius:var(--r-sm);font-size:.825rem;text-decoration:none;transition:color 130ms,background 130ms}
+    .topnav-links a:hover{color:var(--text);background:var(--surface-2)}
+    .topnav-links a.active{color:var(--accent-lt);background:rgba(31,111,235,.12)}
+
+    /* ── BREADCRUMB ── */
+    .bc{display:flex;align-items:center;gap:.35rem;padding:.42rem 1.1rem;border-bottom:1px solid var(--border);background:var(--surface);font-size:.78rem;color:var(--text-muted)}
+    .bc a{color:var(--accent-lt);text-decoration:none}
+    .bc-sep{color:var(--text-dim)}
+    .bc>*:last-child{font-weight:600;color:var(--text)}
+
+    /* ── DEMO NAV ── */
+    #demo-nav{position:fixed;bottom:.85rem;left:50%;transform:translateX(-50%);z-index:9999;background:rgba(20,24,31,.96);border:1px solid var(--border-med);border-radius:999px;padding:.25rem .35rem;display:flex;gap:.2rem;backdrop-filter:blur(12px);box-shadow:0 4px 24px rgba(0,0,0,.5)}
+    #demo-nav button{border-radius:999px;padding:.28rem .75rem;font-size:.75rem;border:none;background:transparent;color:var(--text-muted)}
+    #demo-nav button.active{background:var(--accent);color:#fff;font-weight:600}
+
+    /* ── PHASE BAR ── */
+    .phase-bar{display:flex;gap:.35rem;list-style:none;padding:.65rem 1.1rem;border-bottom:1px solid var(--border);background:var(--surface);overflow-x:auto}
+    .phase-btn{min-height:38px;padding:.35rem .75rem;border-left:3px solid transparent;border-radius:0 var(--r-sm) var(--r-sm) 0;background:transparent;color:var(--text-muted);font-size:.825rem;font-weight:600;white-space:nowrap;border-top:none;border-right:none;border-bottom:none;border-left:3px solid transparent}
+    .phase-btn:hover{background:var(--surface-2);color:var(--text)}
+    .phase-btn.sel{color:var(--accent-lt);background:rgba(31,111,235,.1);border-left-color:var(--accent-lt)}
+    .phase-btn[data-st="done"]{border-left-color:var(--s-done)}
+    .phase-btn[data-st="progress"]{border-left-color:var(--s-info)}
+    .phase-btn[data-st="warn"]{border-left-color:var(--s-warn)}
+
+    /* ── STAGE RAIL ── */
+    .stage-rail{display:flex;flex-wrap:wrap;gap:.4rem;padding:.65rem 1.1rem;border-bottom:1px solid var(--border);background:var(--surface-3)}
+    .stage-group{display:grid;gap:.28rem;padding:.42rem .55rem;border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface)}
+    .stage-group-label{font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim)}
+    .stage-btns{display:flex;gap:.3rem;flex-wrap:wrap}
+    .stage-btn{min-height:32px;padding:.28rem .55rem;font-size:.78rem;position:relative}
+    .stage-btn.active{background:rgba(31,111,235,.16);border-color:var(--accent-lt);color:var(--accent-lt)}
+    .stage-btn::after{content:'';position:absolute;top:4px;right:4px;width:5px;height:5px;border-radius:50%}
+    .stage-btn[data-st="done"]::after{background:var(--s-done)}
+    .stage-btn[data-st="err"]::after{background:var(--s-err)}
+    .stage-btn[data-st="run"]::after{background:var(--s-info);animation:pulse 1.4s ease-in-out infinite}
+
+    /* ── TOAST SYSTEM ── */
+    #toast-shelf{position:fixed;bottom:1rem;right:1rem;z-index:5000;display:flex;flex-direction:column;gap:.45rem;align-items:flex-end;pointer-events:none}
+    .toast{pointer-events:all;display:grid;grid-template-columns:18px 1fr 18px;align-items:start;gap:.55rem;min-width:300px;max-width:380px;padding:.65rem .85rem;border-radius:var(--r-lg);border:1px solid var(--border-med);backdrop-filter:blur(12px);box-shadow:0 4px 16px rgba(0,0,0,.4);animation:t-in 200ms cubic-bezier(.16,1,.3,1) both}
+    .toast.out{animation:t-out 160ms ease-in both}
+    @keyframes t-in{from{opacity:0;transform:translateX(14px) scale(.97)}to{opacity:1;transform:none}}
+    @keyframes t-out{from{opacity:1}to{opacity:0;transform:translateX(14px)}}
+    .toast-err{background:#2a1111;border-color:rgba(248,81,73,.3)}
+    .toast-ok{background:#0d2210;border-color:rgba(63,185,80,.25)}
+    .toast-info{background:#0d1a2e;border-color:rgba(31,111,235,.25)}
+    .toast-warn{background:#221a08;border-color:rgba(210,153,34,.25)}
+    .t-icon{width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;flex-shrink:0;margin-top:1px}
+    .toast-err .t-icon{background:rgba(248,81,73,.2);color:var(--s-err)}
+    .toast-ok  .t-icon{background:rgba(63,185,80,.2); color:var(--s-done)}
+    .toast-info .t-icon{background:rgba(31,111,235,.2);color:var(--s-info)}
+    .toast-warn .t-icon{background:rgba(210,153,34,.2);color:var(--s-warn)}
+    .t-title{font-weight:600;font-size:.82rem;line-height:1.3}
+    .toast-err .t-title{color:var(--s-err)} .toast-ok .t-title{color:var(--s-done)}
+    .toast-info .t-title{color:var(--s-info)} .toast-warn .t-title{color:var(--s-warn)}
+    .t-msg{font-size:.75rem;color:var(--text-muted);margin-top:.1rem;line-height:1.4}
+    .t-dismiss{background:transparent;border:none;color:var(--text-dim);width:18px;height:18px;padding:0;display:flex;align-items:center;justify-content:center;font-size:12px;border-radius:3px}
+    .t-dismiss:hover{background:var(--surface-2);color:var(--text)}
+    .t-timer{height:2px;border-radius:999px;margin-top:.45rem;background:currentColor;opacity:.2;animation:t-shrink var(--dur,4s) linear both}
+    @keyframes t-shrink{from{width:100%}to{width:0}}
+    .toast-actions{display:flex;gap:.35rem;margin-top:.4rem}
+    .toast-actions button{font-size:.72rem;padding:.2rem .45rem}
+
+    /* ══════════════════════════════════════════════════════ */
+    /* SCREEN: RENDER — 3-PANEL EDITOR                       */
+    /* ══════════════════════════════════════════════════════ */
+    .render-shell{display:grid;grid-template-rows:auto 1fr auto;height:calc(100vh - 120px);overflow:hidden}
+    .render-toolbar{display:flex;align-items:center;gap:.6rem;padding:.6rem 1.1rem;border-bottom:1px solid var(--border);background:var(--surface);flex-wrap:wrap}
+    .mapping-badge{display:inline-flex;align-items:center;gap:.4rem;font-size:.78rem;font-weight:700;padding:.28rem .65rem;border-radius:999px;background:var(--s-done-bg);color:var(--s-done);border:1px solid rgba(63,185,80,.2)}
+    .render-body{display:grid;grid-template-columns:1fr 300px;overflow:hidden}
+    .render-main{display:grid;grid-template-rows:1fr auto;overflow:hidden}
+    .render-monitor{background:#000;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
+    .monitor-video{width:100%;max-height:100%;object-fit:contain;display:block}
+    .monitor-placeholder{width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.65rem;color:var(--text-dim)}
+    .monitor-placeholder .big{font-size:2.5rem}
+    .monitor-overlay-bar{position:absolute;bottom:0;left:0;right:0;padding:.55rem .85rem;background:linear-gradient(transparent,rgba(0,0,0,.8));font-size:.82rem;line-height:1.4;font-style:italic;color:rgba(255,255,255,.85)}
+    .monitor-meta-bar{display:flex;align-items:center;gap:.75rem;padding:.42rem .85rem;background:rgba(0,0,0,.6);font-size:.72rem;font-family:"IBM Plex Mono",monospace;color:var(--text-muted);flex-shrink:0}
+    .monitor-meta-bar strong{color:var(--text)}
+    .monitor-note{font-size:.7rem;color:var(--text-dim);font-style:italic}
+
+    /* Timeline */
+    .render-timeline{background:var(--surface-3);border-top:1px solid var(--border);padding:.5rem .75rem .5rem 0;overflow-x:auto;flex-shrink:0;min-height:100px;max-height:140px;position:relative}
+    .timeline-ruler{display:flex;position:relative;height:18px;padding-left:80px;margin-bottom:4px}
+    .timeline-ruler span{position:absolute;font-size:.65rem;color:var(--text-dim);font-family:"IBM Plex Mono",monospace;transform:translateX(-50%);white-space:nowrap}
+    .timeline-track-row{display:flex;align-items:center;height:32px;margin-bottom:3px}
+    .track-label{width:80px;flex-shrink:0;font-size:.7rem;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;padding-right:.5rem;text-align:right}
+    .track-clips{flex:1;position:relative;height:28px;background:rgba(255,255,255,.03);border-radius:3px;overflow:hidden}
+    .clip{position:absolute;height:100%;border-radius:2px;overflow:hidden;cursor:pointer;border:1px solid rgba(255,255,255,.1);display:flex;align-items:center;padding:0 4px;font-size:.62rem;white-space:nowrap;transition:border-color 120ms}
+    .clip.image{background:rgba(31,111,235,.25)}
+    .clip.video{background:rgba(63,185,80,.2)}
+    .clip.fallback{background:rgba(139,148,158,.15)}
+    .clip.selected{border-color:var(--accent-lt)!important;z-index:2}
+    .clip.low-confidence{opacity:.7;border-style:dashed}
+    .clip.has-effects::after{content:'⚙';position:absolute;right:3px;top:50%;transform:translateY(-50%);font-size:.6rem;color:var(--s-warn)}
+    .clip strong{overflow:hidden;text-overflow:ellipsis;color:rgba(255,255,255,.8);pointer-events:none}
+    .narration-track{background:rgba(31,111,235,.12);border:1px solid rgba(31,111,235,.2);border-radius:2px;position:absolute;left:0;right:0;top:0;bottom:0;display:flex;align-items:center;padding-left:4px;font-size:.62rem;color:var(--s-info)}
+    .playhead{position:absolute;top:0;bottom:0;width:1px;background:var(--s-warn);z-index:3;pointer-events:none}
+    .playhead::before{content:'';position:absolute;top:0;left:-4px;border:4px solid transparent;border-top-color:var(--s-warn)}
+
+    /* Inspector panel */
+    .render-inspector{border-left:1px solid var(--border);overflow-y:auto;background:var(--surface);display:grid;grid-template-rows:auto 1fr}
+    .inspector-tabs{display:flex;border-bottom:1px solid var(--border);background:var(--surface-3)}
+    .inspector-tab{flex:1;padding:.5rem .5rem;font-size:.78rem;font-weight:600;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--text-muted);cursor:pointer;transition:color 120ms,border-color 120ms}
+    .inspector-tab:hover{color:var(--text)}
+    .inspector-tab.active{color:var(--accent-lt);border-bottom-color:var(--accent-lt);background:rgba(31,111,235,.05)}
+    .inspector-body{padding:.75rem;overflow-y:auto}
+    .inspector-section{margin-bottom:.85rem}
+    .inspector-section-title{font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);margin-bottom:.5rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+    .form-row{margin-bottom:.5rem}
+    .form-row-2{display:grid;grid-template-columns:1fr 1fr;gap:.4rem;margin-bottom:.5rem}
+    .slider-row{display:grid;grid-template-columns:1fr 52px;gap:.4rem;align-items:center}
+    .slider-row input[type=number]{font-size:.78rem;padding:.28rem .4rem;text-align:center}
+    .confidence-bar{height:4px;border-radius:999px;background:rgba(255,255,255,.08);margin:.25rem 0 .5rem}
+    .confidence-fill{height:4px;border-radius:999px;background:var(--s-done)}
+    .asset-thumb-row{display:flex;gap:.5rem;align-items:center;margin-bottom:.5rem}
+    .asset-thumb{width:48px;height:32px;border-radius:4px;background:var(--surface-3);flex-shrink:0;overflow:hidden;border:1px solid var(--border)}
+    .inline-note{font-size:.72rem;color:var(--text-dim);line-height:1.4;margin:.3rem 0 .5rem;padding:.35rem .5rem;background:rgba(255,255,255,.04);border-radius:4px}
+    .effects-preset-row{display:flex;gap:.3rem;flex-wrap:wrap;margin-bottom:.6rem}
+    .preset-btn{font-size:.7rem;padding:.2rem .45rem;border-radius:4px;border-color:var(--border)}
+    .preset-btn.active{border-color:var(--accent-lt);background:rgba(31,111,235,.12);color:var(--accent-lt)}
+
+    /* Inline error */
+    .inline-err{display:grid;gap:.5rem;padding:.75rem;border:1px solid rgba(248,81,73,.25);border-left:4px solid var(--s-err);border-radius:var(--r-md);background:rgba(248,81,73,.05);margin:.5rem .75rem}
+    .inline-err-head{display:flex;align-items:center;gap:.4rem}
+    .inline-err-icon{width:18px;height:18px;border-radius:50%;background:rgba(248,81,73,.15);color:var(--s-err);display:flex;align-items:center;justify-content:center;font-size:10px;flex-shrink:0}
+    .inline-err-title{font-weight:700;color:var(--s-err);font-size:.82rem}
+    .inline-err-code{font-size:.72rem;color:var(--text-muted);font-family:"IBM Plex Mono",monospace;background:rgba(0,0,0,.3);border-radius:3px;padding:.3rem .5rem;line-height:1.5}
+    .inline-err-actions{display:flex;gap:.4rem}
+    .inline-err-actions button{font-size:.75rem;padding:.25rem .5rem}
+
+    /* Background loop panel */
+    .loop-panel{background:var(--surface-3);border:1px solid var(--border);border-radius:var(--r-md);padding:.65rem .85rem;margin:.5rem .75rem}
+    .loop-panel h4{font-size:.8rem;font-weight:700;margin-bottom:.4rem}
+    .loop-panel p{font-size:.75rem;color:var(--text-muted);margin-bottom:.5rem}
+    .loop-clip-row{display:grid;grid-template-columns:1fr auto;gap:.4rem;align-items:end}
+
+    /* Gate */
+    .gate{display:grid;gap:.25rem;padding:.6rem .85rem;border-left:4px solid var(--s-done);border-radius:0 var(--r-md) var(--r-md) 0;background:rgba(63,185,80,.06);font-size:.8rem;line-height:1.5;margin:.5rem .75rem}
+    .gate p{margin:0}
+    .gate-label{font-weight:700;font-size:.68rem;text-transform:uppercase;letter-spacing:.04em;color:var(--s-done)}
+    .gate-warn{border-left-color:var(--s-warn);background:rgba(210,153,34,.06)}.gate-warn .gate-label{color:var(--s-warn)}
+
+    /* Screen container */
+    .screen{display:none}.screen.active{display:flex;flex-direction:column;height:calc(100vh - 82px)}
+
+    /* Cut stage */
+    .cut-shell{display:grid;grid-template-columns:280px 1fr;height:calc(100vh - 150px);overflow:hidden}
+    .cut-sidebar{border-right:1px solid var(--border);overflow-y:auto;background:var(--surface);padding:.75rem}
+    .cut-main{display:flex;flex-direction:column;overflow:hidden}
+    .cut-preview{flex:1;background:#000;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
+    .cut-waveform{height:60px;background:var(--surface-3);border-top:1px solid var(--border);flex-shrink:0;position:relative;overflow:hidden;padding:0 .75rem}
+    .waveform-bars{display:flex;align-items:center;gap:1px;height:100%;padding:.5rem 0}
+    .waveform-bar{flex:1;background:rgba(108,165,255,.35);border-radius:1px;min-height:2px}
+    .cut-point{position:absolute;top:0;bottom:0;width:2px;background:var(--s-warn);z-index:2;cursor:ew-resize}
+    .cut-point::before{content:'◆';position:absolute;top:50%;transform:translate(-50%,-50%);font-size:8px;color:var(--s-warn)}
+    .cut-toolbar{display:flex;align-items:center;gap:.5rem;padding:.5rem .85rem;border-top:1px solid var(--border);background:var(--surface);flex-shrink:0;flex-wrap:wrap}
+    .cut-toolbar .timecode{font-family:"IBM Plex Mono",monospace;font-size:.9rem;font-weight:700;letter-spacing:.05em;color:var(--accent-lt)}
+    .cut-list .cut-segment-row{display:flex;align-items:center;gap:.5rem;padding:.4rem .5rem;border-radius:var(--r-sm);margin-bottom:.3rem;cursor:pointer;border:1px solid transparent}
+    .cut-segment-row:hover{background:var(--surface-2)}
+    .cut-segment-row.active{background:rgba(31,111,235,.1);border-color:rgba(31,111,235,.25)}
+    .cut-segment-num{width:18px;height:18px;border-radius:50%;background:var(--s-info-bg);color:var(--s-info);font-size:.7rem;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+    .cut-segment-info strong{font-size:.82rem;display:block}
+    .cut-segment-info small{font-size:.72rem;color:var(--text-muted);font-family:"IBM Plex Mono",monospace}
+    .cut-segment-del{opacity:0;background:transparent;border:none;color:var(--s-err);padding:.15rem .3rem;font-size:.8rem}
+    .cut-segment-row:hover .cut-segment-del{opacity:1}
+
+    /* Export / Artifacts */
+    .export-shell{padding:1.1rem;max-width:800px;overflow-y:auto;height:calc(100vh - 150px)}
+    .artifact-card{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:.85rem;padding:.65rem .9rem;border:1px solid var(--border);border-radius:var(--r-lg);background:var(--surface);margin-bottom:.5rem}
+    .artifact-icon{width:38px;height:38px;border-radius:var(--r-sm);display:flex;align-items:center;justify-content:center;font-size:1.1rem;flex-shrink:0}
+    .artifact-icon.video{background:rgba(31,111,235,.15);color:var(--accent-lt)}
+    .artifact-icon.audio{background:rgba(63,185,80,.15);color:var(--s-done)}
+    .artifact-icon.text{background:rgba(210,153,34,.15);color:var(--s-warn)}
+    .artifact-info strong{display:block;font-size:.875rem;margin-bottom:.1rem}
+    .artifact-info small{color:var(--text-muted);font-size:.75rem;font-family:"IBM Plex Mono",monospace}
+    .artifact-actions{display:flex;gap:.35rem;align-items:center}
+    .copyright-check{border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface-3);padding:.75rem;margin-bottom:1rem}
+    .copyright-check h4{font-size:.88rem;margin-bottom:.55rem}
+    .check-item{display:flex;align-items:center;gap:.5rem;padding:.35rem 0;border-bottom:1px solid var(--border);font-size:.82rem}
+    .check-item:last-child{border-bottom:none}
+    .check-icon{width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;flex-shrink:0}
+    .check-ok{background:rgba(63,185,80,.2);color:var(--s-done)}
+    .check-warn{background:rgba(210,153,34,.2);color:var(--s-warn)}
+    .check-fail{background:rgba(248,81,73,.2);color:var(--s-err)}
+    .risk-meter{display:flex;align-items:center;gap:.65rem;padding:.55rem .75rem;border-radius:var(--r-md);background:rgba(63,185,80,.08);border:1px solid rgba(63,185,80,.2);margin-top:.65rem}
+    .risk-label{font-size:.78rem;font-weight:600;color:var(--s-done)}
+    .risk-bar{flex:1;height:6px;border-radius:999px;background:rgba(255,255,255,.08)}
+    .risk-fill{height:6px;border-radius:999px;background:linear-gradient(90deg,var(--s-done),var(--s-warn))}
+
+    /* Misc */
+    .section-title{font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);margin-bottom:.45rem}
+    .stack{display:grid;gap:.45rem}
+    .row{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap}
+    .spacer{flex:1}
+    .faded{opacity:.5;pointer-events:none}
+    hr{border:none;border-top:1px solid var(--border);margin:.65rem 0}
+    .proto-banner{background:rgba(210,153,34,.1);border-bottom:1px solid rgba(210,153,34,.2);padding:.35rem 1.1rem;font-size:.72rem;color:var(--s-warn);font-weight:600}
+  </style>
+</head>
+<body>
+
+<div class="proto-banner">⚡ PROTOTYPE — Render & Edit screens chi tiết. Dùng tab phía dưới để chuyển màn hình.</div>
+
+<header class="topnav">
+  <div class="topnav-brand"><div class="logo">YT</div><h1>YT Review Studio</h1></div>
+  <nav class="topnav-links">
+    <a href="#" class="active">Projects</a>
+    <a href="#">Jobs</a><a href="#">Sources</a><a href="#">Config</a>
+  </nav>
+</header>
+
+<!-- ══════════════════════════════════════════════ -->
+<!-- SCREEN A: RENDER — VISUAL MAPPING EDITOR      -->
+<!-- ══════════════════════════════════════════════ -->
+<div class="screen active" id="screen-render">
+  <nav class="bc"><a href="#">Projects</a><span class="bc-sep">/</span><a href="#">su-150-2</a><span class="bc-sep">/</span><span>Render</span></nav>
+  <ul class="phase-bar">
+    <li><button class="phase-btn" data-st="done">Script</button></li>
+    <li><button class="phase-btn" data-st="done">Voice &amp; Assets</button></li>
+    <li><button class="phase-btn sel" data-st="progress">Render</button></li>
+    <li><button class="phase-btn">Publish</button></li>
+  </ul>
+  <div class="stage-rail">
+    <div class="stage-group">
+      <div class="stage-group-label">Writing</div>
+      <div class="stage-btns">
+        <button class="stage-btn" data-st="done">Brief</button>
+        <button class="stage-btn" data-st="done">Script</button>
+        <button class="stage-btn" data-st="done">Copyright</button>
+      </div>
+    </div>
+    <div class="stage-group">
+      <div class="stage-group-label">Production</div>
+      <div class="stage-btns">
+        <button class="stage-btn" data-st="done">Voice</button>
+        <button class="stage-btn" data-st="done">Assets</button>
+        <button class="stage-btn active" data-st="done">Render</button>
+        <button class="stage-btn" data-st="done">Captions</button>
+        <button class="stage-btn">ASR</button>
+        <button class="stage-btn">Export</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Render toolbar -->
+  <div class="render-toolbar">
+    <span class="mapping-badge"><span class="dot"></span> Approved · 4 scenes</span>
+    <button onclick="toast('info','Generating mapping...','AI đang phân tích script và assets.')">↺ Regenerate mapping</button>
+    <button class="pri" onclick="toast('ok','Mapping approved','Mapping đã được approve. Bạn có thể render draft.')">✓ Approve mapping</button>
+    <span class="spacer"></span>
+    <button onclick="toast('info','Rendering draft...','Job render đã được tạo.')">▶ Render Draft</button>
+    <button onclick="showScreen('cut')">✂ Cắt ghép (Cut)</button>
+  </div>
+
+  <!-- Gate notice -->
+  <div class="gate" style="margin:.45rem .85rem .25rem">
+    <div class="gate-label">Mapping đã approve</div>
+    <p>Visual mapping được approve lúc 19:42. Thay đổi effects cần approve lại trước khi render.</p>
+  </div>
+
+  <!-- Background loop panel -->
+  <div class="loop-panel">
+    <h4>Background loop video</h4>
+    <p>Một clip video lặp toàn bộ narration. Khi set loop, scene timeline bên dưới sẽ bị bỏ qua.</p>
+    <div class="loop-clip-row">
+      <div>
+        <label>Loop clip</label>
+        <select><option value="">None (dùng scene timeline)</option><option selected>night-city-loop.mp4 · 00:30 · Licensed</option><option>forest-ambient.mp4 · 00:45 · Own footage</option></select>
+      </div>
+      <div style="display:grid;gap:.3rem">
+        <label>Fit</label>
+        <select style="width:90px"><option selected>Cover</option><option>Contain</option></select>
+      </div>
+      <div style="display:grid;gap:.3rem">
+        <label>Zoom</label>
+        <select style="width:110px"><option>None</option><option selected>Slow zoom in</option></select>
+      </div>
+      <button class="pri" style="align-self:end" onclick="toast('ok','Background loop saved','night-city-loop.mp4 · Cover · Slow zoom in. Approve mapping lại trước khi render.')">Save</button>
+    </div>
+  </div>
+
+  <!-- 3-panel editor body -->
+  <div class="render-body" style="flex:1;overflow:hidden">
+    <!-- Left: Monitor + Timeline -->
+    <div class="render-main">
+      <div class="render-monitor">
+        <div class="monitor-placeholder">
+          <div class="big">🌃</div>
+          <div style="font-size:.82rem;color:var(--text-muted)">night-city-loop.mp4· scene-02 · 00:12 → 00:24</div>
+          <div style="font-size:.72rem;color:var(--text-dim)">Source preview · effects không hiển thị ở đây</div>
+        </div>
+        <div class="monitor-overlay-bar">
+          "...Qin Mu finally stepped through the shattered gate, his eyes wide as he glimpsed the truth hidden beneath the Celestial River..."
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:.75rem;padding:.35rem .85rem;background:rgba(0,0,0,.5);font-size:.72rem;font-family:'IBM Plex Mono',monospace;color:var(--text-muted);flex-shrink:0">
+        <strong style="color:var(--text)">scene-02</strong>
+        <span>00:12 → 00:24</span>
+        <span>night-city-loop.mp4</span>
+        <span style="color:var(--s-info)">⚙ zoom-in · fade</span>
+        <span class="spacer"></span>
+        <span style="color:var(--text-dim);font-style:italic">Monitor không chính xác frame · Effects áp dụng sau khi render</span>
+      </div>
+
+      <!-- Timeline -->
+      <div class="render-timeline">
+        <div class="timeline-ruler" style="position:relative;height:18px;padding-left:80px;margin-bottom:4px;min-width:600px">
+          <span style="left:80px;font-size:.63rem;color:var(--text-dim);font-family:'IBM Plex Mono',monospace">0:00</span>
+          <span style="left:calc(80px + (600px - 80px) * .33);font-size:.63rem;color:var(--text-dim);font-family:'IBM Plex Mono',monospace">0:30</span>
+          <span style="left:calc(80px + (600px - 80px) * .67);font-size:.63rem;color:var(--text-dim);font-family:'IBM Plex Mono',monospace">1:00</span>
+          <span style="right:0;font-size:.63rem;color:var(--text-dim);font-family:'IBM Plex Mono',monospace">1:30</span>
+        </div>
+        <!-- V1 Visual Track -->
+        <div class="timeline-track-row" style="min-width:600px">
+          <div class="track-label">V1 Visual</div>
+          <div class="track-clips" style="position:relative;height:28px">
+            <div class="clip video" style="left:0%;width:26%" onclick="toast('info','Scene selected','scene-01 · night-city-loop.mp4')"><strong>scene-01 · Night city</strong></div>
+            <div class="clip video selected" style="left:26%;width:26%" onclick="toast('info','Scene selected','scene-02 đang xem trong monitor')"><strong>scene-02 · Night city</strong></div>
+            <div class="clip image has-effects" style="left:52%;width:26%" onclick="toast('info','Scene selected','scene-03 · bg-generated.png · has effects')"><strong>scene-03 · Generated bg</strong></div>
+            <div class="clip image low-confidence" style="left:78%;width:22%" onclick="toast('warn','Low confidence','scene-04 có confidence thấp (0.31). Kiểm tra lại asset.')"><strong>scene-04 · Low conf.</strong></div>
+          </div>
+        </div>
+        <!-- A1 Narration Track -->
+        <div class="timeline-track-row" style="min-width:600px">
+          <div class="track-label">A1 Narration</div>
+          <div class="track-clips" style="position:relative;height:28px">
+            <div style="position:absolute;left:0;right:0;top:0;bottom:0;background:rgba(31,111,235,.12);border:1px solid rgba(31,111,235,.2);border-radius:2px;display:flex;align-items:center;padding-left:6px;font-size:.62rem;color:var(--s-info)">voice-final.mp3 · 1m 34s</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:.75rem;padding:.3rem 0 0 80px;font-size:.68rem;color:var(--text-dim)">
+          <span>🟦 Video clip</span><span>🟧 Image / generated</span><span style="color:var(--s-warn)">⚙ Has effects</span><span style="opacity:.6">- - Low confidence</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: Inspector Panel (tabbed) -->
+    <div class="render-inspector">
+      <div class="inspector-tabs">
+        <button class="inspector-tab active" onclick="switchTab(this,'clip-tab')">Clip Inspector</button>
+        <button class="inspector-tab" onclick="switchTab(this,'effects-tab')">Effects</button>
+      </div>
+
+      <!-- Tab: Clip Inspector -->
+      <div class="inspector-body" id="clip-tab">
+        <div class="inspector-section">
+          <div class="inspector-section-title">scene-02 · 00:12 – 00:24</div>
+          <div style="font-size:.75rem;color:var(--text-muted);margin-bottom:.4rem">Narration excerpt:</div>
+          <div style="font-size:.75rem;font-style:italic;color:var(--text-muted);background:rgba(255,255,255,.04);border-radius:4px;padding:.35rem .5rem;line-height:1.45;margin-bottom:.5rem">"...his eyes wide as he glimpsed the truth hidden beneath the Celestial River..."</div>
+          <div style="font-size:.72rem;color:var(--text-muted);margin-bottom:.2rem">AI confidence</div>
+          <div class="confidence-bar"><div class="confidence-fill" style="width:78%"></div></div>
+          <div style="font-size:.7rem;color:var(--text-dim)">78% — reason: urban night scene matches tone of revelation</div>
+        </div>
+
+        <div class="inspector-section">
+          <div class="inspector-section-title">Asset</div>
+          <div class="asset-thumb-row">
+            <div class="asset-thumb" style="background:linear-gradient(135deg,#0a1628,#1a3a6b)"></div>
+            <div style="min-width:0">
+              <div style="font-size:.8rem;font-weight:600">night-city-loop.mp4</div>
+              <div style="font-size:.72rem;color:var(--text-muted)">Video · 45.2 MB · Licensed</div>
+            </div>
+          </div>
+          <div class="form-row"><label>Asset</label>
+            <select>
+              <option value="">Generated background</option>
+              <option selected>night-city-loop.mp4</option>
+              <option>forest-ambient.mp4</option>
+            </select>
+          </div>
+          <div class="form-row-2">
+            <div><label>Fit</label><select><option selected>Cover</option><option>Contain</option></select></div>
+            <div><label>Mute audio</label><select><option selected>Yes</option><option>No</option></select></div>
+          </div>
+          <div class="form-row-2">
+            <div><label>Source start (s)</label><input type="number" value="0" step="any" /></div>
+            <div><label>Duration (max 5s)</label><input type="number" value="5" step="any" /></div>
+          </div>
+          <button class="pri" style="width:100%" onclick="toast('ok','Mapping saved','scene-02 asset/timing đã lưu. Approve mapping lại trước khi render.')">Save clip mapping</button>
+        </div>
+      </div>
+
+      <!-- Tab: Effects -->
+      <div class="inspector-body" id="effects-tab" style="display:none">
+        <div class="inspector-section">
+          <div class="inspector-section-title">Effects — scene-02</div>
+          <div class="inline-note">Effects chỉ hiển thị trong rendered draft, không trong monitor. Lưu xong cần approve mapping lại.</div>
+          <div class="effects-preset-row">
+            <button class="preset-btn" onclick="applyPreset('cinematic')">🎬 Cinematic</button>
+            <button class="preset-btn" onclick="applyPreset('dramatic')">🌑 Dramatic</button>
+            <button class="preset-btn" onclick="applyPreset('bright')">☀️ Bright</button>
+            <button class="preset-btn" onclick="applyPreset('reset')" style="color:var(--text-dim)">↺ Reset</button>
+          </div>
+        </div>
+
+        <div class="inspector-section">
+          <div class="inspector-section-title">Motion</div>
+          <div class="form-row">
+            <label>Zoom</label>
+            <select>
+              <option>None</option>
+              <option selected>Slow zoom in</option>
+              <option>Slow zoom out</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label>Flip</label>
+            <select><option selected>None</option><option>Mirror left/right</option><option>Mirror top/bottom</option></select>
+          </div>
+          <div class="form-row">
+            <label>Speed <span style="color:var(--text-dim);font-weight:400">(0.5 – 2.0)</span></label>
+            <div class="slider-row"><input type="range" min="0.5" max="2" step="0.05" value="1" oninput="this.nextElementSibling.value=this.value" /><input type="number" value="1" min="0.5" max="2" step="0.05" /></div>
+          </div>
+        </div>
+
+        <div class="inspector-section">
+          <div class="inspector-section-title">Transitions</div>
+          <div class="form-row-2">
+            <div><label>Transition in</label><select><option selected>Cut</option><option>Fade</option></select></div>
+            <div><label>Transition out</label><select><option>Cut</option><option selected>Fade</option></select></div>
+          </div>
+        </div>
+
+        <div class="inspector-section">
+          <div class="inspector-section-title">Color grading</div>
+          <div class="form-row">
+            <label>Brightness <span style="color:var(--text-dim);font-weight:400">(-1 – 1)</span></label>
+            <div class="slider-row"><input type="range" min="-1" max="1" step="0.05" value="-0.1" oninput="this.nextElementSibling.value=this.value" /><input type="number" value="-0.1" /></div>
+          </div>
+          <div class="form-row">
+            <label>Contrast <span style="color:var(--text-dim);font-weight:400">(0 – 2)</span></label>
+            <div class="slider-row"><input type="range" min="0" max="2" step="0.05" value="1.2" oninput="this.nextElementSibling.value=this.value" /><input type="number" value="1.2" /></div>
+          </div>
+          <div class="form-row">
+            <label>Saturation <span style="color:var(--text-dim);font-weight:400">(0 – 2)</span></label>
+            <div class="slider-row"><input type="range" min="0" max="2" step="0.05" value="0.9" oninput="this.nextElementSibling.value=this.value" /><input type="number" value="0.9" /></div>
+          </div>
+          <div class="form-row">
+            <label>Grayscale <span style="color:var(--text-dim);font-weight:400">(0 – 1)</span></label>
+            <div class="slider-row"><input type="range" min="0" max="1" step="0.05" value="0" oninput="this.nextElementSibling.value=this.value" /><input type="number" value="0" /></div>
+          </div>
+          <div class="form-row">
+            <label>Blur <span style="color:var(--text-dim);font-weight:400">(0 – 40)</span></label>
+            <div class="slider-row"><input type="range" min="0" max="40" step="1" value="0" oninput="this.nextElementSibling.value=this.value" /><input type="number" value="0" /></div>
+          </div>
+        </div>
+
+        <div class="inspector-section">
+          <div class="inspector-section-title">Watermark</div>
+          <div class="form-row"><label>Logo asset</label>
+            <select><option value="" selected>No watermark</option><option>logo-white.png (owned)</option></select>
+          </div>
+          <div class="form-row faded"><label>Position</label><select><option>Bottom right</option></select></div>
+          <div class="form-row faded">
+            <label>Scale <span style="color:var(--text-dim);font-weight:400">(0.05 – 0.5)</span></label>
+            <div class="slider-row"><input type="range" min="0.05" max="0.5" step="0.01" value="0.12" disabled /><input type="number" value="0.12" disabled /></div>
+          </div>
+        </div>
+
+        <div class="row" style="gap:.4rem;padding-top:.2rem">
+          <button class="pri" onclick="toast('ok','Effects saved','scene-02 effects đã lưu. Approve mapping lại trước khi render.')">Save effects</button>
+          <button onclick="toast('ok','Effects reset','scene-02 đã reset về mặc định.')">↺ Reset</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════ -->
+<!-- SCREEN B: CUT / TRIM EDITOR                   -->
+<!-- ══════════════════════════════════════════════ -->
+<div class="screen" id="screen-cut">
+  <nav class="bc"><a href="#">su-150-2</a><span class="bc-sep">/</span><span>✂ Cắt ghép (Cut)</span></nav>
+  <ul class="phase-bar">
+    <li><button class="phase-btn" data-st="done">Script</button></li>
+    <li><button class="phase-btn sel" data-st="progress">Render</button></li>
+    <li><button class="phase-btn">Publish</button></li>
+  </ul>
+
+  <div class="gate gate-warn" style="margin:.45rem .85rem .25rem">
+    <div class="gate-label">Cut mode</div>
+    <p>Đánh dấu điểm cắt rồi bấm Save cut. Draft video và captions sẽ được tính lại.</p>
+  </div>
+
+  <div class="cut-shell">
+    <!-- Sidebar: segment list -->
+    <div class="cut-sidebar">
+      <div class="section-title">Segments (4)</div>
+      <div class="cut-list">
+        <div class="cut-segment-row active">
+          <div class="cut-segment-num">1</div>
+          <div class="cut-segment-info">
+            <strong>Intro hook</strong>
+            <small>00:00 → 00:24</small>
+          </div>
+          <button class="cut-segment-del">✕</button>
+        </div>
+        <div class="cut-segment-row">
+          <div class="cut-segment-num">2</div>
+          <div class="cut-segment-info">
+            <strong>Main point 1</strong>
+            <small>00:24 → 00:58</small>
+          </div>
+          <button class="cut-segment-del">✕</button>
+        </div>
+        <div class="cut-segment-row">
+          <div class="cut-segment-num">3</div>
+          <div class="cut-segment-info">
+            <strong>Main point 2</strong>
+            <small>00:58 → 01:24</small>
+          </div>
+          <button class="cut-segment-del">✕</button>
+        </div>
+        <div class="cut-segment-row">
+          <div class="cut-segment-num">4</div>
+          <div class="cut-segment-info">
+            <strong>CTA / Outro</strong>
+            <small>01:24 → 01:34</small>
+          </div>
+          <button class="cut-segment-del">✕</button>
+        </div>
+      </div>
+      <hr />
+      <div class="stack">
+        <button onclick="toast('info','Cut point added','Thêm điểm cắt tại 00:42')">+ Add cut point</button>
+        <button class="pri" onclick="toast('ok','Cut saved','4 segments đã lưu. Render draft lại để áp dụng.')">Save cut</button>
+        <button class="ghost" onclick="showScreen('render')">← Back to Render</button>
+      </div>
+    </div>
+
+    <!-- Main: preview + waveform -->
+    <div class="cut-main">
+      <div class="cut-preview">
+        <div style="text-align:center;color:var(--text-dim)">
+          <div style="font-size:2rem;margin-bottom:.5rem">🎬</div>
+          <div style="font-size:.82rem">Draft render preview</div>
+          <div style="font-size:.72rem;margin-top:.25rem">render-draft.mp4 · 1m 34s</div>
+        </div>
+        <!-- Overlaid cut point marker -->
+        <div style="position:absolute;left:38%;top:0;bottom:0;width:2px;background:var(--s-warn);pointer-events:none">
+          <div style="position:absolute;top:8px;left:4px;font-size:.68rem;color:var(--s-warn);white-space:nowrap;background:rgba(0,0,0,.7);padding:.1rem .3rem;border-radius:3px">00:36</div>
+        </div>
+      </div>
+
+      <!-- Waveform + cut points -->
+      <div class="cut-waveform">
+        <div class="waveform-bars" id="waveform-bars"></div>
+        <!-- Cut points on waveform -->
+        <div style="position:absolute;left:25%;top:0;bottom:0;width:2px;background:var(--s-warn);z-index:2"><div style="position:absolute;top:0;left:3px;font-size:.62rem;color:var(--s-warn);white-space:nowrap">00:24</div></div>
+        <div style="position:absolute;left:62%;top:0;bottom:0;width:2px;background:var(--s-warn);z-index:2"><div style="position:absolute;top:0;left:3px;font-size:.62rem;color:var(--s-warn);white-space:nowrap">00:58</div></div>
+        <div style="position:absolute;left:88%;top:0;bottom:0;width:2px;background:var(--s-warn);z-index:2"><div style="position:absolute;top:0;left:3px;font-size:.62rem;color:var(--s-warn);white-space:nowrap">01:24</div></div>
+      </div>
+
+      <!-- Playback toolbar -->
+      <div class="cut-toolbar">
+        <button onclick="toast('info','Playing...','')">⏮</button>
+        <button onclick="toast('info','Playing...','')">⏪ -5s</button>
+        <button class="pri" onclick="toast('info','Playing...','')">▶ Play</button>
+        <button onclick="toast('info','','')">⏩ +5s</button>
+        <button onclick="toast('info','','')">⏭</button>
+        <span class="timecode">00:24.5</span>
+        <span style="font-size:.75rem;color:var(--text-dim)">/ 01:34.0</span>
+        <span class="spacer"></span>
+        <button onclick="toast('info','Cut point set at 00:24','')">✂ Cut here</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════ -->
+<!-- SCREEN C: EXPORT + COPYRIGHT REVIEW           -->
+<!-- ══════════════════════════════════════════════ -->
+<div class="screen" id="screen-export">
+  <nav class="bc"><a href="#">su-150-2</a><span class="bc-sep">/</span><span>Export</span></nav>
+  <ul class="phase-bar">
+    <li><button class="phase-btn" data-st="done">Render</button></li>
+    <li><button class="phase-btn sel" data-st="progress">Publish</button></li>
+  </ul>
+  <div class="stage-rail">
+    <div class="stage-group">
+      <div class="stage-group-label">Publishing</div>
+      <div class="stage-btns">
+        <button class="stage-btn active">Export</button>
+        <button class="stage-btn">YouTube upload</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="export-shell">
+    <!-- Copyright check -->
+    <div class="section-title" style="margin-bottom:.5rem">Copyright review</div>
+    <div class="copyright-check">
+      <h4>Checklist trước khi publish</h4>
+      <div class="check-item"><div class="check-icon check-ok">✓</div>Script là commentary gốc, không dịch hay copy</div>
+      <div class="check-item"><div class="check-icon check-ok">✓</div>Voice narration do TTS tự tạo, không dùng clip âm thanh gốc</div>
+      <div class="check-item"><div class="check-icon check-ok">✓</div>Background video đã khai báo rights (Licensed)</div>
+      <div class="check-item"><div class="check-icon check-warn">!</div>Ảnh thumbnail có thể chứa artwork từ show — xác nhận fair use cho review</div>
+      <div class="check-item"><div class="check-icon check-ok">✓</div>Không clip âm thanh nhạc gốc</div>
+      <div class="check-item"><div class="check-icon check-ok">✓</div>Không clip video episode gốc được insert</div>
+      <div class="risk-meter">
+        <span class="risk-label">Risk: LOW</span>
+        <div class="risk-bar"><div class="risk-fill" style="width:18%"></div></div>
+        <span style="font-size:.72rem;color:var(--text-muted)">18% · Review commentary</span>
+      </div>
+    </div>
+
+    <!-- Artifacts -->
+    <div class="section-title" style="margin-bottom:.5rem">Output files</div>
+    <div class="artifact-card">
+      <div class="artifact-icon video">🎬</div>
+      <div class="artifact-info">
+        <strong>render-draft.mp4</strong>
+        <small>Shorts 9:16 · 1080×1920 · 1m 34s · 24.5 MB · created 19:42</small>
+      </div>
+      <div class="artifact-actions">
+        <button onclick="toast('info','Opening preview...','')">▶ Preview</button>
+        <a href="#" style="font-size:.82rem;padding:.35rem .6rem;border:1px solid var(--border-med);border-radius:var(--r-sm);color:var(--text);background:var(--surface);text-decoration:none" onclick="toast('info','Downloading...','render-draft.mp4')">↓</a>
+      </div>
+    </div>
+    <div class="artifact-card">
+      <div class="artifact-icon audio">🔊</div>
+      <div class="artifact-info">
+        <strong>voice-final.mp3</strong>
+        <small>TTS · Google Studio · en-US-Studio-O · 1m 34s · 3.2 MB</small>
+      </div>
+      <div class="artifact-actions">
+        <button onclick="toast('info','Playing audio...','')">▶ Play</button>
+      </div>
+    </div>
+    <div class="artifact-card">
+      <div class="artifact-icon text">📄</div>
+      <div class="artifact-info">
+        <strong>captions.srt</strong>
+        <small>SRT · 47 lines · en-US · created 19:45</small>
+      </div>
+      <div class="artifact-actions">
+        <button onclick="toast('info','Opening captions editor...','')">Edit</button>
+        <button onclick="toast('info','Downloading captions...','')">↓</button>
+      </div>
+    </div>
+
+    <hr style="margin:1rem 0"/>
+
+    <!-- YouTube metadata -->
+    <div class="section-title" style="margin-bottom:.5rem">YouTube metadata</div>
+    <div class="stack" style="max-width:680px;margin-bottom:1rem">
+      <div><label>Title</label><input value="Tales of Herding Gods Ep 52 — The Hidden Realm Explained" /></div>
+      <div><label>Description</label><textarea rows="4">In episode 52, Qin Mu finally reveals the truth about the Hidden Realm...
+
+This is a review and analysis video. All commentary is original.
+
+#TalesOfHerdingGods #Donghua #Anime</textarea></div>
+      <div class="form-row-2">
+        <div><label>Privacy</label><select><option>Private (review first)</option><option>Public</option><option>Unlisted</option></select></div>
+        <div><label>Scheduled publish</label><input type="datetime-local" value="2026-08-26T09:00" /></div>
+      </div>
+    </div>
+
+    <div class="gate" style="margin:0 0 1rem">
+      <div class="gate-label">Approval required</div>
+      <p>Bấm "Approve &amp; queue upload" để xác nhận. Upload sẽ thực hiện vào giờ đã đặt.</p>
+    </div>
+    <div class="row">
+      <button class="pri" onclick="toast('ok','Queued for upload','su-150-2 sẽ upload lên YouTube lúc 2026-08-26 09:00.')">✓ Approve &amp; queue upload</button>
+      <button onclick="toast('info','Export packed','Package đã tạo tại projects/su-150-2/export/')">↓ Export package only</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════ -->
+<!-- SCREEN D: RENDER FAILED (inline error)        -->
+<!-- ══════════════════════════════════════════════ -->
+<div class="screen" id="screen-render-err">
+  <nav class="bc"><a href="#">su-150-2</a><span class="bc-sep">/</span><span style="color:var(--s-err)">Render — ⚠ Failed</span></nav>
+  <ul class="phase-bar">
+    <li><button class="phase-btn" data-st="done">Script</button></li>
+    <li><button class="phase-btn sel">Render</button></li>
+    <li><button class="phase-btn">Publish</button></li>
+  </ul>
+  <div class="stage-rail">
+    <div class="stage-group">
+      <div class="stage-group-label">Production</div>
+      <div class="stage-btns">
+        <button class="stage-btn" data-st="done">Voice</button>
+        <button class="stage-btn" data-st="done">Assets</button>
+        <button class="stage-btn active" data-st="err">Render</button>
+        <button class="stage-btn">Captions</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="render-toolbar">
+    <span class="mapping-badge" style="background:var(--s-warn-bg);color:var(--s-warn);border-color:rgba(210,153,34,.2)">⚠ Approved · needs re-render</span>
+    <button onclick="toast('info','Regenerating mapping...','')">↺ Regenerate mapping</button>
+    <button onclick="toast('info','Approving...','')">✓ Approve mapping</button>
+    <span class="spacer"></span>
+    <button class="pri" onclick="toast('info','Queuing render...','Job render mới đã được tạo.')">▶ Retry Render</button>
+  </div>
+
+  <!-- INLINE ERROR — full detail -->
+  <div class="inline-err">
+    <div class="inline-err-head">
+      <div class="inline-err-icon">✕</div>
+      <div class="inline-err-title">Render thất bại — FFmpeg error (exit code 1)</div>
+    </div>
+    <div class="inline-err-code">Stage: final-render
+Command: ffmpeg -i projects/su-150-2/workspace/bg-loop.mp4 ...
+Error: No such file or directory
+  → Input: projects/su-150-2/workspace/bg-loop.mp4
+  → File was likely moved or renamed after mapping was approved.
+
+Fix: Chọn lại background loop hoặc clear loop để dùng scene timeline.</div>
+    <div class="inline-err-actions">
+      <button class="danger" onclick="toast('info','Retrying render...','Job mới đã được tạo.')">↺ Retry render</button>
+      <button onclick="toast('info','Opening Assets stage...','')">📁 Sửa background video</button>
+      <button onclick="toast('ok','Log copied','Full FFmpeg output đã copy vào clipboard.')">📋 Copy log</button>
+    </div>
+  </div>
+
+  <!-- Still show the mapping editor in read-only state -->
+  <div class="gate gate-warn" style="margin:.45rem .85rem">
+    <div class="gate-label">⚠ Last render failed</div>
+    <p>Mapping vẫn còn approved. Sửa background video rồi bấm Retry Render — không cần approve lại mapping.</p>
+  </div>
+
+  <div class="loop-panel">
+    <h4>Background loop video <span style="color:var(--s-err);font-size:.75rem">(file not found)</span></h4>
+    <p>File bg-loop.mp4 không còn tồn tại. Chọn lại clip hoặc clear loop để dùng scene timeline.</p>
+    <div class="loop-clip-row">
+      <div>
+        <label>Loop clip</label>
+        <select style="border-color:rgba(248,81,73,.4);background:rgba(248,81,73,.05)">
+          <option value="">None (dùng scene timeline)</option>
+          <option selected>bg-loop.mp4 ⚠ FILE NOT FOUND</option>
+          <option>night-city-loop.mp4 · Licensed</option>
+          <option>forest-ambient.mp4 · Own footage</option>
+        </select>
+      </div>
+      <div style="display:grid;gap:.3rem"><label>Fit</label><select style="width:90px"><option>Cover</option></select></div>
+      <div style="display:grid;gap:.3rem"><label>Zoom</label><select style="width:110px"><option>None</option></select></div>
+      <button class="pri" style="align-self:end" onclick="toast('ok','Loop updated','night-city-loop.mp4 saved. Bấm Retry Render.')">Save &amp; retry</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST SHELF -->
+<div id="toast-shelf"></div>
+
+<!-- DEMO NAV -->
+<nav id="demo-nav">
+  <button class="active" onclick="showScreen('render')">🎬 Render Editor</button>
+  <button onclick="showScreen('cut')">✂ Cut / Trim</button>
+  <button onclick="showScreen('export')">📤 Export + Copyright</button>
+  <button onclick="showScreen('render-err')">⚠ Render Failed</button>
+</nav>
+
+<script>
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  const el = document.getElementById('screen-' + id);
+  if (el) el.classList.add('active');
+  document.querySelectorAll('#demo-nav button').forEach((b, i) => {
+    b.classList.toggle('active', ['render','cut','export','render-err'][i] === id);
+  });
+}
+
+function switchTab(btn, tabId) {
+  btn.closest('.render-inspector').querySelectorAll('.inspector-tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  btn.closest('.render-inspector').querySelectorAll('.inspector-body').forEach(b => b.style.display = 'none');
+  document.getElementById(tabId).style.display = 'block';
+}
+
+let tid = 0;
+function toast(level, title, msg, persist = false) {
+  const shelf = document.getElementById('toast-shelf');
+  const id = ++tid;
+  const icons = {err:'✕', ok:'✓', info:'ℹ', warn:'!'};
+  const dur = persist ? null : (level === 'err' ? 7000 : level === 'warn' ? 5500 : 4000);
+  const el = document.createElement('div');
+  el.className = `toast toast-${level}`;
+  el.id = `t${id}`;
+  el.innerHTML = `<div class="t-icon">${icons[level]||'ℹ'}</div>
+    <div><div class="t-title">${title}</div>${msg?`<div class="t-msg">${msg}</div>`:''}
+    ${level==='err'?`<div class="toast-actions"><button onclick="dismissToast(${id})">Dismiss</button><button onclick="dismissToast(${id})" class="danger">↺ Retry</button></div>`:''}
+    ${dur?`<div class="t-timer" style="color:${level==='err'?'#f85149':level==='ok'?'#3fb950':level==='warn'?'#d29922':'#6ca5ff'};--dur:${dur}ms"></div>`:''}
+    </div><button class="t-dismiss" onclick="dismissToast(${id})">✕</button>`;
+  shelf.appendChild(el);
+  if (dur) setTimeout(() => dismissToast(id), dur);
+}
+
+function dismissToast(id) {
+  const el = document.getElementById(`t${id}`);
+  if (!el) return;
+  el.classList.add('out');
+  setTimeout(() => el.remove(), 180);
+}
+
+function applyPreset(preset) {
+  const labels = {cinematic:'Cinematic: contrast 1.3, saturation 0.85, brightness -0.1', dramatic:'Dramatic: contrast 1.4, brightness -0.2, saturation 0.7, grayscale 0.15', bright:'Bright: brightness 0.15, contrast 1.1, saturation 1.2', reset:'Effects đã reset về mặc định'};
+  toast('ok', `Preset: ${preset}`, labels[preset] || '');
+}
+
+// Generate waveform bars
+window.addEventListener('DOMContentLoaded', () => {
+  const container = document.getElementById('waveform-bars');
+  if (!container) return;
+  for (let i = 0; i < 120; i++) {
+    const bar = document.createElement('div');
+    bar.className = 'waveform-bar';
+    const h = 8 + Math.random() * 84;
+    bar.style.height = h + '%';
+    bar.style.opacity = 0.3 + Math.random() * 0.7;
+    container.appendChild(bar);
+  }
+  setTimeout(() => toast('info', 'Render editor', 'Click các scene clip trong timeline để chọn và chỉnh sửa.'), 800);
+});
+</script>
+</body>
+</html>

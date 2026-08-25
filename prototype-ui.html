@@ -1,0 +1,1152 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>YT Review Studio — UI Prototype v2</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    /* ===== DESIGN TOKENS ===== */
+    :root {
+      color-scheme: dark;
+      --bg:          #0e1116;
+      --surface:     #14181f;
+      --surface-2:   #1a2029;
+      --surface-3:   #10151c;
+      --border:      rgba(255,255,255,0.08);
+      --border-med:  rgba(255,255,255,0.14);
+      --text:        #e6edf3;
+      --text-muted:  #9aa4b2;
+      --text-dim:    #6b7280;
+      --accent:      #1f6feb;
+      --accent-light:#6ca5ff;
+      --radius-sm:   6px;
+      --radius-md:   8px;
+      --radius-lg:   10px;
+      --radius-xl:   14px;
+      --shadow:      0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.3);
+      --shadow-lg:   0 4px 6px rgba(0,0,0,.4),0 16px 40px rgba(0,0,0,.4);
+      /* Status tokens */
+      --s-neutral-bg: rgba(139,148,158,.16); --s-neutral:  #9aa4b2;
+      --s-info-bg:    rgba(31,111,235,.16);  --s-info:     #6ca5ff;
+      --s-done-bg:    rgba(63,185,80,.15);   --s-done:     #3fb950;
+      --s-warn-bg:    rgba(210,153,34,.16);  --s-warn:     #d29922;
+      --s-error-bg:   rgba(248,81,73,.14);   --s-error:    #f85149;
+      /* Toast */
+      --toast-error:  #2a1111;
+      --toast-success:#0d2210;
+      --toast-info:   #0d1a2e;
+      --toast-warn:   #221a08;
+    }
+
+    /* ===== RESET ===== */
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:"IBM Plex Sans",system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.5;font-size:15px;min-height:100vh;display:flex;flex-direction:column}
+    h1,h2,h3,h4{font-family:"Space Grotesk",system-ui,sans-serif;letter-spacing:-.01em}
+    a{color:var(--accent-light);text-decoration:none}
+    a:hover{text-decoration:underline}
+    button{font:inherit;cursor:pointer;border-radius:var(--radius-sm);border:1px solid var(--border-med);background:var(--surface);color:var(--text);padding:.45rem .75rem;transition:background 140ms,border-color 140ms,color 140ms,box-shadow 140ms}
+    button:hover{background:var(--surface-2);border-color:rgba(255,255,255,.22)}
+    button:focus-visible{outline:2px solid var(--accent-light);outline-offset:2px}
+    button.btn-primary{background:var(--accent);border-color:#6ca5ff;color:#fff;font-weight:600}
+    button.btn-primary:hover{background:#1a5fd0}
+    button.btn-ghost{background:transparent;border-color:transparent;color:var(--text-muted)}
+    button.btn-ghost:hover{background:var(--surface-2);color:var(--text)}
+    button.btn-danger{background:rgba(248,81,73,.14);border-color:rgba(248,81,73,.3);color:#f85149}
+    input,select,textarea{font:inherit;background:var(--surface-3);color:var(--text);border:1px solid var(--border-med);border-radius:var(--radius-sm);padding:.45rem .65rem;width:100%}
+    input:focus,select:focus,textarea:focus{outline:2px solid var(--accent-light);outline-offset:2px;border-color:var(--accent)}
+    label{font-size:.875rem;color:var(--text-muted);font-weight:500;display:block;margin-bottom:.3rem}
+
+    /* ===== DEMO NAV (screen switcher, not part of product) ===== */
+    #demo-nav{position:fixed;bottom:1rem;left:50%;transform:translateX(-50%);z-index:9999;background:rgba(20,24,31,.95);border:1px solid var(--border-med);border-radius:999px;padding:.3rem .4rem;display:flex;gap:.25rem;backdrop-filter:blur(12px);box-shadow:var(--shadow-lg)}
+    #demo-nav button{border-radius:999px;padding:.3rem .8rem;font-size:.8rem;border:none;background:transparent;color:var(--text-muted)}
+    #demo-nav button.active{background:var(--accent);color:#fff;font-weight:600}
+
+    /* ===== TOP NAV ===== */
+    .topnav{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:1rem;padding:.75rem 1.25rem;border-bottom:1px solid var(--border);background:rgba(20,24,31,.92);backdrop-filter:blur(8px);position:sticky;top:0;z-index:100}
+    .topnav-brand{display:flex;align-items:center;gap:.65rem}
+    .topnav-logo{width:28px;height:28px;background:linear-gradient(135deg,#1f6feb,#6ca5ff);border-radius:6px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.85rem;color:#fff;flex-shrink:0}
+    .topnav-brand h1{font-size:1rem;font-weight:700;white-space:nowrap}
+    .topnav-brand p{font-size:.75rem;color:var(--text-muted);white-space:nowrap;display:none}
+    @media(min-width:800px){.topnav-brand p{display:block}}
+    .topnav-links{display:flex;justify-content:center;gap:.25rem}
+    .topnav-links a{color:var(--text-muted);font-weight:600;padding:.4rem .7rem;border-radius:var(--radius-sm);font-size:.875rem;transition:color 140ms,background 140ms}
+    .topnav-links a:hover{color:var(--text);background:var(--surface-2);text-decoration:none}
+    .topnav-links a.active{color:var(--accent-light);background:rgba(31,111,235,.12)}
+
+    /* ===== BREADCRUMB ===== */
+    .breadcrumb{display:flex;align-items:center;gap:.4rem;padding:.5rem 1.25rem;border-bottom:1px solid var(--border);background:var(--surface);font-size:.825rem;color:var(--text-muted)}
+    .breadcrumb a{color:var(--accent-light)}
+    .breadcrumb-sep{color:var(--text-dim)}
+    .breadcrumb > *:last-child{font-weight:600;color:var(--text)}
+
+    /* ===== MAIN VIEW ===== */
+    .view{flex:1;padding:1.25rem;max-width:1200px;width:100%;margin:0 auto}
+
+    /* ===== STATUS PILLS ===== */
+    .pill{display:inline-flex;align-items:center;gap:.3rem;border-radius:999px;padding:.15rem .5rem;font-size:.72rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap}
+    .pill-neutral{background:var(--s-neutral-bg);color:var(--s-neutral)}
+    .pill-info{background:var(--s-info-bg);color:var(--s-info)}
+    .pill-done{background:var(--s-done-bg);color:var(--s-done)}
+    .pill-warn{background:var(--s-warn-bg);color:var(--s-warn)}
+    .pill-error{background:var(--s-error-bg);color:var(--s-error)}
+    .pill svg,.pill .dot{flex-shrink:0}
+    .dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+    .dot-pulse{animation:pulse 1.4s ease-in-out infinite}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+    /* ===== TOAST NOTIFICATION SYSTEM (NEW) ===== */
+    #toast-shelf{position:fixed;bottom:1rem;right:1rem;z-index:5000;display:flex;flex-direction:column;gap:.5rem;align-items:flex-end;pointer-events:none}
+    .toast{pointer-events:all;display:grid;grid-template-columns:auto 1fr auto;align-items:start;gap:.65rem;min-width:320px;max-width:420px;padding:.75rem 1rem;border-radius:var(--radius-lg);border:1px solid var(--border-med);backdrop-filter:blur(12px);box-shadow:var(--shadow-lg);animation:toast-in 220ms cubic-bezier(.16,1,.3,1) both}
+    .toast.toast-removing{animation:toast-out 180ms ease-in both}
+    @keyframes toast-in{from{opacity:0;transform:translateX(16px) scale(.96)}to{opacity:1;transform:none}}
+    @keyframes toast-out{from{opacity:1;transform:none}to{opacity:0;transform:translateX(16px) scale(.94)}}
+    .toast-error{background:var(--toast-error);border-color:rgba(248,81,73,.3)}
+    .toast-success{background:var(--toast-success);border-color:rgba(63,185,80,.25)}
+    .toast-info{background:var(--toast-info);border-color:rgba(31,111,235,.25)}
+    .toast-warn{background:var(--toast-warn);border-color:rgba(210,153,34,.25)}
+    .toast-icon{width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;font-size:11px}
+    .toast-error .toast-icon{background:rgba(248,81,73,.2);color:#f85149}
+    .toast-success .toast-icon{background:rgba(63,185,80,.2);color:#3fb950}
+    .toast-info .toast-icon{background:rgba(31,111,235,.2);color:#6ca5ff}
+    .toast-warn .toast-icon{background:rgba(210,153,34,.2);color:#d29922}
+    .toast-body{min-width:0}
+    .toast-title{font-weight:600;font-size:.875rem;line-height:1.3;margin-bottom:.15rem}
+    .toast-error .toast-title{color:#f85149}
+    .toast-success .toast-title{color:#3fb950}
+    .toast-info .toast-title{color:#6ca5ff}
+    .toast-warn .toast-title{color:#d29922}
+    .toast-msg{font-size:.825rem;color:var(--text-muted);line-height:1.4}
+    .toast-actions{display:flex;gap:.4rem;margin-top:.5rem}
+    .toast-actions button{font-size:.75rem;padding:.25rem .55rem;border-radius:4px}
+    .toast-dismiss{align-self:start;flex-shrink:0;background:transparent;border:none;color:var(--text-dim);width:20px;height:20px;display:flex;align-items:center;justify-content:center;padding:0;border-radius:4px;font-size:14px;line-height:1}
+    .toast-dismiss:hover{background:var(--surface-2);color:var(--text);border:none}
+    .toast-timer{height:2px;border-radius:999px;margin-top:.5rem;background:currentColor;opacity:.25;animation:timer-shrink var(--duration,4s) linear both}
+    @keyframes timer-shrink{from{width:100%}to{width:0}}
+
+    /* ===== JOB STATUS BAR (NEW — floats above toast shelf) ===== */
+    #job-bar{position:fixed;bottom:1rem;left:50%;transform:translateX(-50%);z-index:4000;background:rgba(20,24,31,.96);border:1px solid var(--border-med);border-radius:999px;padding:.45rem .85rem .45rem 1rem;display:flex;align-items:center;gap:.75rem;box-shadow:var(--shadow-lg);backdrop-filter:blur(12px);animation:toast-in 220ms cubic-bezier(.16,1,.3,1)}
+    #job-bar.hidden{display:none}
+    .job-bar-spinner{width:16px;height:16px;border:2px solid rgba(31,111,235,.25);border-top-color:var(--accent-light);border-radius:50%;animation:spin 700ms linear infinite;flex-shrink:0}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .job-bar-label{font-size:.825rem;font-weight:600;white-space:nowrap}
+    .job-bar-progress{font-size:.75rem;color:var(--text-muted);font-family:"IBM Plex Mono",monospace}
+    .job-bar-track{width:80px;height:4px;border-radius:999px;background:rgba(255,255,255,.08)}
+    .job-bar-fill{height:4px;border-radius:999px;background:var(--accent-light);transition:width 300ms ease}
+    .job-bar-cancel{background:transparent;border:none;color:var(--text-dim);font-size:.75rem;padding:.15rem .4rem;border-radius:4px}
+    .job-bar-cancel:hover{background:var(--s-error-bg);color:var(--s-error);border:none}
+
+    /* ===== SCREEN: PROJECTS ===== */
+    .screen-header{margin-bottom:1.25rem}
+    .screen-header h2{font-size:1.4rem;margin-bottom:.2rem}
+    .screen-header p{color:var(--text-muted);font-size:.875rem}
+    .toolbar{display:flex;flex-wrap:wrap;gap:.65rem;align-items:center;margin-bottom:1rem}
+    .toolbar input{max-width:260px}
+    .filter-pills{display:flex;gap:.4rem;flex-wrap:wrap}
+    .filter-pill{padding:.3rem .75rem;border-radius:999px;font-size:.8rem;font-weight:600;border:1px solid var(--border);background:transparent;color:var(--text-muted)}
+    .filter-pill.active{background:var(--s-info-bg);border-color:rgba(31,111,235,.3);color:var(--accent-light)}
+    .project-list{display:grid;gap:.45rem}
+    .project-row{display:grid;grid-template-columns:36px 1fr auto;align-items:center;gap:.85rem;padding:.7rem 1rem;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface);cursor:pointer;transition:border-color 140ms,background 140ms}
+    .project-row:hover{border-color:rgba(31,111,235,.4);background:var(--surface-2)}
+    .project-row.project-row--active{border-color:var(--accent-light);background:rgba(31,111,235,.08)}
+    .type-icon{width:36px;height:36px;border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;font-size:1rem;flex-shrink:0}
+    .type-icon--review{background:rgba(31,111,235,.15);color:var(--accent-light)}
+    .type-icon--series{background:rgba(210,153,34,.15);color:#d29922}
+    .type-icon--channel{background:rgba(63,185,80,.15);color:#3fb950}
+    .project-info strong{display:block;font-size:.9rem}
+    .project-info small{color:var(--text-muted);font-size:.78rem;font-family:"IBM Plex Mono",monospace}
+    .project-meta{display:flex;align-items:center;gap:.5rem}
+
+    /* ===== SCREEN: REVIEW PROJECT ===== */
+    .workspace-grid{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:1rem;align-items:start}
+    @media(max-width:860px){.workspace-grid{grid-template-columns:1fr}}
+    .workspace-main{}
+    .phase-bar{display:flex;gap:.4rem;list-style:none;margin-bottom:1rem;flex-wrap:wrap}
+    .phase-btn{min-height:44px;padding:.45rem .85rem;border-left:3px solid transparent;border-radius:0 var(--radius-sm) var(--radius-sm) 0;background:var(--surface);color:var(--text-muted);font-size:.875rem;font-weight:600;text-align:left;min-width:120px;transition:border-color 140ms,background 140ms,color 140ms}
+    .phase-btn:hover{color:var(--text);background:var(--surface-2)}
+    .phase-btn.selected{color:var(--accent-light);background:rgba(31,111,235,.12);border-left-color:var(--accent-light)}
+    .phase-btn[data-state="done"]{border-left-color:var(--s-done)}
+    .phase-btn[data-state="in-progress"]{border-left-color:var(--s-info)}
+    .phase-btn[data-state="blocked"]{border-left-color:var(--s-error)}
+
+    /* Workflow board */
+    .workflow-board{border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface-3);padding:1rem;margin-bottom:1rem}
+    .workflow-board-header{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;margin-bottom:.85rem}
+    .workflow-board-header h3{margin-bottom:.15rem;font-size:1rem}
+    .workflow-board-header p{color:var(--text-muted);font-size:.825rem}
+    .workflow-steps{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:.5rem;list-style:none}
+    .step-card{display:grid;gap:.35rem;padding:.7rem .85rem;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface);cursor:pointer;transition:border-color 140ms,background 140ms;min-height:90px;align-content:start;border-left-width:3px}
+    .step-card:hover{background:var(--surface-2)}
+    .step-card.selected{border-color:var(--accent-light)!important;background:rgba(31,111,235,.1)}
+    .step-card[data-state="done"]{border-left-color:var(--s-done)}
+    .step-card[data-state="ready"]{border-left-color:var(--s-info);animation:glow-ready 2s ease-in-out infinite}
+    @keyframes glow-ready{0%,100%{box-shadow:none}50%{box-shadow:0 0 0 2px rgba(31,111,235,.2)}}
+    .step-card[data-state="running"]{border-left-color:var(--s-info)}
+    .step-card[data-state="failed"]{border-left-color:var(--s-error);background:rgba(248,81,73,.04)}
+    .step-card[data-state="blocked"]{border-left-color:var(--s-neutral);opacity:.7}
+    .step-card-label{font-weight:600;font-size:.875rem;line-height:1.3}
+    .step-card-sub{font-size:.75rem;color:var(--text-muted);line-height:1.4}
+    .step-card-error{font-size:.72rem;color:var(--s-error);margin-top:.2rem;line-height:1.3}
+
+    /* Stage rail */
+    .stage-rail{display:flex;flex-wrap:wrap;gap:.5rem;list-style:none;margin-bottom:1rem}
+    .stage-phase-group{display:grid;gap:.35rem;padding:.5rem .6rem;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface-3)}
+    .stage-phase-label{font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim)}
+    .stage-buttons{display:flex;flex-wrap:wrap;gap:.35rem}
+    .stage-btn{min-height:36px;padding:.3rem .65rem;font-size:.82rem;position:relative}
+    .stage-btn.active{background:rgba(31,111,235,.16);border-color:var(--accent-light);color:var(--accent-light)}
+    .stage-btn[data-st="done"]:after{content:'';position:absolute;top:4px;right:4px;width:6px;height:6px;border-radius:50%;background:var(--s-done)}
+    .stage-btn[data-st="failed"]:after{content:'';position:absolute;top:4px;right:4px;width:6px;height:6px;border-radius:50%;background:var(--s-error)}
+    .stage-btn[data-st="running"]:after{content:'';position:absolute;top:4px;right:4px;width:6px;height:6px;border-radius:50%;background:var(--s-info);animation:pulse 1.4s ease-in-out infinite}
+
+    /* Stage content panel */
+    .panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow);padding:1.1rem}
+    .panel-title{font-size:1.1rem;margin-bottom:.85rem;padding-bottom:.6rem;border-bottom:1px solid var(--border)}
+
+    /* === INLINE ERROR STATE (NEW) === */
+    .inline-error{display:grid;gap:.75rem;padding:1rem;border:1px solid rgba(248,81,73,.25);border-left:4px solid var(--s-error);border-radius:var(--radius-md);background:rgba(248,81,73,.06);margin-bottom:1rem}
+    .inline-error-header{display:flex;align-items:center;gap:.5rem}
+    .inline-error-icon{width:20px;height:20px;border-radius:50%;background:rgba(248,81,73,.15);color:var(--s-error);display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0}
+    .inline-error-title{font-weight:700;color:var(--s-error);font-size:.875rem}
+    .inline-error-msg{font-size:.825rem;color:var(--text-muted);font-family:"IBM Plex Mono",monospace;background:rgba(0,0,0,.25);border-radius:4px;padding:.5rem .65rem;line-height:1.5}
+    .inline-error-actions{display:flex;gap:.5rem}
+
+    /* Gate notice */
+    .gate{display:grid;gap:.3rem;padding:.75rem 1rem;border:1px solid var(--border);border-left:4px solid transparent;border-radius:var(--radius-md);background:var(--surface-3);font-size:.85rem;line-height:1.5;margin-bottom:.75rem}
+    .gate p{margin:0}
+    .gate-label{font-weight:700;text-transform:uppercase;font-size:.7rem;letter-spacing:.04em}
+    .gate-info{border-left-color:var(--accent-light)}.gate-info .gate-label{color:var(--accent-light)}
+    .gate-warn{border-left-color:var(--s-warn)}.gate-warn .gate-label{color:var(--s-warn)}
+    .gate-error{border-left-color:var(--s-error)}.gate-error .gate-label{color:var(--s-error)}
+
+    /* Summary grid */
+    .summary-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:.6rem;margin-bottom:1rem}
+    .summary-cell{padding:.65rem .85rem;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface-3)}
+    .summary-cell-label{font-size:.72rem;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;margin-bottom:.2rem}
+    .summary-cell-value{font-size:1rem;font-weight:700}
+
+    /* Preview pane */
+    .preview-pane{padding:1rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow)}
+    .preview-pane h3{font-size:.875rem;margin-bottom:.75rem;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+    .preview-thumb{width:100%;aspect-ratio:16/9;border-radius:var(--radius-md);background:var(--surface-3);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;color:var(--text-dim);font-size:.8rem;margin-bottom:.75rem}
+    .preview-meta{display:grid;gap:.4rem}
+    .preview-meta-row{display:flex;justify-content:space-between;font-size:.8rem}
+    .preview-meta-row span:first-child{color:var(--text-muted)}
+    .preview-meta-row span:last-child{font-weight:600;font-family:"IBM Plex Mono",monospace}
+
+    /* ===== SCREEN: STORY FACTORY ===== */
+    .channel-header{display:flex;align-items:center;gap:1rem;margin-bottom:1.25rem;padding-bottom:1rem;border-bottom:1px solid var(--border)}
+    .channel-avatar{width:48px;height:48px;border-radius:var(--radius-md);background:linear-gradient(135deg,#1f6feb 0%,#3fb950 100%);display:flex;align-items:center;justify-content:center;font-size:1.4rem;flex-shrink:0}
+    .channel-title-block strong{font-size:1.15rem;display:block}
+    .channel-title-block small{color:var(--text-muted);font-size:.825rem}
+    .channel-stats{margin-left:auto;display:flex;gap:1rem}
+    .stat{text-align:center}
+    .stat-value{font-size:1.25rem;font-weight:700;display:block;line-height:1}
+    .stat-label{font-size:.72rem;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+    .story-list{display:grid;gap:.45rem}
+    .story-row{display:grid;grid-template-columns:1fr auto auto;align-items:center;gap:.85rem;padding:.65rem 1rem;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface);cursor:pointer;transition:border-color 140ms,background 140ms}
+    .story-row:hover{background:var(--surface-2);border-color:rgba(255,255,255,.14)}
+    .story-row-title{font-weight:600;font-size:.875rem;margin-bottom:.1rem}
+    .story-row-meta{font-size:.75rem;color:var(--text-muted)}
+    .stage-tracker{display:flex;gap:2px;align-items:center}
+    .stage-dot{width:8px;height:8px;border-radius:2px;background:var(--s-neutral-bg)}
+    .stage-dot.done{background:var(--s-done)}
+    .stage-dot.running{background:var(--s-info);animation:pulse 1.4s ease-in-out infinite}
+    .stage-dot.failed{background:var(--s-error)}
+
+    /* ===== SCREEN: SOURCES ===== */
+    .sources-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:1rem}
+    @media(max-width:780px){.sources-grid{grid-template-columns:1fr}}
+    .sources-panel h3{font-size:.95rem;margin-bottom:.75rem;padding-bottom:.5rem;border-bottom:1px solid var(--border)}
+    .candidate-list{display:grid;gap:.4rem}
+    .candidate-row{display:grid;grid-template-columns:48px 1fr auto;align-items:center;gap:.65rem;padding:.55rem .75rem;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface);font-size:.825rem}
+    .candidate-thumb{width:48px;height:32px;border-radius:4px;background:var(--surface-3);overflow:hidden;flex-shrink:0}
+    .candidate-thumb img{width:100%;height:100%;object-fit:cover}
+    .candidate-title{font-weight:600;line-height:1.3;margin-bottom:.15rem}
+    .candidate-meta{color:var(--text-muted);font-size:.75rem}
+    .rights-badge{font-size:.7rem;padding:.15rem .4rem;border-radius:4px}
+    .rights-unknown{background:var(--s-warn-bg);color:var(--s-warn)}
+    .rights-own{background:var(--s-done-bg);color:var(--s-done)}
+    .search-input-row{display:flex;gap:.5rem;margin-bottom:.75rem}
+    .search-input-row input{flex:1}
+
+    /* ===== SCREEN: JOBS ===== */
+    .job-list{display:grid;gap:.45rem}
+    .job-row-card{display:grid;grid-template-columns:100px 1fr minmax(120px,200px) auto;align-items:center;gap:1rem;padding:.75rem 1rem;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface);box-shadow:var(--shadow)}
+    @media(max-width:700px){.job-row-card{grid-template-columns:auto 1fr;row-gap:.4rem}}
+    .job-meta strong{display:block;font-size:.875rem;margin-bottom:.1rem}
+    .job-meta small{color:var(--text-muted);font-size:.75rem;font-family:"IBM Plex Mono",monospace}
+    .job-progress-col{display:grid;gap:.3rem}
+    .job-progress-col small{color:var(--text-muted);font-size:.75rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .progress-track{height:5px;border-radius:999px;background:rgba(255,255,255,.08)}
+    .progress-fill{height:5px;border-radius:999px;transition:width 400ms ease}
+    .progress-fill.running{background:var(--accent-light)}
+    .progress-fill.succeeded{background:var(--s-done)}
+    .progress-fill.failed{background:var(--s-error)}
+    .job-actions{display:flex;gap:.4rem;flex-wrap:wrap}
+
+    /* ===== DIVIDERS / MISC ===== */
+    .section-title{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);margin-bottom:.5rem}
+    .stack{display:grid;gap:.5rem}
+    .row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+    .spacer{flex:1}
+    hr.sep{border:none;border-top:1px solid var(--border);margin:.75rem 0}
+    .empty-state{text-align:center;padding:2.5rem 1rem;color:var(--text-muted);font-size:.875rem}
+    .form-grid{display:grid;gap:.65rem}
+
+    /* Screen visibility */
+    .screen{display:none}.screen.active{display:block}
+
+    /* ===== PROTOTYPE LABEL ===== */
+    .proto-banner{background:rgba(210,153,34,.1);border-bottom:1px solid rgba(210,153,34,.2);padding:.4rem 1.25rem;font-size:.75rem;color:#d29922;font-weight:600;display:flex;align-items:center;gap:.5rem;letter-spacing:.01em}
+  </style>
+</head>
+<body>
+
+<!-- PROTOTYPE BANNER -->
+<div class="proto-banner">
+  ⚡ PROTOTYPE UI v2 — Click các tab bên dưới để chuyển màn hình. Toast/Status bar là tính năng MỚI.
+</div>
+
+<!-- TOP NAV -->
+<header class="topnav">
+  <div class="topnav-brand">
+    <div class="topnav-logo">YT</div>
+    <div>
+      <h1>YT Review Studio</h1>
+      <p>Local production pipeline</p>
+    </div>
+  </div>
+  <nav class="topnav-links" aria-label="Main">
+    <a href="#" class="active" onclick="showScreen('projects');return false">Projects</a>
+    <a href="#" onclick="showScreen('jobs');return false">Jobs</a>
+    <a href="#" onclick="showScreen('sources');return false">Sources</a>
+    <a href="#" onclick="showScreen('config');return false">Config</a>
+    <a href="#" onclick="showScreen('youtube');return false">YouTube</a>
+  </nav>
+  <!-- REMOVED: single status line from header -->
+</header>
+
+<!-- BREADCRUMB -->
+<nav class="breadcrumb" id="breadcrumb" aria-label="Breadcrumb">
+  <span>Projects</span>
+</nav>
+
+<!-- MAIN VIEW -->
+<main class="view">
+
+  <!-- ═══════════════════════════════════════════════════ -->
+  <!-- SCREEN 1: PROJECTS                                  -->
+  <!-- ═══════════════════════════════════════════════════ -->
+  <section class="screen active" id="screen-projects">
+    <div class="screen-header">
+      <h2>Projects</h2>
+      <p>Review projects, series, và story channels.</p>
+    </div>
+    <div class="toolbar">
+      <input type="search" placeholder="Tìm tên project..." style="max-width:240px" />
+      <div class="filter-pills">
+        <button class="filter-pill active">All</button>
+        <button class="filter-pill">Review</button>
+        <button class="filter-pill">Series</button>
+        <button class="filter-pill">Channel</button>
+      </div>
+      <span class="spacer"></span>
+      <button class="btn-primary" onclick="toast('info','Project đang tạo...','Khởi tạo folder và brief.json cho project mới.')">+ New project</button>
+    </div>
+    <div class="project-list">
+      <div class="project-row" onclick="showScreen('review-overview')">
+        <div class="type-icon type-icon--review">📋</div>
+        <div class="project-info">
+          <strong>Su-150-2 — Tales of Herding Gods Ep 52</strong>
+          <small>su-150-2 · Review</small>
+        </div>
+        <div class="project-meta">
+          <span class="pill pill-warn"><span class="dot"></span>Needs approval</span>
+        </div>
+      </div>
+      <div class="project-row" onclick="toast('info','Đang mở...','Navigating to su-148-final.')">
+        <div class="type-icon type-icon--review">📋</div>
+        <div class="project-info">
+          <strong>Su-148-final — Character Power Scale</strong>
+          <small>su-148-final · Review</small>
+        </div>
+        <div class="project-meta">
+          <span class="pill pill-done"><span class="dot"></span>Done</span>
+        </div>
+      </div>
+      <div class="project-row" onclick="showScreen('channel-overview')">
+        <div class="type-icon type-icon--channel">📚</div>
+        <div class="project-info">
+          <strong>Tales of Herding Gods — ES Horror</strong>
+          <small>es-horror · Story channel</small>
+        </div>
+        <div class="project-meta">
+          <span class="pill pill-info"><span class="dot dot-pulse"></span>In progress</span>
+        </div>
+      </div>
+      <div class="project-row" onclick="toast('info','Đang mở series...','')">
+        <div class="type-icon type-icon--series">🎬</div>
+        <div class="project-info">
+          <strong>Donghua Rankings S2</strong>
+          <small>donghua-s2 · Series · review</small>
+        </div>
+        <div class="project-meta">
+          <span class="pill pill-neutral">3 episodes</span>
+        </div>
+      </div>
+      <div class="project-row" onclick="toast('error','Lỗi load project','Project folder bị thiếu brief.json. Kiểm tra lại thư mục projects/su-141.', true)">
+        <div class="type-icon type-icon--review">📋</div>
+        <div class="project-info">
+          <strong>su-141</strong>
+          <small>su-141 · Review · ⚠ missing brief</small>
+        </div>
+        <div class="project-meta">
+          <span class="pill pill-error"><span class="dot"></span>Error</span>
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid var(--border)">
+      <div class="section-title">Tạo project mới</div>
+      <div class="form-grid" style="max-width:480px">
+        <div><label>Project ID</label><input placeholder="su-151" /></div>
+        <div><label>Topic</label><input placeholder="Tales of Herding Gods Ep 53 Review" /></div>
+        <div><label>Show</label><input placeholder="Tales of Herding Gods" /></div>
+        <button class="btn-primary" style="justify-self:start" onclick="toast('success','Project đã tạo','su-151 — Tales of Herding Gods Ep 53 đã sẵn sàng.')">Tạo project</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════ -->
+  <!-- SCREEN 2: REVIEW PROJECT — OVERVIEW                 -->
+  <!-- ═══════════════════════════════════════════════════ -->
+  <section class="screen" id="screen-review-overview">
+    <div class="workspace-grid">
+      <div class="workspace-main">
+        <ol class="phase-bar">
+          <li><button class="phase-btn selected" data-state="in-progress">Overview</button></li>
+          <li><button class="phase-btn" data-state="done" onclick="showScreen('review-stage')">Script</button></li>
+          <li><button class="phase-btn" data-state="done">Voice &amp; Render</button></li>
+          <li><button class="phase-btn" data-state="">Publish</button></li>
+        </ol>
+
+        <!-- Workflow board -->
+        <div class="workflow-board">
+          <div class="workflow-board-header">
+            <div>
+              <h3>Workflow</h3>
+              <p>Anime review · 2 steps in progress</p>
+            </div>
+            <button class="btn-primary" onclick="startJobBar()">▶ Run available tasks</button>
+          </div>
+          <ol class="workflow-steps">
+            <li class="step-card" data-state="done">
+              <span class="pill pill-done">Done</span>
+              <div class="step-card-label">Brief</div>
+              <div class="step-card-sub">Topic, audience, and language</div>
+            </li>
+            <li class="step-card" data-state="done">
+              <span class="pill pill-done">Done</span>
+              <div class="step-card-label">Script</div>
+              <div class="step-card-sub">Outline, sections, and hook</div>
+            </li>
+            <li class="step-card selected" data-state="running" onclick="showScreen('review-stage')">
+              <span class="pill pill-info"><span class="dot dot-pulse"></span> Running</span>
+              <div class="step-card-label">Voice</div>
+              <div class="step-card-sub">TTS narration · 68%</div>
+            </li>
+            <li class="step-card" data-state="failed" onclick="showScreen('review-stage-error')">
+              <span class="pill pill-error">Failed</span>
+              <div class="step-card-label">Render</div>
+              <div class="step-card-sub">9:16 Shorts draft</div>
+              <div class="step-card-error">FFmpeg error: missing background asset</div>
+            </li>
+            <li class="step-card" data-state="blocked">
+              <span class="pill pill-neutral">Blocked</span>
+              <div class="step-card-label">ASR / Captions</div>
+              <div class="step-card-sub">Waiting for render</div>
+            </li>
+            <li class="step-card" data-state="blocked">
+              <span class="pill pill-neutral">Blocked</span>
+              <div class="step-card-label">YouTube Upload</div>
+              <div class="step-card-sub">Waiting for captions</div>
+            </li>
+          </ol>
+        </div>
+
+        <!-- Summary -->
+        <div class="summary-grid">
+          <div class="summary-cell"><div class="summary-cell-label">Project</div><div class="summary-cell-value">su-150-2</div></div>
+          <div class="summary-cell"><div class="summary-cell-label">Format</div><div class="summary-cell-value">Shorts 9:16</div></div>
+          <div class="summary-cell"><div class="summary-cell-label">Language</div><div class="summary-cell-value">EN</div></div>
+          <div class="summary-cell"><div class="summary-cell-label">Duration est.</div><div class="summary-cell-value">2m 34s</div></div>
+        </div>
+      </div>
+
+      <!-- Preview pane -->
+      <aside>
+        <div class="preview-pane">
+          <h3>Preview</h3>
+          <div class="preview-thumb">No render yet</div>
+          <div class="preview-meta">
+            <div class="preview-meta-row"><span>Script</span><span>✓ approved</span></div>
+            <div class="preview-meta-row"><span>Voice</span><span>68%</span></div>
+            <div class="preview-meta-row"><span>Render</span><span>⚠ failed</span></div>
+            <div class="preview-meta-row"><span>ASR</span><span>pending</span></div>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════ -->
+  <!-- SCREEN 3: REVIEW PROJECT — STAGE (SCRIPT)          -->
+  <!-- ═══════════════════════════════════════════════════ -->
+  <section class="screen" id="screen-review-stage">
+    <div class="workspace-grid">
+      <div class="workspace-main">
+        <ol class="phase-bar">
+          <li><button class="phase-btn" onclick="showScreen('review-overview')">Overview</button></li>
+          <li><button class="phase-btn selected" data-state="done">Script</button></li>
+          <li><button class="phase-btn" data-state="done">Voice &amp; Render</button></li>
+          <li><button class="phase-btn">Publish</button></li>
+        </ol>
+
+        <ol class="stage-rail">
+          <li class="stage-phase-group">
+            <div class="stage-phase-label">Writing</div>
+            <div class="stage-buttons">
+              <button class="stage-btn" data-st="done">Brief</button>
+              <button class="stage-btn" data-st="done">Outline</button>
+              <button class="stage-btn active" data-st="done">Script</button>
+              <button class="stage-btn" data-st="done">Copyright</button>
+            </div>
+          </li>
+          <li class="stage-phase-group">
+            <div class="stage-phase-label">Production</div>
+            <div class="stage-buttons">
+              <button class="stage-btn" data-st="running">Voice</button>
+              <button class="stage-btn" data-st="failed" onclick="showScreen('review-stage-error')">Render</button>
+              <button class="stage-btn">ASR</button>
+              <button class="stage-btn">Captions</button>
+            </div>
+          </li>
+        </ol>
+
+        <div class="panel">
+          <h2 class="panel-title">Script</h2>
+          <div class="gate gate-info">
+            <div class="gate-label">Script approved</div>
+            <p>Script được duyệt bởi bạn lúc 18:42. Có thể tiếp tục sang Voice stage.</p>
+          </div>
+          <div class="stack" style="gap:.75rem">
+            <div><label>Title</label><input value="Tales of Herding Gods Ep 52 — The Hidden Realm Explained" /></div>
+            <div><label>Script</label><textarea rows="6">Hook: In episode 52, Qin Mu finally reveals the truth about the Hidden Realm...
+
+Main points:
+1. The Celestial River formation and its secret purpose
+2. Why the Jade Face Lady chose this moment to act
+3. What this means for the final arc...</textarea></div>
+          </div>
+          <hr class="sep" />
+          <div class="row">
+            <button onclick="toast('success','Script đã lưu','Thay đổi đã được ghi vào brief.json.')">💾 Lưu script</button>
+            <button onclick="toast('warn','Cần xác nhận','Regenerate script sẽ mất phiên bản hiện tại.')">↺ Regenerate</button>
+            <span class="spacer"></span>
+            <button class="btn-primary" onclick="toast('info','Chuyển sang Voice...','Stage voice đang được chuẩn bị.')">→ Tiếp tục Voice</button>
+          </div>
+        </div>
+      </div>
+      <aside>
+        <div class="preview-pane">
+          <h3>Preview</h3>
+          <div class="preview-thumb" style="font-size:2rem">📄</div>
+          <div class="preview-meta">
+            <div class="preview-meta-row"><span>Words</span><span>847</span></div>
+            <div class="preview-meta-row"><span>Est. duration</span><span>2m 34s</span></div>
+            <div class="preview-meta-row"><span>Language</span><span>EN</span></div>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════ -->
+  <!-- SCREEN 4: REVIEW PROJECT — STAGE WITH ERROR (NEW)  -->
+  <!-- ═══════════════════════════════════════════════════ -->
+  <section class="screen" id="screen-review-stage-error">
+    <div class="workspace-grid">
+      <div class="workspace-main">
+        <ol class="phase-bar">
+          <li><button class="phase-btn" onclick="showScreen('review-overview')">Overview</button></li>
+          <li><button class="phase-btn" data-state="done">Script</button></li>
+          <li><button class="phase-btn selected" data-state="in-progress">Voice &amp; Render</button></li>
+          <li><button class="phase-btn">Publish</button></li>
+        </ol>
+
+        <ol class="stage-rail">
+          <li class="stage-phase-group">
+            <div class="stage-phase-label">Writing</div>
+            <div class="stage-buttons">
+              <button class="stage-btn" data-st="done">Brief</button>
+              <button class="stage-btn" data-st="done">Script</button>
+              <button class="stage-btn" data-st="done">Copyright</button>
+            </div>
+          </li>
+          <li class="stage-phase-group">
+            <div class="stage-phase-label">Production</div>
+            <div class="stage-buttons">
+              <button class="stage-btn" data-st="done">Voice</button>
+              <button class="stage-btn active" data-st="failed">Render</button>
+              <button class="stage-btn">ASR</button>
+              <button class="stage-btn">Captions</button>
+            </div>
+          </li>
+        </ol>
+
+        <div class="panel">
+          <h2 class="panel-title">Render</h2>
+
+          <!-- ★ NEW: Inline error feedback (replaces status line) -->
+          <div class="inline-error">
+            <div class="inline-error-header">
+              <div class="inline-error-icon">✕</div>
+              <div class="inline-error-title">Render thất bại — FFmpeg error</div>
+            </div>
+            <div class="inline-error-msg">Error: No such file or directory
+  Input: projects/su-150-2/workspace/bg-loop.mp4
+  Stage: final-render
+  Exit code: 1</div>
+            <div class="inline-error-actions">
+              <button class="btn-danger" onclick="startJobBar();toast('info','Đang retry render...','Job mới đã được tạo và đang chạy.')">↺ Retry render</button>
+              <button onclick="showScreen('sources')">📁 Chọn background video</button>
+              <button class="btn-ghost" onclick="toast('info','Log đã copy','Full error log đã được copy vào clipboard.')">📋 Copy log</button>
+            </div>
+          </div>
+
+          <!-- Config section remains -->
+          <div class="section-title">Render settings</div>
+          <div class="form-grid">
+            <div><label>Format</label>
+              <select><option>Shorts (9:16, 1080×1920)</option><option>Long-form (16:9, 1920×1080)</option></select>
+            </div>
+            <div><label>Background video</label>
+              <div class="row">
+                <input value="bg-loop.mp4" style="flex:1;border-color:rgba(248,81,73,.4);background:rgba(248,81,73,.05)" />
+                <button onclick="showScreen('sources')">Browse</button>
+              </div>
+              <small style="color:var(--s-error);font-size:.78rem;margin-top:.25rem;display:block">⚠ File không tìm thấy — hãy chọn lại</small>
+            </div>
+            <div><label>Voice track</label><input value="voice-final.mp3" /></div>
+          </div>
+        </div>
+      </div>
+      <aside>
+        <div class="preview-pane">
+          <h3>Preview</h3>
+          <div class="preview-thumb" style="border-color:rgba(248,81,73,.3);background:rgba(248,81,73,.05)">
+            <span style="color:var(--s-error)">⚠ Render failed</span>
+          </div>
+          <div class="preview-meta">
+            <div class="preview-meta-row"><span>Voice</span><span style="color:var(--s-done)">✓ done</span></div>
+            <div class="preview-meta-row"><span>Render</span><span style="color:var(--s-error)">✗ failed</span></div>
+            <div class="preview-meta-row"><span>Last run</span><span>19:32</span></div>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════ -->
+  <!-- SCREEN 5: STORY FACTORY — CHANNEL                  -->
+  <!-- ═══════════════════════════════════════════════════ -->
+  <section class="screen" id="screen-channel-overview">
+    <div class="channel-header">
+      <div class="channel-avatar">🎭</div>
+      <div class="channel-title-block">
+        <strong>Tales of Herding Gods — ES Horror</strong>
+        <small>es-horror · Story channel · ES-US voice · Paid model</small>
+      </div>
+      <div class="channel-stats">
+        <div class="stat"><span class="stat-value">12</span><span class="stat-label">Stories</span></div>
+        <div class="stat"><span class="stat-value">3</span><span class="stat-label">In progress</span></div>
+        <div class="stat"><span class="stat-value">$1.24</span><span class="stat-label">Cost today</span></div>
+      </div>
+    </div>
+
+    <ol class="phase-bar">
+      <li><button class="phase-btn selected">Overview</button></li>
+      <li><button class="phase-btn" data-state="in-progress">Content</button></li>
+      <li><button class="phase-btn" data-state="in-progress">Edit</button></li>
+      <li><button class="phase-btn">Publish</button></li>
+    </ol>
+
+    <div class="panel" style="margin-bottom:1rem">
+      <div class="row" style="margin-bottom:.75rem">
+        <h3 style="font-size:1rem;margin:0">Stories in production</h3>
+        <span class="spacer"></span>
+        <button class="btn-primary" onclick="toast('info','Đang tạo story mới...','Khởi tạo La habitación 312')">+ New story</button>
+      </div>
+      <div class="story-list">
+        <div class="story-row">
+          <div>
+            <div class="story-row-title">La habitación 307 — The Hidden Door</div>
+            <div class="story-row-meta">story-001 · 5 min · $0.42</div>
+          </div>
+          <div class="stage-tracker">
+            <div class="stage-dot done" title="idea"></div>
+            <div class="stage-dot done" title="hook"></div>
+            <div class="stage-dot done" title="outline"></div>
+            <div class="stage-dot done" title="bible"></div>
+            <div class="stage-dot done" title="sections"></div>
+            <div class="stage-dot done" title="tts"></div>
+            <div class="stage-dot running" title="render"></div>
+            <div class="stage-dot" title="thumbnail"></div>
+            <div class="stage-dot" title="metadata"></div>
+          </div>
+          <span class="pill pill-info"><span class="dot dot-pulse"></span> Rendering</span>
+        </div>
+        <div class="story-row">
+          <div>
+            <div class="story-row-title">La sombra en el pasillo</div>
+            <div class="story-row-meta">story-002 · 4 min · $0.38</div>
+          </div>
+          <div class="stage-tracker">
+            <div class="stage-dot done"></div>
+            <div class="stage-dot done"></div>
+            <div class="stage-dot done"></div>
+            <div class="stage-dot done"></div>
+            <div class="stage-dot done"></div>
+            <div class="stage-dot failed"></div>
+            <div class="stage-dot"></div>
+            <div class="stage-dot"></div>
+            <div class="stage-dot"></div>
+          </div>
+          <span class="pill pill-error"><span class="dot"></span> TTS failed</span>
+        </div>
+        <div class="story-row">
+          <div>
+            <div class="story-row-title">El último susurro</div>
+            <div class="story-row-meta">story-003 · 5 min · $0.51</div>
+          </div>
+          <div class="stage-tracker">
+            <div class="stage-dot done"></div>
+            <div class="stage-dot done"></div>
+            <div class="stage-dot done"></div>
+            <div class="stage-dot done"></div>
+            <div class="stage-dot done"></div>
+            <div class="stage-dot done"></div>
+            <div class="stage-dot done"></div>
+            <div class="stage-dot done"></div>
+            <div class="stage-dot done"></div>
+          </div>
+          <span class="pill pill-warn"><span class="dot"></span> Needs approval</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Error card example for story-002 -->
+    <div class="inline-error">
+      <div class="inline-error-header">
+        <div class="inline-error-icon">✕</div>
+        <div class="inline-error-title">La sombra en el pasillo — TTS failed</div>
+      </div>
+      <div class="inline-error-msg">provider=google tier=economy
+Error: quota exceeded (daily limit reached for es-US-Standard-A)
+Story: story-002 · Stage: tts</div>
+      <div class="inline-error-actions">
+        <button class="btn-danger" onclick="toast('info','Scheduled retry...','TTS sẽ tự retry lúc 00:00 khi quota reset.')">↺ Retry lúc quota reset</button>
+        <button onclick="toast('info','Switching voice...','Đang chuyển sang es-US-Wavenet-B.')">🎤 Đổi voice tier</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════ -->
+  <!-- SCREEN 6: SOURCES                                   -->
+  <!-- ═══════════════════════════════════════════════════ -->
+  <section class="screen" id="screen-sources">
+    <div class="screen-header">
+      <h2>Sources</h2>
+      <p>Tìm và quản lý video assets. Tất cả downloads yêu cầu khai báo quyền trước.</p>
+    </div>
+    <div class="sources-grid">
+      <!-- Left: Search -->
+      <div>
+        <div class="sources-panel">
+          <h3>Tìm kiếm video</h3>
+          <div class="form-grid" style="margin-bottom:.75rem">
+            <div>
+              <label>Platform</label>
+              <select>
+                <option>YouTube</option>
+                <option>Bilibili</option>
+                <option>TikTok</option>
+                <option selected>BestSeedancePrompts (Seedance)</option>
+                <option>Facebook</option>
+              </select>
+            </div>
+            <div class="search-input-row">
+              <input placeholder="night market, aerial city, rain..." />
+              <button class="btn-primary" onclick="toast('info','Đang search Seedance...','Tìm video assets cho: night market')">Search</button>
+            </div>
+          </div>
+          <div class="candidate-list">
+            <div class="section-title">Kết quả (3)</div>
+            <div class="candidate-row">
+              <div class="candidate-thumb" style="background:linear-gradient(135deg,#0d3b6e,#1a6fad)"></div>
+              <div>
+                <div class="candidate-title">Rainy Night Market Timelapse</div>
+                <div class="candidate-meta">Seedance · 00:15 · 1080p</div>
+              </div>
+              <div class="stack" style="gap:.35rem;align-items:end">
+                <span class="rights-badge rights-unknown">⚠ Unknown</span>
+                <button style="font-size:.75rem;padding:.2rem .5rem" onclick="toast('warn','Khai báo quyền trước','Bạn cần khai báo quyền sử dụng trước khi download.')">+ Track</button>
+              </div>
+            </div>
+            <div class="candidate-row">
+              <div class="candidate-thumb" style="background:linear-gradient(135deg,#2d1b00,#8b4513)"></div>
+              <div>
+                <div class="candidate-title">Street Food Market Bokeh</div>
+                <div class="candidate-meta">Seedance · 00:12 · 4K</div>
+              </div>
+              <div class="stack" style="gap:.35rem;align-items:end">
+                <span class="rights-badge rights-unknown">⚠ Unknown</span>
+                <button style="font-size:.75rem;padding:.2rem .5rem" onclick="toast('warn','Khai báo quyền trước','Bạn cần khai báo quyền sử dụng trước khi download.')">+ Track</button>
+              </div>
+            </div>
+            <div class="candidate-row">
+              <div class="candidate-thumb" style="background:linear-gradient(135deg,#0a1628,#1a3a6b)"></div>
+              <div>
+                <div class="candidate-title">Night City Loop — Neon Reflection</div>
+                <div class="candidate-meta">Seedance · 00:30 · 1080p</div>
+              </div>
+              <div class="stack" style="gap:.35rem;align-items:end">
+                <span class="rights-badge rights-own" style="background:var(--s-done-bg);color:var(--s-done)">✓ Licensed</span>
+                <button class="btn-primary" style="font-size:.75rem;padding:.2rem .5rem" onclick="startJobBar('Downloading video...',45)">↓ Download</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Tracked candidates -->
+      <div>
+        <div class="sources-panel">
+          <h3>Tracked sources (4)</h3>
+          <div class="form-grid" style="margin-bottom:.75rem">
+            <div class="search-input-row">
+              <input placeholder="Add by URL..." />
+              <button onclick="toast('info','Đang track...','Fetching metadata từ URL.')">Add URL</button>
+            </div>
+          </div>
+          <div class="candidate-list">
+            <div class="candidate-row">
+              <div class="candidate-thumb" style="background:linear-gradient(135deg,#1a0533,#5b21b6)"></div>
+              <div>
+                <div class="candidate-title">Night City Loop — Neon Reflection</div>
+                <div class="candidate-meta">sources/abc123/video.mp4 · 45.2 MB</div>
+              </div>
+              <span class="rights-badge rights-own">✓ Licensed</span>
+            </div>
+            <div class="candidate-row">
+              <div class="candidate-thumb" style="background:linear-gradient(135deg,#0c2340,#1565c0)"></div>
+              <div>
+                <div class="candidate-title">Tales of Herding Gods OST BG</div>
+                <div class="candidate-meta">sources/def456/video.mp4 · 12.1 MB</div>
+              </div>
+              <span class="rights-badge rights-unknown">⚠ Unknown</span>
+            </div>
+            <div class="candidate-row" style="border-color:rgba(248,81,73,.25);background:rgba(248,81,73,.04)">
+              <div class="candidate-thumb" style="background:var(--s-error-bg)"></div>
+              <div>
+                <div class="candidate-title">Rain Loop HQ</div>
+                <div class="candidate-meta" style="color:var(--s-error)">Download failed · 404 Not Found</div>
+              </div>
+              <button style="font-size:.75rem;padding:.2rem .5rem" onclick="toast('error','Download thất bại','404: Video đã bị xóa khỏi nguồn gốc.', true)">↺ Retry</button>
+            </div>
+            <div class="candidate-row">
+              <div class="candidate-thumb" style="background:linear-gradient(135deg,#0d3b0d,#1b5e20)"></div>
+              <div>
+                <div class="candidate-title">Forest Ambient Loop</div>
+                <div class="candidate-meta">sources/ghi789/video.mp4 · 8.7 MB</div>
+              </div>
+              <span class="rights-badge rights-own">✓ Own footage</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════ -->
+  <!-- SCREEN 7: JOBS                                      -->
+  <!-- ═══════════════════════════════════════════════════ -->
+  <section class="screen" id="screen-jobs">
+    <div class="screen-header">
+      <h2>Background Jobs</h2>
+      <p>Renders, imports, và AI generations đang chạy. Tự refresh mỗi 3 giây.</p>
+    </div>
+    <div class="job-list">
+      <div class="job-row-card">
+        <span class="pill pill-info"><span class="dot dot-pulse"></span> Running</span>
+        <div class="job-meta">
+          <strong>Story pipeline</strong>
+          <small>es-horror / story-001</small>
+        </div>
+        <div class="job-progress-col">
+          <small>render · 68% complete</small>
+          <div class="progress-track"><div class="progress-fill running" style="width:68%"></div></div>
+        </div>
+        <div class="job-actions">
+          <button class="btn-ghost" style="font-size:.8rem">View</button>
+          <button class="btn-danger" style="font-size:.8rem" onclick="toast('warn','Cancel job?','Job render đang chạy. Bạn muốn cancel?')">Cancel</button>
+        </div>
+      </div>
+      <div class="job-row-card">
+        <span class="pill pill-done">Done</span>
+        <div class="job-meta">
+          <strong>Voice render</strong>
+          <small>su-150-2</small>
+        </div>
+        <div class="job-progress-col">
+          <small>Finished · 2m 34s</small>
+          <div class="progress-track"><div class="progress-fill succeeded" style="width:100%"></div></div>
+        </div>
+        <div class="job-actions">
+          <button class="btn-primary" style="font-size:.8rem" onclick="toast('info','Mở voice review...','')">Review</button>
+        </div>
+      </div>
+      <div class="job-row-card" style="border-color:rgba(248,81,73,.25)">
+        <span class="pill pill-error">Failed</span>
+        <div class="job-meta">
+          <strong>Final render</strong>
+          <small>su-150-2</small>
+        </div>
+        <div class="job-progress-col">
+          <small style="color:var(--s-error)">FFmpeg: missing background asset</small>
+          <div class="progress-track"><div class="progress-fill failed" style="width:35%"></div></div>
+        </div>
+        <div class="job-actions">
+          <button class="btn-danger" style="font-size:.8rem" onclick="showScreen('review-stage-error')">Debug</button>
+          <button style="font-size:.8rem" onclick="startJobBar();toast('info','Retrying render...','')">↺ Retry</button>
+        </div>
+      </div>
+      <div class="job-row-card">
+        <span class="pill pill-neutral">Cancelled</span>
+        <div class="job-meta">
+          <strong>ASR / Captions</strong>
+          <small>su-149</small>
+        </div>
+        <div class="job-progress-col">
+          <small>Cancelled by user · 19:15</small>
+          <div class="progress-track"><div class="progress-fill" style="width:20%;background:var(--s-neutral)"></div></div>
+        </div>
+        <div class="job-actions">
+          <button class="btn-ghost" style="font-size:.8rem">Dismiss</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════ -->
+  <!-- SCREEN 8: CONFIG                                    -->
+  <!-- ═══════════════════════════════════════════════════ -->
+  <section class="screen" id="screen-config">
+    <div class="screen-header">
+      <h2>Config</h2>
+      <p>Studio configuration — lưu vào studio.config.json trên disk.</p>
+    </div>
+    <div class="panel" style="max-width:640px">
+      <div class="section-title">LLM Provider</div>
+      <div class="form-grid" style="margin-bottom:1rem">
+        <div><label>Base URL</label><input value="https://api.openai.com/v1" /></div>
+        <div><label>Model</label><input value="gpt-4o" /></div>
+        <div><label>API Key env var</label><input value="OPENAI_API_KEY" /></div>
+      </div>
+      <hr class="sep" />
+      <div class="section-title">TTS / Voice</div>
+      <div class="form-grid" style="margin-bottom:1rem">
+        <div><label>Provider</label><select><option>Google TTS</option><option>OpenAI</option></select></div>
+        <div><label>Default voice</label><input value="en-US-Studio-O" /></div>
+      </div>
+      <hr class="sep" />
+      <div class="section-title">FFmpeg</div>
+      <div class="form-grid" style="margin-bottom:1rem">
+        <div><label>FFmpeg path</label><input value="C:\ffmpeg\bin\ffmpeg.exe" /></div>
+      </div>
+      <div class="row">
+        <button class="btn-primary" onclick="toast('success','Config đã lưu','studio.config.json đã được cập nhật.')">💾 Save config</button>
+        <button onclick="toast('info','Testing FFmpeg...','ffmpeg -version: 6.1.1')">Test FFmpeg</button>
+        <button onclick="toast('info','Testing LLM...','gpt-4o responded OK.')">Test LLM</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════ -->
+  <!-- SCREEN 9: YOUTUBE                                   -->
+  <!-- ═══════════════════════════════════════════════════ -->
+  <section class="screen" id="screen-youtube">
+    <div class="screen-header">
+      <h2>YouTube</h2>
+      <p>Publish management — chỉ upload sau khi copyright review được duyệt.</p>
+    </div>
+    <div class="panel" style="max-width:720px;margin-bottom:1rem">
+      <div class="gate gate-warn">
+        <div class="gate-label">⚠ Chưa kết nối</div>
+        <p>Chưa có OAuth token. Bấm Connect để đăng nhập YouTube Studio.</p>
+      </div>
+      <button class="btn-primary" onclick="toast('info','Đang mở OAuth flow...','Trình duyệt sẽ mở YouTube authorization.')">🔗 Connect YouTube account</button>
+    </div>
+    <div class="panel" style="max-width:720px;opacity:.5;pointer-events:none">
+      <div class="section-title">Publish queue (requires connection)</div>
+      <div class="empty-state">Kết nối YouTube để xem hàng chờ upload.</div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- NEW: TOAST NOTIFICATION SHELF                          -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div id="toast-shelf" role="region" aria-label="Notifications" aria-live="polite"></div>
+
+<!-- NEW: JOB STATUS BAR -->
+<div id="job-bar" class="hidden" role="status">
+  <div class="job-bar-spinner"></div>
+  <div class="job-bar-label" id="job-bar-label">Rendering...</div>
+  <div class="job-bar-track"><div class="job-bar-fill" id="job-bar-fill" style="width:0%"></div></div>
+  <div class="job-bar-progress" id="job-bar-pct">0%</div>
+  <button class="job-bar-cancel" onclick="stopJobBar()">✕ Cancel</button>
+</div>
+
+<!-- DEMO SCREEN SWITCHER -->
+<nav id="demo-nav">
+  <button class="active" onclick="showScreen('projects')">Projects</button>
+  <button onclick="showScreen('review-overview')">Workflow</button>
+  <button onclick="showScreen('review-stage')">Stage</button>
+  <button onclick="showScreen('review-stage-error')">Stage Error ★</button>
+  <button onclick="showScreen('channel-overview')">Channel</button>
+  <button onclick="showScreen('sources')">Sources</button>
+  <button onclick="showScreen('jobs')">Jobs</button>
+  <button onclick="showScreen('config')">Config</button>
+  <button onclick="demoToasts()">Demo Toasts ★</button>
+</nav>
+
+<script>
+// ===== SCREEN SWITCHER =====
+const BREADCRUMBS = {
+  'projects': [{ label: 'Projects' }],
+  'review-overview': [{ label: 'Projects', href: '#' }, { label: 'su-150-2' }, { label: 'Overview' }],
+  'review-stage': [{ label: 'Projects', href: '#' }, { label: 'su-150-2' }, { label: 'Script' }],
+  'review-stage-error': [{ label: 'Projects', href: '#' }, { label: 'su-150-2' }, { label: 'Render — ⚠ Failed' }],
+  'channel-overview': [{ label: 'Projects', href: '#' }, { label: 'ES Horror' }, { label: 'Overview' }],
+  'sources': [{ label: 'Sources' }],
+  'jobs': [{ label: 'Jobs' }],
+  'config': [{ label: 'Config' }],
+  'youtube': [{ label: 'YouTube' }],
+};
+
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  const el = document.getElementById('screen-' + id);
+  if (el) el.classList.add('active');
+
+  document.querySelectorAll('#demo-nav button').forEach((b, i) => {
+    const screens = ['projects','review-overview','review-stage','review-stage-error','channel-overview','sources','jobs','config'];
+    b.classList.toggle('active', screens[i] === id);
+  });
+
+  // Breadcrumb
+  const bc = document.getElementById('breadcrumb');
+  const items = BREADCRUMBS[id] || [{ label: id }];
+  bc.innerHTML = items.map((item, i) =>
+    (i > 0 ? '<span class="breadcrumb-sep">/</span>' : '') +
+    (item.href ? `<a href="${item.href}" onclick="showScreen('projects');return false">${item.label}</a>` : `<span>${item.label}</span>`)
+  ).join('');
+}
+
+// ===== TOAST SYSTEM =====
+let toastId = 0;
+const TOAST_ICONS = { error: '✕', success: '✓', info: 'ℹ', warn: '!' };
+const TOAST_TITLES = { error: 'Lỗi', success: 'Thành công', info: 'Thông báo', warn: 'Cảnh báo' };
+
+function toast(level, title, msg, persistent = false) {
+  const shelf = document.getElementById('toast-shelf');
+  const id = ++toastId;
+  const duration = persistent ? null : (level === 'error' ? 7000 : level === 'warn' ? 5500 : 4000);
+
+  const el = document.createElement('div');
+  el.className = `toast toast-${level}`;
+  el.setAttribute('role', level === 'error' ? 'alert' : 'status');
+  el.id = `toast-${id}`;
+  el.innerHTML = `
+    <div class="toast-icon">${TOAST_ICONS[level]}</div>
+    <div class="toast-body">
+      <div class="toast-title">${title || TOAST_TITLES[level]}</div>
+      ${msg ? `<div class="toast-msg">${msg}</div>` : ''}
+      ${level === 'error' ? `<div class="toast-actions"><button onclick="dismissToast(${id})">Dismiss</button><button onclick="dismissToast(${id});toast('info','Đang retry...','')" style="background:rgba(248,81,73,.12);border-color:rgba(248,81,73,.3);color:#f85149">↺ Retry</button></div>` : ''}
+      ${duration ? `<div class="toast-timer" style="color:${level==='error'?'#f85149':level==='success'?'#3fb950':level==='warn'?'#d29922':'#6ca5ff'};--duration:${duration}ms"></div>` : ''}
+    </div>
+    <button class="toast-dismiss" onclick="dismissToast(${id})" aria-label="Đóng">✕</button>
+  `;
+  shelf.appendChild(el);
+
+  if (duration) {
+    setTimeout(() => dismissToast(id), duration);
+  }
+}
+
+function dismissToast(id) {
+  const el = document.getElementById(`toast-${id}`);
+  if (!el) return;
+  el.classList.add('toast-removing');
+  setTimeout(() => el.remove(), 200);
+}
+
+// Demo sequence
+function demoToasts() {
+  setTimeout(() => toast('info', 'Story pipeline đang chạy', 'es-horror / story-001 · Stage: render · 0%'), 100);
+  setTimeout(() => toast('success', 'Voice render hoàn tất', 'su-150-2 · 2m 34s · voice-final.mp3'), 1200);
+  setTimeout(() => toast('warn', 'Budget gần giới hạn', 'story-001 đã dùng $0.82 / $1.00 budget'), 2400);
+  setTimeout(() => toast('error', 'FFmpeg render thất bại', 'Missing file: bg-loop.mp4\nExit code: 1', true), 3600);
+}
+
+// ===== JOB STATUS BAR =====
+let jobInterval = null;
+let jobPct = 0;
+
+function startJobBar(label, startPct) {
+  const bar = document.getElementById('job-bar');
+  document.getElementById('job-bar-label').textContent = label || 'Story pipeline running...';
+  jobPct = startPct || 0;
+  bar.classList.remove('hidden');
+  clearInterval(jobInterval);
+  jobInterval = setInterval(() => {
+    jobPct = Math.min(100, jobPct + Math.random() * 4);
+    document.getElementById('job-bar-fill').style.width = jobPct + '%';
+    document.getElementById('job-bar-pct').textContent = Math.round(jobPct) + '%';
+    if (jobPct >= 100) {
+      clearInterval(jobInterval);
+      document.getElementById('job-bar-label').textContent = '✓ Done';
+      setTimeout(() => stopJobBar(), 1500);
+      toast('success', 'Job hoàn tất', label || 'Story pipeline finished successfully.');
+    }
+  }, 300);
+}
+
+function stopJobBar() {
+  clearInterval(jobInterval);
+  document.getElementById('job-bar').classList.add('hidden');
+}
+
+// Init
+document.addEventListener('DOMContentLoaded', () => {
+  showScreen('projects');
+  // Show a demo toast after 1.5s to demonstrate the new system
+  setTimeout(() => toast('info', 'UI Prototype v2', 'Bấm "Demo Toasts ★" ở thanh dưới để xem notification system mới.'), 1500);
+});
+</script>
+</body>
+</html>
