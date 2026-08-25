@@ -479,7 +479,7 @@ test("Save effects treats a cleared numeric input as unchanged, not 0, and rejec
   // buildEffectsPatch returns null so the caller aborts before calling the API.
   assert.match(script, /Number\.isFinite\(parsed\)/);
   assert.match(script, /errors\.push\(`\$\{fieldDef\.label\} must be a number between/);
-  assert.match(script, /if \(errors\.length > 0\) \{\s*setStatus\(errors\.join\(" "\)\);\s*return null;/);
+  assert.match(script, /if \(errors\.length > 0\) \{\s*toast\("warn", "Validation error", errors\.join\(" "\)\);\s*return null;/);
   assert.match(script, /const patch = buildEffectsPatch\(form, effects\);\s*if \(!patch\) return;/);
 });
 
