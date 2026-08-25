@@ -1161,7 +1161,12 @@ async function routeRequest(
     }
     const captions = await readFile(resolveProjectPath(projectId, captionsPath), "utf8");
     const manifest = await loadAssetManifest(projectId);
-    const mapping = generateVisualMapping(buildNarrationScenes(captions), manifest.assets);
+    // Regeneration re-derives scenes from the captions. A background loop is
+    // an independent choice the captions say nothing about, so it is carried
+    // over rather than silently discarded along with the old scenes.
+    const previous = await loadVisualMapping(projectId);
+    const rebuilt = generateVisualMapping(buildNarrationScenes(captions), manifest.assets);
+    const mapping = previous?.backgroundLoop ? { ...rebuilt, backgroundLoop: previous.backgroundLoop } : rebuilt;
     await saveVisualMapping(projectId, mapping);
     sendJson(response, 200, { ok: true, mapping });
     return;

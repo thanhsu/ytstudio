@@ -1488,3 +1488,73 @@ test("clearing a background loop that was never set keeps the approval intact", 
     }
   });
 });
+
+async function seedLoopProject(): Promise<void> {
+  const project = join("projects", "sample-project");
+  await mkdir(join(project, "workspace", "captions"), { recursive: true });
+  await mkdir(join(project, "workspace", "editing"), { recursive: true });
+  await mkdir(join(project, "assets", "clips"), { recursive: true });
+  await writeFile(
+    join(project, "workspace", "captions", "c.srt"),
+    "1\n00:00:00,000 --> 00:00:06,000\nfirst scene\n\n2\n00:00:06,000 --> 00:00:12,000\nsecond scene\n",
+    "utf8",
+  );
+  await writeFile(
+    join(project, "project-state.json"),
+    JSON.stringify({
+      version: 1,
+      approvals: {},
+      artifacts: { captions: { kind: "captions", sourceHash: "h", relativePath: "workspace/captions/c.srt", createdAt: "2026-08-25T00:00:00.000Z", metadata: {} } },
+    }),
+    "utf8",
+  );
+  await writeFile(join(project, "assets", "clips", "loop.mp4"), "clip", "utf8");
+  await writeFile(
+    join(project, "assets", "asset-manifest.json"),
+    JSON.stringify({
+      version: 1,
+      assets: [{
+        id: "loop-1", filename: "loop.mp4", relativePath: "assets/clips/loop.mp4", mediaType: "video",
+        mimeType: "video/mp4", sizeBytes: 4, rightsConfirmed: true, usagePurpose: "looping background",
+        createdAt: "2026-08-25T00:00:00.000Z", analysisStatus: "ready", durationSeconds: 12,
+      }],
+    }),
+    "utf8",
+  );
+  await writeFile(
+    join(project, "workspace", "editing", "visual-mapping.json"),
+    JSON.stringify({
+      version: 1, status: "approved", generatedAt: "2026-08-25T00:00:00.000Z", inputFingerprint: "abc",
+      segments: [],
+      backgroundLoop: { assetId: "loop-1", fitMode: "cover", effects: { ...DEFAULT_SEGMENT_EFFECTS, zoom: "slow-in", flip: "horizontal" } },
+    }),
+    "utf8",
+  );
+}
+
+test("regenerating the mapping keeps the background loop the operator chose", async () => {
+  await withTempCwd(async () => {
+    await seedLoopProject();
+    const running = await startStudioServer(createStudioServer(), { port: 0 });
+    try {
+      const response = await fetch(`${running.url}/api/projects/sample-project/visual-mapping/generate`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: running.url },
+        body: "{}",
+      });
+
+      assert.equal(response.status, 200);
+      const { mapping } = await response.json();
+      // Regeneration re-derives scenes from captions. The loop is an
+      // independent choice that captions say nothing about, so silently
+      // dropping it would discard work the operator cannot see was lost.
+      assert.equal(mapping.backgroundLoop?.assetId, "loop-1");
+      assert.equal(mapping.backgroundLoop?.effects.zoom, "slow-in");
+      assert.equal(mapping.backgroundLoop?.effects.flip, "horizontal");
+      assert.ok(mapping.segments.length > 0, "scenes are still rebuilt from the captions");
+      assert.equal(mapping.status, "draft", "rebuilt scenes still need approval");
+    } finally {
+      await running.close();
+    }
+  });
+});
