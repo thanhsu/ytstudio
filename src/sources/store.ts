@@ -44,6 +44,8 @@ export type SourceCandidate = {
     downloadedAt: string;
   };
   error?: string;
+  /** The download succeeded, but something optional alongside it did not. */
+  warning?: string;
 };
 
 const CANDIDATE_FILE = "candidate.json";

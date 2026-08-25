@@ -30,6 +30,17 @@ import { runOriginalityStage } from "./stages/originality-qa.ts";
 import { runOutlineStage } from "./stages/outline.ts";
 import { runScenesStage } from "./stages/scenes.ts";
 import { runSectionsStage } from "./stages/sections.ts";
+import { runCanonAlignmentStage } from "./stages/canon-alignment.ts";
+import { runLocalizeStage } from "./stages/localize.ts";
+import {
+  runCanonContextStage,
+  runCanonContinuityStage,
+  runCanonWriteStage,
+  runChapterPlanStage,
+  runMemoryApplyStage,
+  runMemoryExtractStage,
+} from "../canon/stages.ts";
+import { copyCanonSceneImage } from "../canon/variant.ts";
 import {
   approvalState,
   approveStoryStage,
@@ -386,6 +397,37 @@ async function executeStage(stage: StoryStageId, ctx: StageContext, options: Sin
     case "final-qa":
       await runFinalQaStage(ctx);
       return;
+
+    // Canon chapter stages (kind "canon").
+    case "chapter-plan":
+      await runChapterPlanStage(ctx);
+      return;
+    case "canon-context":
+      await runCanonContextStage(ctx);
+      return;
+    case "canon-write":
+      await runCanonWriteStage(ctx);
+      return;
+    case "canon-continuity":
+      await runCanonContinuityStage(ctx);
+      return;
+    case "memory-extract":
+      await runMemoryExtractStage(ctx);
+      return;
+    case "memory-apply":
+      await runMemoryApplyStage(ctx);
+      return;
+
+    // Localization stages (kind "variant").
+    case "localize":
+      await runLocalizeStage(ctx, {
+        onlySections: options.sectionIndex === undefined ? undefined : [options.sectionIndex],
+      });
+      return;
+    case "canon-alignment":
+      await runCanonAlignmentStage(ctx);
+      return;
+
     default:
       throw new Error(`Stage ${stage} has no executor.`);
   }
@@ -524,6 +566,28 @@ async function runImagesStage(ctx: StageContext, onlySceneId?: string): Promise<
   for (const image of manifest.images) {
     if (onlySceneId && image.sceneId !== onlySceneId) continue;
     if (image.status === "done") continue;
+
+    // A variant reuses its canon chapter's rendered scene image: same chapter,
+    // same picture, only the narration differs. Four locales pay for the image
+    // once. Cross-project paths are impossible, so this is a guarded read from
+    // the series project plus a copy into this channel's workspace.
+    if (ctx.story.canonRef) {
+      const copied = await copyCanonSceneImage(
+        ctx.story.canonRef.seriesId,
+        ctx.story.canonRef.chapterId,
+        image.sceneId,
+        resolveProjectPath(ctx.channelId, image.relativePath),
+      );
+      if (copied) {
+        image.status = "done";
+        image.costUsd = 0;
+        image.lastError = undefined;
+        await persist();
+        await ctx.update?.(`Reused canon image for ${image.sceneId}.`);
+        continue;
+      }
+    }
+
     await assertWithinBudget(ctx.channelId, ctx.storyId, ctx.story.config.budget.maxCostPerStoryUsd, usdPerImage, { maxUsd: ctx.channel.budget.maxCostPerMonthUsd ?? 0 });
     try {
       await provider.generate(

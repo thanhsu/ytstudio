@@ -439,6 +439,12 @@ export type ContinuityReport = {
 export type NaturalizedScript = {
   version: 1;
   fullText: string;
+  /**
+   * The same text, still split by section. `fullText` is what TTS reads, but a
+   * canon-alignment failure has to name ONE section to re-localize — joining
+   * first would throw away the only mapping back to a fixable unit.
+   */
+  sections: Array<{ index: number; text: string }>;
   changes: Array<{ sectionIndex: number; note: string }>;
   locale: string;
   provenance: Provenance;

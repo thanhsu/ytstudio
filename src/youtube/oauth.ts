@@ -2,7 +2,7 @@ import { normalizeYouTubeError } from "./errors.ts";
 
 const AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
-const pendingStates = new Map<string, { channelId: string; expiresAt: number }>();
+const pendingStates = new Map<string, { channelId: string; redirectUri: string; expiresAt: number }>();
 
 export type TokenResponse = {
   accessToken: string;
@@ -32,15 +32,18 @@ export function buildAuthUrl(options: {
   return url.toString();
 }
 
-export function rememberOAuthState(state: string, channelId: string, now = Date.now()): void {
-  pendingStates.set(state, { channelId, expiresAt: now + 10 * 60 * 1000 });
+export function rememberOAuthState(state: string, channelId: string, redirectUri: string, now = Date.now()): void {
+  pendingStates.set(state, { channelId, redirectUri, expiresAt: now + 10 * 60 * 1000 });
 }
 
-export function consumeOAuthState(state: string, now = Date.now()): string | null {
+// Returns the redirect URI captured at connect time: Google rejects the token
+// exchange unless it matches the auth request byte-for-byte, and the callback
+// request itself only carries the path, not the original host and port.
+export function consumeOAuthState(state: string, now = Date.now()): { channelId: string; redirectUri: string } | null {
   const entry = pendingStates.get(state);
   pendingStates.delete(state);
   if (!entry || entry.expiresAt < now) return null;
-  return entry.channelId;
+  return { channelId: entry.channelId, redirectUri: entry.redirectUri };
 }
 
 export async function exchangeCode(options: {

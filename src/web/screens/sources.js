@@ -344,6 +344,15 @@ function renderSourceRow(candidate) {
     children.push(failure);
   }
 
+  // The video is on disk; something optional beside it is not. Saying so keeps
+  // a missing subtitle from reading as a silent success.
+  if (candidate.warning) {
+    const note = document.createElement("p");
+    note.className = "source-warning";
+    note.textContent = `Video saved, but: ${candidate.warning}`;
+    children.push(note);
+  }
+
   const rightsForm = document.createElement("form");
   rightsForm.className = "form-grid source-rights";
   rightsForm.addEventListener("submit", async (event) => {
