@@ -36,9 +36,9 @@ test("YouTube video library renders joined rows, paging, edit fields, and confir
   assert.match(script, /No source project/);
 });
 
-test("YouTube publish wizard has three explicit steps, readiness review, schedule times, and 202 queue handoff", async () => {
+test("YouTube publish wizard has explicit readiness review, schedule times, and 202 queue handoff", async () => {
   const script = await screen();
-  for (const marker of ["Source preview", "Metadata validation", "Visibility and schedule", "plannedPublishAt", "toLocaleString", "UTC", "matrix", "approval", "Confirm publish", "202", "EventSource", "activeYouTubeJob"]) assert.match(script, new RegExp(marker.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")));
+  for (const marker of ["Pick source", "Check readiness", "Publish or schedule", "publish/readiness", "Ready to publish", "Publish blocked", "plannedPublishAt", "toLocaleString", "UTC", "matrix", "Confirm publish", "202", "EventSource", "activeYouTubeJob"]) assert.match(script, new RegExp(marker.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")));
   assert.match(script, /required/);
   assert.match(script, /explicit/i);
 });

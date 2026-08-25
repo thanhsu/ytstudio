@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createStudioServer, startStudioServer } from "../src/server.ts";
@@ -43,4 +43,18 @@ test("GET /api/jobs lists persisted jobs across projects, newest first", async (
     process.chdir(previousCwd);
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("jobs screen exposes a debug drawer with raw job JSON", async () => {
+  const [script, styles] = await Promise.all([
+    readFile("src/web/screens/jobs.js", "utf8"),
+    readFile("src/web/styles.css", "utf8"),
+  ]);
+
+  assert.match(script, /Debug/);
+  assert.match(script, /openJobDebug/);
+  assert.match(script, /job-debug-drawer/);
+  assert.match(script, /JSON\.stringify\(job, null, 2\)/);
+  assert.match(styles, /\.job-debug-drawer/);
+  assert.match(styles, /\.job-debug-json/);
 });

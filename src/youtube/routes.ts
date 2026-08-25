@@ -8,6 +8,7 @@ import { deleteRemoteVideo, getRemoteVideo, listRemoteVideos, updateRemoteVideo,
 import { fetchVideoStats } from "./analytics.ts";
 import { loadYouTubeStore, removeVideoLink, saveYouTubeStore, updateAnalyticsSnapshots } from "./youtube-store.ts";
 import { cancelYouTubePublish, startYouTubePublish, type YouTubePublishDeps } from "./publish.ts";
+import { evaluatePublishReadiness, type PublishSourceKind } from "./publish-readiness.ts";
 
 export type YouTubeRouteError = { code: string; message: string; action?: string; details?: unknown };
 
@@ -149,6 +150,17 @@ export async function routeYouTube(options: {
 
     if (route === "publish" && method === "GET") {
       tools.sendJson(200, { ok: true, jobs: await loadYouTubeStore(seriesId).then((store) => store.jobs) });
+      return true;
+    }
+    if (route === "publish/readiness" && method === "GET") {
+      const sourceKind = options.url.searchParams.get("sourceKind") as PublishSourceKind | null;
+      const sourceId = options.url.searchParams.get("sourceId") ?? "";
+      if (!sourceKind || !["story", "review", "compilation"].includes(sourceKind) || !sourceId.trim()) {
+        tools.sendError(400, { code: "youtube-readiness-input", message: "Choose a source kind and source id before checking publish readiness." });
+        return true;
+      }
+      const readiness = await evaluatePublishReadiness(seriesId, sourceKind, sourceId);
+      tools.sendJson(200, { ok: true, readiness });
       return true;
     }
     const publishJobMatch = /^publish\/([^/]+)$/.exec(route);

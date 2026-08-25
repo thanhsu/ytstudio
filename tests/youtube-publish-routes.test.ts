@@ -38,3 +38,22 @@ test("publish routes create a 202 job and list it without provider calls", async
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("publish readiness route validates source input before reading artifacts", async () => {
+  const result: Array<{ status: number; body: any }> = [];
+  const tools = {
+    sendJson: (status: number, body: unknown) => result.push({ status, body }),
+    sendError: (status: number, body: unknown) => result.push({ status, body }),
+    readBody: async () => ({}),
+  };
+  await routeYouTube({
+    method: "GET",
+    rest: "youtube/publish/readiness",
+    url: new URL("http://local?sourceKind=bad&sourceId="),
+    seriesId: "series-1",
+    request: {} as never,
+    tools,
+  });
+  assert.equal(result[0].status, 400);
+  assert.equal(result[0].body.code, "youtube-readiness-input");
+});

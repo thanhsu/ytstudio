@@ -323,7 +323,12 @@ test("the sources screen exposes paste, rights, score, download, and delete", as
   assert.match(script, /startSourceJob\(candidate\.id, "score"\)/);
   assert.match(script, /deleteSource\(candidate\.id/);
   assert.match(script, /Declare rights before downloading/);
+  assert.match(script, /Rights review/);
+  assert.match(script, /Unknown rights only/);
+  assert.match(script, /Bulk rights for unknown/);
+  assert.match(script, /applyBulkRights/);
   assert.match(styles, /\.source-list/);
+  assert.match(styles, /\.source-rights-review/);
 });
 
 test("the sources screen exposes keyword search before tracking a source", async () => {

@@ -1,6 +1,6 @@
 import { appState, refreshAppData } from "../lib/state.js";
-import { actionButton, field, selectField, textareaField } from "../lib/dom.js";
-import { setActiveNav, setBreadcrumb, setStatus, view } from "../lib/shell.js";
+import { actionButton, field, gateNotice, readinessPill, selectField, textareaField } from "../lib/dom.js";
+import { setActiveNav, setBreadcrumb, setStatus, toast, view } from "../lib/shell.js";
 
 const INTERNAL_NAV = [
   ["overview", "Overview"],
@@ -11,6 +11,8 @@ const INTERNAL_NAV = [
   ["settings", "Settings"],
 ];
 const PRIVACY_OPTIONS = [["public", "Public"], ["private", "Private"], ["unlisted", "Unlisted"]];
+const SOURCE_KIND_OPTIONS = [["story", "Story"], ["review", "Review project"], ["compilation", "Compilation"]];
+const MATRIX_LEVELS = { current: "done", stale: "warn", missing: "block", "not-required": "neutral" };
 const screenState = { activeYouTubeJob: null, videos: [], nextPageToken: null, loading: false, analyticsLoading: false, analyticsError: null, analytics: [], calendar: null };
 
 const api = (seriesId, route) => `/api/series/${encodeURIComponent(seriesId)}/youtube/${route}`;
@@ -29,11 +31,11 @@ export async function mountYouTube(route) {
     screenState.loading = false;
     view.replaceChildren(renderShell(series, activeView, data));
     subscribeToPublishProgress(series.id);
-    setStatus(`${series.title || series.id}: YouTube ${activeView}.`);
+    toast("info", `${series.title || series.id}: YouTube ${activeView}`);
   } catch (error) {
     screenState.loading = false;
     view.replaceChildren(renderShell(series, activeView, { error: error instanceof Error ? error.message : "Unable to load YouTube." }));
-    setStatus(error instanceof Error ? error.message : "Unable to load YouTube.");
+    toast("err", "Unable to load YouTube", error instanceof Error ? error.message : "");
   }
 }
 
@@ -131,8 +133,15 @@ async function refreshAnalytics(seriesId, button) {
 function renderOverview(series, data) {
   const panel = document.createElement("section"); panel.className = "youtube-panel";
   const heading = document.createElement("h3"); heading.textContent = "Channel overview";
-  const counts = document.createElement("dl"); counts.className = "youtube-counts";
-  for (const [label, value] of [["Published videos", data.videos?.length ?? 0], ["Queued jobs", (data.jobs ?? []).filter((job) => ["queued", "uploading", "thumbnail-uploading"].includes(job.status)).length], ["Failed jobs", (data.jobs ?? []).filter((job) => job.status === "failed").length]]) { const dt = document.createElement("dt"); dt.textContent = label; const dd = document.createElement("dd"); dd.textContent = String(value); counts.append(dt, dd); }
+  const counts = document.createElement("div"); counts.className = "youtube-counts";
+  for (const [label, value] of [["Published videos", data.videos?.length ?? 0], ["Queued jobs", (data.jobs ?? []).filter((job) => ["queued", "uploading", "thumbnail-uploading"].includes(job.status)).length], ["Failed jobs", (data.jobs ?? []).filter((job) => job.status === "failed").length]]) {
+    const card = document.createElement("div");
+    card.className = "youtube-count";
+    const term = document.createElement("span"); term.textContent = label;
+    const number = document.createElement("strong"); number.textContent = String(value);
+    card.append(term, number);
+    counts.append(card);
+  }
   const note = document.createElement("p"); note.textContent = data.status?.connected ? `Connected channel: ${data.channel?.id ?? "Unknown"}` : "Connect a YouTube channel to manage videos and publish approved exports.";
   panel.append(heading, counts, note);
   return panel;
@@ -170,7 +179,26 @@ function renderVideoRow(seriesId, video) {
 
 async function loadNextVideos(seriesId) { const response = await fetch(`${api(seriesId, "videos")}?pageToken=${encodeURIComponent(screenState.nextPageToken)}`); const data = await response.json(); screenState.videos = data.videos ?? []; screenState.nextPageToken = data.nextPageToken ?? null; setStatus("Loaded next YouTube video page."); }
 
-function renderQueue(jobs) { const panel = emptyPanel("Publish Queue", jobs.length ? "Recent and active publish jobs" : "No publish jobs yet."); for (const job of jobs) { const item = document.createElement("article"); item.className = "youtube-job"; item.textContent = `${job.sourceKind}:${job.sourceId} — ${job.status} — ${job.progress}%`; panel.append(item); } return panel; }
+function renderQueue(jobs) {
+  const panel = emptyPanel("Publish Queue", jobs.length ? "Recent and active publish jobs" : "No publish jobs yet.");
+  for (const job of jobs) {
+    const item = document.createElement("article");
+    item.className = "youtube-job";
+    const title = document.createElement("strong");
+    title.textContent = `${job.sourceKind}:${job.sourceId}`;
+    const status = readinessPill(job.status === "completed" ? "done" : job.status === "failed" ? "block" : "progress", job.status);
+    const progress = document.createElement("div");
+    progress.className = "youtube-publish-progress";
+    const fill = document.createElement("span");
+    fill.style.width = `${Math.max(2, Math.min(100, Number(job.progress) || 0))}%`;
+    progress.append(fill);
+    const detail = document.createElement("small");
+    detail.textContent = job.error?.message ?? `${job.progress}%`;
+    item.append(title, status, progress, detail);
+    panel.append(item);
+  }
+  return panel;
+}
 function renderCalendar(seriesId) { const panel = emptyPanel("Calendar", "Planned publish times are used to pre-fill the publish wizard."); panel.append(actionButton("Open publish wizard", () => openPublish({ id: seriesId }, {}), "button", "primary")); return panel; }
 function emptyPanel(title, message) { const panel = document.createElement("section"); panel.className = "youtube-panel"; const heading = document.createElement("h3"); heading.textContent = title; const body = document.createElement("p"); body.textContent = message; panel.append(heading, body); return panel; }
 
@@ -178,7 +206,103 @@ function openEdit(seriesId, video) { const panel = document.createElement("secti
 async function patchVideo(seriesId, videoId, form) { const values = Object.fromEntries(Array.from(form.elements).filter((element) => element.name).map((element) => [element.name, element.value])); values.tags = String(values.tags || "").split(",").map((tag) => tag.trim()).filter(Boolean); const response = await fetch(api(seriesId, `videos/${encodeURIComponent(videoId)}`), { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(values) }); if (!response.ok) throw new Error("Unable to update YouTube video metadata."); setStatus("YouTube video updated."); }
 function openDelete(seriesId, video) { const panel = document.createElement("section"); panel.className = "youtube-detail-drawer"; const heading = document.createElement("h3"); heading.textContent = "Delete remote video"; const confirmation = field("Type DELETE to confirm", "confirmation", ""); const button = actionButton("Delete remote video", async () => { if (confirmation.querySelector("input").value !== "DELETE") { setStatus("Type DELETE before deleting the remote video."); return; } const response = await fetch(api(seriesId, `videos/${encodeURIComponent(video.videoId)}`), { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ confirm: true }) }); if (!response.ok) setStatus("The server rejected the delete request."); else setStatus("Remote video deleted; local export retained."); }, "button", "danger"); panel.append(heading, confirmation, button); view.append(panel); }
 
-function openPublish(series, data) { const panel = document.createElement("section"); panel.className = "youtube-publish-wizard"; const heading = document.createElement("h3"); heading.textContent = "Publish approved export"; const steps = document.createElement("ol"); for (const label of ["Source preview", "Metadata validation", "Visibility and schedule"]) { const li = document.createElement("li"); li.textContent = label; steps.append(li); } const form = document.createElement("form"); form.append(field("Source kind", "sourceKind", "story"), field("Source id", "sourceId", ""), field("Export path", "exportPath", ""), field("Title", "title", data.metadata?.title || ""), textareaField("Description", "description", data.metadata?.description || ""), field("Tags", "tags", (data.metadata?.tags || []).join(", ")), selectField("Visibility", "privacyStatus", "private", PRIVACY_OPTIONS), field("Planned publish time", "publishAt", screenState.calendar?.plannedPublishAt || "", "datetime-local"), field("Thumbnail path", "thumbnailPath", "")); const schedule = scheduleSummary(screenState.calendar?.plannedPublishAt); const confirmation = document.createElement("p"); confirmation.textContent = `Channel: ${data.channel?.title || data.channel?.id || "selected channel"}. ${schedule} Confirm publish only after reviewing the thumbnail, approval matrix, local time, and UTC time.`; const checklist = document.createElement("ul"); checklist.className = "youtube-approval-checklist"; for (const label of Object.keys(data.matrix || { script: "missing", media: "missing", final: "missing" })) { const li = document.createElement("li"); li.textContent = `Approval: ${label}`; checklist.append(li); } const submit = actionButton("Confirm publish", () => submitPublish(series.id, form, submit), "button", "primary"); submit.disabled = false; form.append(checklist, confirmation, submit); panel.append(heading, steps, form); view.append(panel); }
+function openPublish(series, data) {
+  const panel = document.createElement("section");
+  panel.className = "youtube-publish-wizard";
+  panel.setAttribute("aria-label", "Publish approved export");
+  const heading = document.createElement("h3");
+  heading.textContent = "Publish approved export";
+  const steps = document.createElement("ol");
+  steps.className = "youtube-publish-steps";
+  for (const label of ["1. Pick source", "2. Check readiness", "3. Publish or schedule"]) {
+    const li = document.createElement("li"); li.textContent = label; steps.append(li);
+  }
+  const form = document.createElement("form");
+  form.className = "youtube-publish-form form-grid";
+  const readinessHost = document.createElement("div");
+  readinessHost.className = "youtube-readiness-host field-wide";
+  readinessHost.append(gateNotice("Readiness not checked", "Choose a source, then run Check readiness to load approvals, export paths, thumbnail, and metadata before upload.", "warn"));
+  const submit = actionButton("Confirm publish", () => submitPublish(series.id, form, submit), "button", "primary");
+  const check = actionButton("Check readiness", () => checkPublishReadiness(series.id, form, readinessHost), "button");
+  form.append(
+    selectField("Source kind", "sourceKind", "story", SOURCE_KIND_OPTIONS),
+    field("Source id", "sourceId", ""),
+    readinessHost,
+    field("Export path", "exportPath", ""),
+    field("Thumbnail path", "thumbnailPath", ""),
+    field("Title", "title", data.metadata?.title || ""),
+    textareaField("Description", "description", data.metadata?.description || ""),
+    field("Tags", "tags", (data.metadata?.tags || []).join(", ")),
+    selectField("Visibility", "privacyStatus", "private", PRIVACY_OPTIONS),
+    field("Planned publish time", "publishAt", screenState.calendar?.plannedPublishAt || "", "datetime-local"),
+  );
+  const schedule = document.createElement("p");
+  schedule.className = "youtube-schedule-summary";
+  schedule.textContent = `Channel: ${data.channel?.title || data.channel?.id || "selected channel"}. ${scheduleSummary(screenState.calendar?.plannedPublishAt)}`;
+  const actions = document.createElement("div");
+  actions.className = "youtube-publish-actions field-wide";
+  actions.append(check, submit);
+  form.append(schedule, actions);
+  panel.append(heading, steps, form);
+  view.append(panel);
+}
+
+async function checkPublishReadiness(seriesId, form, host) {
+  const values = Object.fromEntries(Array.from(form.elements).filter((element) => element.name).map((element) => [element.name, element.value]));
+  if (!values.sourceId) {
+    host.replaceChildren(gateNotice("Source required", "Enter the story, review project, or compilation id before checking readiness.", "block"));
+    return;
+  }
+  host.replaceChildren(gateNotice("Checking readiness", "Reading approvals, export package, thumbnail, and metadata.", "info"));
+  try {
+    const response = await fetch(`${api(seriesId, "publish/readiness")}?sourceKind=${encodeURIComponent(values.sourceKind)}&sourceId=${encodeURIComponent(values.sourceId)}`);
+    const data = await response.json();
+    if (!response.ok) throw Object.assign(new Error(`${data.code}: ${data.message}`), { details: data.details });
+    applyReadinessToForm(form, data.readiness);
+    host.replaceChildren(renderReadinessPanel(data.readiness));
+    toast("ok", "Publish readiness passed", "Export, metadata, thumbnail, and approvals are loaded.");
+  } catch (error) {
+    const matrix = error.details?.matrix;
+    host.replaceChildren(renderReadinessPanel({ ready: false, matrix: matrix ?? {}, exportPath: null, thumbnailPath: null, metadata: null }, error.message));
+    toast("err", "Publish readiness failed", error.message);
+  }
+}
+
+function applyReadinessToForm(form, readiness) {
+  const set = (name, value) => { const input = form.elements.namedItem(name); if (input && value) input.value = value; };
+  set("exportPath", readiness.exportPath);
+  set("thumbnailPath", readiness.thumbnailPath);
+  set("title", readiness.metadata?.title);
+  set("description", readiness.metadata?.description);
+  set("tags", readiness.metadata?.tags?.join(", "));
+}
+
+function renderReadinessPanel(readiness, error = "") {
+  const panel = document.createElement("div");
+  panel.className = `youtube-readiness-panel ${readiness.ready ? "ready" : "blocked"}`;
+  const title = document.createElement("strong");
+  title.textContent = readiness.ready ? "Ready to publish" : "Publish blocked";
+  panel.append(title);
+  if (error) panel.append(gateNotice("Fix before publishing", error, "block"));
+  const matrix = document.createElement("div");
+  matrix.className = "youtube-readiness-matrix";
+  for (const [key, value] of Object.entries(readiness.matrix ?? {})) {
+    const item = document.createElement("span");
+    item.className = "youtube-readiness-item";
+    item.append(readinessPill(MATRIX_LEVELS[value] ?? "neutral", value), document.createTextNode(key));
+    matrix.append(item);
+  }
+  if (!matrix.childNodes.length) matrix.append(gateNotice("No matrix returned", "The source could not be read yet.", "warn"));
+  const artifacts = document.createElement("dl");
+  artifacts.className = "youtube-artifact-summary";
+  for (const [label, value] of [["Export", readiness.exportPath ?? "missing"], ["Thumbnail", readiness.thumbnailPath ?? "missing"], ["Title", readiness.metadata?.title ?? "missing"]]) {
+    const dt = document.createElement("dt"); dt.textContent = label;
+    const dd = document.createElement("dd"); dd.textContent = value;
+    artifacts.append(dt, dd);
+  }
+  panel.append(matrix, artifacts);
+  return panel;
+}
 function scheduleSummary(value) { if (!value) return "No schedule selected."; const date = new Date(value); if (!Number.isFinite(date.getTime())) return "Schedule time needs review."; return `Local: ${date.toLocaleString()} — UTC: ${date.toISOString()}`; }
 const explicitConfirmation = "Explicit confirmation is required before publishing.";
 async function submitPublish(seriesId, form, button) { const values = Object.fromEntries(Array.from(form.elements).filter((element) => element.name).map((element) => [element.name, element.value])); if (!values.sourceId || !values.title || !values.exportPath) { setStatus("Source, title, and export are required before publishing."); return; } button.disabled = true; try { const response = await fetch(api(seriesId, "publish"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...values, tags: String(values.tags || "").split(",").map((tag) => tag.trim()).filter(Boolean), publishAt: values.publishAt || undefined }) }); if (response.status !== 202) throw new Error("YouTube publish was not queued."); const data = await response.json(); screenState.activeYouTubeJob = data.job; setStatus("YouTube publish queued."); } catch (error) { setStatus(error instanceof Error ? error.message : "YouTube publish failed."); } finally { button.disabled = false; } }

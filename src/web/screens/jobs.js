@@ -98,6 +98,7 @@ function renderJobRows(jobs) {
     const actions = document.createElement("div");
     actions.className = "job-actions";
     actions.append(actionButton("Open", () => openJobOwner(job)));
+    actions.append(actionButton("Debug", () => openJobDebug(job)));
     if (job.status === "succeeded" && REVIEW_ARTIFACTS[job.kind]) {
       actions.append(actionButton("Review result", () => reviewJob(job).catch((error) => toast("err", "Failed to open result", error.message)), "button", "primary"));
     }
@@ -106,6 +107,49 @@ function renderJobRows(jobs) {
     return row;
   });
   rowsHost.replaceChildren(...rows);
+}
+
+function openJobDebug(job) {
+  document.querySelector(".job-debug-drawer")?.remove();
+  const drawer = document.createElement("aside");
+  drawer.className = "job-debug-drawer";
+  drawer.setAttribute("aria-label", "Job detail");
+  const header = document.createElement("div");
+  header.className = "job-debug-header";
+  const title = document.createElement("h3");
+  title.textContent = JOB_LABELS[job.kind] ?? job.kind;
+  const close = actionButton("Close", () => drawer.remove());
+  header.append(title, close);
+
+  const meta = document.createElement("dl");
+  meta.className = "job-debug-meta";
+  for (const [label, value] of [
+    ["Status", job.status],
+    ["Owner", job.projectId],
+    ["Job id", job.id],
+    ["Updated", new Date(job.updatedAt).toLocaleString()],
+    ["Message", job.message],
+    ["Error", job.error ?? "None"],
+  ]) {
+    const dt = document.createElement("dt"); dt.textContent = label;
+    const dd = document.createElement("dd"); dd.textContent = String(value);
+    meta.append(dt, dd);
+  }
+
+  const raw = document.createElement("pre");
+  raw.className = "job-debug-json";
+  raw.textContent = JSON.stringify(job, null, 2);
+  const actions = document.createElement("div");
+  actions.className = "job-debug-actions";
+  actions.append(
+    actionButton("Open owner", () => openJobOwner(job), "button", "primary"),
+    actionButton("Copy JSON", async () => {
+      await navigator.clipboard?.writeText(raw.textContent ?? "");
+      toast("ok", "Job JSON copied");
+    }),
+  );
+  drawer.append(header, meta, actions, raw);
+  view.append(drawer);
 }
 
 // A composite owner "<channel>::<suffix>" belongs to a story channel; plain

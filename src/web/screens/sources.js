@@ -10,6 +10,7 @@ import { appState } from "../lib/state.js";
 // The container this screen paints into. mountSources() creates it; the screen's
 // own re-renders keep writing to the same node.
 let sourcesHost = null;
+const sourceUiState = { rightsFilter: "all" };
 
 export function sourcePlatformOptions() {
   return [
@@ -126,9 +127,65 @@ export async function renderSources(container = sourcesHost) {
       paragraph("Paste a video URL. Metadata is read first; nothing is downloaded until you declare rights."),
       addForm,
     ),
-    wrapSection("Candidates", boundary, renderSourceList(sources)),
+    wrapSection("Rights review", boundary, renderRightsReview(sources), renderSourceList(sources)),
   );
   setStatus(`${sources.length} source${sources.length === 1 ? "" : "s"} tracked.`);
+}
+
+function renderRightsReview(sources) {
+  const panel = document.createElement("div");
+  panel.className = "source-rights-review";
+  const counts = {
+    unknown: sources.filter((source) => source.rights === "unknown").length,
+    declared: sources.filter((source) => source.rights !== "unknown").length,
+    downloaded: sources.filter((source) => source.status === "downloaded").length,
+  };
+  const summary = document.createElement("dl");
+  summary.className = "source-rights-summary";
+  for (const [label, value] of [["Unknown rights", counts.unknown], ["Rights declared", counts.declared], ["Downloaded", counts.downloaded]]) {
+    const dt = document.createElement("dt"); dt.textContent = label;
+    const dd = document.createElement("dd"); dd.textContent = String(value);
+    summary.append(dt, dd);
+  }
+
+  const filter = document.createElement("div");
+  filter.className = "source-rights-filter";
+  const all = actionButton("All candidates", () => { sourceUiState.rightsFilter = "all"; renderSources(); });
+  const unknown = actionButton("Unknown rights only", () => { sourceUiState.rightsFilter = "unknown"; renderSources(); }, "button", "primary");
+  all.classList.toggle("selected", sourceUiState.rightsFilter === "all");
+  unknown.classList.toggle("selected", sourceUiState.rightsFilter === "unknown");
+  filter.append(all, unknown);
+
+  const bulk = document.createElement("form");
+  bulk.className = "form-grid source-bulk-rights";
+  bulk.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await applyBulkRights(sources.filter((source) => source.rights === "unknown"), bulk);
+  });
+  bulk.append(
+    selectField("Bulk rights for unknown", "rights", "third-party-fair-use", SOURCE_RIGHTS_OPTIONS.filter(([value]) => value !== "unknown")),
+    field("Bulk note", "rightsNote", "Review commentary only."),
+    actionButton(`Apply to ${counts.unknown} unknown`, null, "submit", "primary"),
+  );
+  if (!counts.unknown) {
+    for (const element of Array.from(bulk.elements)) element.disabled = true;
+  }
+  panel.append(summary, filter, bulk);
+  return panel;
+}
+
+async function applyBulkRights(sources, form) {
+  if (!sources.length) return;
+  if (!confirm(`Apply this rights declaration to ${sources.length} unknown source(s)?`)) return;
+  const values = formValues(form);
+  try {
+    await Promise.all(sources.map((source) => patchJson(`/api/sources/${encodeURIComponent(source.id)}`, values)));
+    setStatus(`Rights recorded for ${sources.length} source(s).`);
+    sourceUiState.rightsFilter = "all";
+    await renderSources();
+  } catch (error) {
+    setStatus(error.message);
+  }
 }
 
 function renderSourceSearchResults(results) {
@@ -301,15 +358,16 @@ async function trackSource(result) {
 }
 
 function renderSourceList(sources) {
-  if (!sources.length) {
-    return paragraph("No sources yet. Paste a URL above to start.");
+  const visible = sourceUiState.rightsFilter === "unknown" ? sources.filter((source) => source.rights === "unknown") : sources;
+  if (!visible.length) {
+    return paragraph(sources.length ? "No candidates match the current rights filter." : "No sources yet. Paste a URL above to start.");
   }
 
   const list = document.createElement("ul");
   list.className = "source-list";
   // Unscored candidates sort last rather than being hidden: a score is an
   // ordinal hint, not a filter.
-  const ranked = [...sources].sort((left, right) => (right.score?.value ?? -1) - (left.score?.value ?? -1));
+  const ranked = [...visible].sort((left, right) => (right.score?.value ?? -1) - (left.score?.value ?? -1));
   for (const candidate of ranked) {
     list.append(renderSourceRow(candidate));
   }
