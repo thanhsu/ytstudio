@@ -17,6 +17,7 @@ import {
   buildMemoryExtractMessages,
 } from "./prompts.ts";
 import { chapterNumberFrom, loadCanonSeries } from "./series.ts";
+import { writeProjectedBible } from "./variant.ts";
 import type {
   CanonChapterArtifact,
   CanonChapterPlan,
@@ -219,6 +220,10 @@ export async function runCanonWriteStage(ctx: StageContext): Promise<CanonChapte
   };
   await writeSectionFile(ctx.channelId, ctx.storyId, section);
   await writeStageArtifact(ctx.channelId, ctx.storyId, "sections", assembleScriptArtifact([section]));
+  // `scenes` requires a bible artifact, and a canon chapter's bible lives in
+  // the series entities rather than as a story stage. Projecting it here lets
+  // scene extraction — and so the visuals every locale reuses — run unmodified.
+  await writeProjectedBible(ctx.channelId, ctx.channelId, ctx.storyId);
   return artifact;
 }
 

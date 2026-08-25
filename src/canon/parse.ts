@@ -1,7 +1,6 @@
 import {
   optionalStringArray,
   parseJsonObject,
-  requireArray,
   requireObject,
   requireText,
   requireStringArray,
@@ -97,7 +96,11 @@ export function parseChapterPlan(raw: string): ParsedPlan {
 
 export function parseContinuityReport(raw: string): Omit<CanonContinuityReport, "attempts" | "gaveUpReason"> {
   const payload = parseJsonObject(raw);
-  const issues = requireArray(payload.issues, "issues").map((entry, index) => {
+  // An EMPTY issues array is the correct answer for a clean chapter, so this
+  // cannot use requireArray — that helper rejects empty arrays, which would
+  // make every passing continuity check fail to parse.
+  const rawIssues = Array.isArray(payload.issues) ? payload.issues : [];
+  const issues = rawIssues.map((entry, index) => {
     const record = requireObject(entry, `issues[${index}]`);
     const severity = record.severity === "ERROR" ? "ERROR" : "WARN";
     const action = record.suggestedAction;

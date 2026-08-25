@@ -5,6 +5,7 @@ import {
   downloadCandidate,
   parseDownloadProgress,
   selectSubtitle,
+  subtitleLanguageArgument,
   type DownloadOptions,
 } from "../src/sources/download.ts";
 import { loadCandidate, resolveSourcePath, saveCandidate } from "../src/sources/store.ts";
@@ -15,7 +16,14 @@ async function saveDeclaredCandidate(id: string): Promise<void> {
 }
 
 async function downloadOptions(
-  behaviour: { partial?: boolean; fail?: boolean; hang?: boolean; subtitles?: string[] } = {},
+  behaviour: {
+    partial?: boolean;
+    fail?: boolean;
+    hang?: boolean;
+    subtitles?: string[];
+    /** Writes the merged video, then fails the way a subtitle convertor does. */
+    failAfterVideo?: boolean;
+  } = {},
 ): Promise<DownloadOptions> {
   const lines = [
     'import { mkdir, writeFile } from "node:fs/promises";',
@@ -29,6 +37,10 @@ async function downloadOptions(
   }
   if (behaviour.hang) {
     lines.push("setInterval(() => {}, 1000);");
+  } else if (behaviour.failAfterVideo) {
+    lines.push('await writeFile(join(dir, "video.mp4"), "video", "utf8");');
+    lines.push('console.error("ERROR: Error opening input files: Invalid data found when processing input");');
+    lines.push("process.exit(1);");
   } else if (behaviour.fail) {
     lines.push('console.error("ERROR: the server said no");', "process.exit(1);");
   } else {
@@ -68,6 +80,15 @@ test("no subtitle at all is not a failure", () => {
 
 test("a language nobody configured is still taken over nothing", () => {
   assert.deepEqual(selectSubtitle(["video.ja.srt"], ["en"]), { path: "video.ja.srt", language: "ja" });
+});
+
+test("the requested subtitle languages exclude the comment streams that pose as tracks", () => {
+  // Bilibili offers danmaku as its only track; converting that XML to srt is what
+  // ffmpeg refused with "Invalid data found when processing input".
+  assert.equal(subtitleLanguageArgument(["zh-Hans", "zh"]), "zh-Hans,zh,-danmaku,-live_chat");
+  assert.equal(subtitleLanguageArgument([" en ", ""]), "en,-danmaku,-live_chat");
+  // Naming no language means no preference, not "download nothing".
+  assert.equal(subtitleLanguageArgument([]), "all,-danmaku,-live_chat");
 });
 
 test("a download is refused while rights are unknown", async () => {
@@ -126,6 +147,35 @@ test("a failed download leaves status failed, an error, and no partial file", as
   });
 });
 
+test("a subtitle failure keeps the video that already arrived and records the complaint", async () => {
+  await withSourcesRoot(async () => {
+    await saveDeclaredCandidate("youtube-abc");
+
+    const candidate = await downloadCandidate("youtube-abc", await downloadOptions({ failAfterVideo: true }));
+
+    assert.equal(candidate.status, "downloaded");
+    assert.equal(candidate.media?.videoRelativePath, "video.mp4");
+    assert.match(candidate.warning ?? "", /Invalid data found/);
+    assert.equal(candidate.error, undefined);
+    assert.ok((await readdir(resolveSourcePath("youtube-abc"))).includes("video.mp4"));
+  });
+});
+
+test("a half-written video is not rescued, and a later clean run clears the warning", async () => {
+  await withSourcesRoot(async () => {
+    await saveDeclaredCandidate("youtube-abc");
+
+    // The merged file exists but a .part alongside it means the run was cut short.
+    const cutShort = await downloadOptions({ partial: true, failAfterVideo: true });
+    await assert.rejects(() => downloadCandidate("youtube-abc", cutShort));
+    assert.equal((await loadCandidate("youtube-abc"))?.status, "failed");
+
+    await downloadCandidate("youtube-abc", await downloadOptions({ failAfterVideo: true }));
+    const clean = await downloadCandidate("youtube-abc", await downloadOptions());
+    assert.equal(clean.warning, undefined);
+  });
+});
+
 test("an aborted download returns the candidate to metadata and removes partials", async () => {
   await withSourcesRoot(async () => {
     await saveDeclaredCandidate("youtube-abc");
@@ -165,12 +215,14 @@ test("the command carries the configured format and asks for subtitles", async (
     await downloadCandidate("youtube-abc", {
       ...(await downloadOptions()),
       format: "bv*+ba/b",
+      subtitleLanguages: ["zh-Hans", "en"],
       onCommand: (_path, args) => seen.push(...args),
     });
 
     assert.ok(seen.includes("--newline"));
     assert.ok(seen.includes("--write-subs"));
     assert.ok(seen.includes("--write-auto-subs"));
+    assert.equal(seen[seen.indexOf("--sub-langs") + 1], "zh-Hans,en,-danmaku,-live_chat");
     assert.equal(seen[seen.indexOf("-f") + 1], "bv*+ba/b");
     assert.equal(seen.at(-1), "https://www.youtube.com/watch?v=dQw4w9WgXcQ");
   });

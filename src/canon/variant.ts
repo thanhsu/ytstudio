@@ -146,24 +146,7 @@ async function projectCanonArtifacts(
   };
   await writeStageArtifact(variant.channelId, variant.id, "hook", hook);
 
-  const projected: BibleArtifact = {
-    version: 1,
-    setting: bible.setting,
-    characters: characters.characters.map((character) => ({
-      name: character.name,
-      role: character.role,
-      description: character.staticProfile.appearance,
-      arc: character.state.goals.join("; "),
-    })),
-    timeline: [],
-    locations: bible.locations.map((location) => ({ name: location.name, description: location.description })),
-    supernaturalRules: bible.worldRules.map((rule) => rule.text),
-    knownFacts: bible.fixedFacts.map((fact) => fact.text),
-    openQuestions: bible.mysteries.filter((mystery) => mystery.status === "OPEN").map((mystery) => mystery.question),
-    endingConstraints: bible.endingConstraints,
-    provenance,
-  };
-  await writeStageArtifact(variant.channelId, variant.id, "bible", projected);
+  await writeProjectedBible(seriesId, variant.channelId, variant.id);
 
   // The canon scene plan and its rendered images are shared across every
   // locale: the same chapter, so the same pictures. Only the narration differs.
@@ -207,6 +190,46 @@ export async function copyCanonSceneImage(
     if (isNotFound(error)) return false;
     throw error;
   }
+}
+
+/**
+ * Project the canon bible into the story-factory `bible` artifact shape.
+ *
+ * Both a canon chapter and a localized variant need this: `runScenesStage`
+ * requires a `bible` artifact, and neither has one of its own. Projecting it
+ * lets scene extraction — and therefore the shared visuals — run on both
+ * without a single branch on story kind.
+ */
+export async function writeProjectedBible(
+  seriesId: string,
+  targetChannelId: string,
+  targetStoryId: string,
+): Promise<BibleArtifact> {
+  const [bible, characters] = await Promise.all([loadBible(seriesId), loadCharacters(seriesId)]);
+  const projected: BibleArtifact = {
+    version: 1,
+    setting: bible.setting || bible.premise,
+    characters: characters.characters.map((character) => ({
+      name: character.name,
+      role: character.role,
+      description: character.staticProfile.appearance,
+      arc: character.state.goals.join("; "),
+    })),
+    timeline: [],
+    locations: bible.locations.map((location) => ({ name: location.name, description: location.description })),
+    supernaturalRules: bible.worldRules.map((rule) => rule.text),
+    knownFacts: bible.fixedFacts.map((fact) => fact.text),
+    openQuestions: bible.mysteries.filter((mystery) => mystery.status === "OPEN").map((mystery) => mystery.question),
+    endingConstraints: bible.endingConstraints,
+    provenance: {
+      provider: "canon",
+      model: `canon:${seriesId}`,
+      promptVersion: "projection-v1",
+      generatedAt: new Date().toISOString(),
+    },
+  };
+  await writeStageArtifact(targetChannelId, targetStoryId, "bible", projected);
+  return projected;
 }
 
 /** Where a variant's images live, relative to its channel project. */
