@@ -30,6 +30,14 @@ export type LlmEndpointConfig = {
   paid: boolean;
   temperature: number;
   maxOutputTokens: number;
+  /**
+   * The model's total context window. Without it a story-context builder has
+   * no ceiling to check against, and an 8k local model silently overflows —
+   * llama.cpp and Ollama truncate the FRONT of the prompt, which is exactly
+   * where the stable canon rules and story bible sit. 0 means "unknown", and
+   * the builder then falls back to its configured budget alone.
+   */
+  contextWindowTokens: number;
   // Which transport carries this endpoint's calls. "openai-compatible" covers
   // Ollama, LM Studio, OpenAI, DeepSeek, Groq, and OpenRouter; "anthropic" and
   // "gemini" call those providers' native APIs directly. baseUrl still names
@@ -116,16 +124,57 @@ export type StudioConfig = {
   };
   storyFactory: {
     enabled: boolean;
+    /**
+     * Role → endpoint. The record is TOTAL: an unset role is one whose `model`
+     * is empty, never a missing key. Optional keys would make every
+     * `models[role].model` call site possibly-undefined, and the "unset" test
+     * `model.trim() === ""` is the one `stageEndpoint` already performs.
+     *
+     * The split exists so expensive models can do the rare architectural work
+     * while small or local models do the high-volume production work.
+     */
     models: {
       planner: LlmEndpointConfig;
       writer: LlmEndpointConfig;
       qa: LlmEndpointConfig;
+      /** Series design and arc planning — rare, worth a strong model. */
+      architect: LlmEndpointConfig;
+      /** Localization — high volume, cheap multilingual model. */
+      localizer: LlmEndpointConfig;
+      /** Memory extraction — high volume, cheap model. */
+      memory: LlmEndpointConfig;
     };
     // USD per million tokens by model-name substring; first match wins. Empty
     // means costs record as 0 with usage still logged.
     llmPricing: Array<{ modelPattern: string; inputUsdPerMTok: number; outputUsdPerMTok: number }>;
     duplicateSimilarityThreshold: number;
     defaultMaxCostPerStoryUsd: number;
+    /** Story memory embeddings. Optional: retrieval works without them. */
+    embeddings: {
+      // "disabled" is the default and a first-class mode, not a degraded one:
+      // keyword+structured retrieval is the primary path, and it is the only
+      // path that runs offline and in tests.
+      provider: "disabled" | "openai-compatible" | "ollama";
+      baseUrl: string;
+      model: string;
+      apiKeyEnv: string;
+      /** Guards the same way chat does; embeddings can spend real money. */
+      paid: boolean;
+      usdPerMTok: number;
+    };
+    canon: {
+      enabled: boolean;
+      /** Ceiling for an assembled chapter context, before the model's own window. */
+      contextTokenBudget: number;
+      /** Retrieved memories per entity class, so one entity cannot crowd out the rest. */
+      retrievalTopKPerClass: number;
+      /** Rewrite attempts on a local model before escalating to a stronger role. */
+      escalateAfterAttempts: number;
+      /** Hard ceiling on all retry loops for one chapter, whatever their cause. */
+      maxAttemptsPerChapter: number;
+      /** Relative weights for hybrid retrieval; renormalized over present signals. */
+      retrievalWeights: { keyword: number; vector: number; importance: number; proximity: number };
+    };
   };
   render: {
     ffmpegPath: string;
@@ -242,10 +291,29 @@ export const DEFAULT_STUDIO_CONFIG: StudioConfig = {
       planner: defaultLlmEndpoint(),
       writer: defaultLlmEndpoint(),
       qa: defaultLlmEndpoint(),
+      architect: defaultLlmEndpoint(),
+      localizer: defaultLlmEndpoint(),
+      memory: defaultLlmEndpoint(),
     },
     llmPricing: [],
     duplicateSimilarityThreshold: 0.6,
     defaultMaxCostPerStoryUsd: 5,
+    embeddings: {
+      provider: "disabled",
+      baseUrl: "http://127.0.0.1:11434",
+      model: "",
+      apiKeyEnv: "",
+      paid: false,
+      usdPerMTok: 0,
+    },
+    canon: {
+      enabled: false,
+      contextTokenBudget: 12000,
+      retrievalTopKPerClass: 6,
+      escalateAfterAttempts: 2,
+      maxAttemptsPerChapter: 6,
+      retrievalWeights: { keyword: 1, vector: 1, importance: 0.5, proximity: 0.5 },
+    },
   },
   render: {
     ffmpegPath: "",
@@ -414,6 +482,9 @@ export function normalizeStudioConfig(value: unknown): StudioConfig {
         planner: llmEndpointValue(candidate.storyFactory?.models?.planner),
         writer: llmEndpointValue(candidate.storyFactory?.models?.writer),
         qa: llmEndpointValue(candidate.storyFactory?.models?.qa),
+        architect: llmEndpointValue(candidate.storyFactory?.models?.architect),
+        localizer: llmEndpointValue(candidate.storyFactory?.models?.localizer),
+        memory: llmEndpointValue(candidate.storyFactory?.models?.memory),
       },
       llmPricing: llmPricingValue(candidate.storyFactory?.llmPricing),
       duplicateSimilarityThreshold: rangeValue(
@@ -428,6 +499,8 @@ export function normalizeStudioConfig(value: unknown): StudioConfig {
         0,
         10000,
       ),
+      embeddings: embeddingsValue(candidate.storyFactory?.embeddings),
+      canon: canonValue(candidate.storyFactory?.canon),
     },
     render: {
       ffmpegPath: stringValue(candidate.render?.ffmpegPath, ""),
@@ -502,6 +575,7 @@ function defaultLlmEndpoint(): LlmEndpointConfig {
     paid: false,
     temperature: 0.8,
     maxOutputTokens: 8000,
+    contextWindowTokens: 0,
     provider: "openai-compatible",
   };
 }
@@ -516,7 +590,45 @@ function llmEndpointValue(value: unknown): LlmEndpointConfig {
     paid: booleanValue(candidate.paid, fallback.paid),
     temperature: rangeValue(candidate.temperature, fallback.temperature, 0, 2),
     maxOutputTokens: numberValue(candidate.maxOutputTokens, fallback.maxOutputTokens),
+    contextWindowTokens: numberValue(candidate.contextWindowTokens, fallback.contextWindowTokens),
     provider: enumValue(candidate.provider, ["openai-compatible", "anthropic", "gemini"], fallback.provider),
+  };
+}
+
+function embeddingsValue(value: unknown): StudioConfig["storyFactory"]["embeddings"] {
+  const fallback = DEFAULT_STUDIO_CONFIG.storyFactory.embeddings;
+  const candidate =
+    value && typeof value === "object" ? (value as Partial<StudioConfig["storyFactory"]["embeddings"]>) : {};
+  return {
+    provider: enumValue(candidate.provider, ["disabled", "openai-compatible", "ollama"], fallback.provider),
+    baseUrl: stringValue(candidate.baseUrl, fallback.baseUrl),
+    model: stringValue(candidate.model, fallback.model),
+    apiKeyEnv: stringValue(candidate.apiKeyEnv, fallback.apiKeyEnv),
+    paid: booleanValue(candidate.paid, fallback.paid),
+    usdPerMTok: rangeValue(candidate.usdPerMTok, fallback.usdPerMTok, 0, 10000),
+  };
+}
+
+function canonValue(value: unknown): StudioConfig["storyFactory"]["canon"] {
+  const fallback = DEFAULT_STUDIO_CONFIG.storyFactory.canon;
+  const candidate =
+    value && typeof value === "object" ? (value as Partial<StudioConfig["storyFactory"]["canon"]>) : {};
+  const weights =
+    candidate.retrievalWeights && typeof candidate.retrievalWeights === "object"
+      ? candidate.retrievalWeights
+      : fallback.retrievalWeights;
+  return {
+    enabled: booleanValue(candidate.enabled, fallback.enabled),
+    contextTokenBudget: rangeValue(candidate.contextTokenBudget, fallback.contextTokenBudget, 1000, 1_000_000),
+    retrievalTopKPerClass: rangeValue(candidate.retrievalTopKPerClass, fallback.retrievalTopKPerClass, 1, 100),
+    escalateAfterAttempts: rangeValue(candidate.escalateAfterAttempts, fallback.escalateAfterAttempts, 1, 10),
+    maxAttemptsPerChapter: rangeValue(candidate.maxAttemptsPerChapter, fallback.maxAttemptsPerChapter, 1, 50),
+    retrievalWeights: {
+      keyword: rangeValue(weights.keyword, fallback.retrievalWeights.keyword, 0, 10),
+      vector: rangeValue(weights.vector, fallback.retrievalWeights.vector, 0, 10),
+      importance: rangeValue(weights.importance, fallback.retrievalWeights.importance, 0, 10),
+      proximity: rangeValue(weights.proximity, fallback.retrievalWeights.proximity, 0, 10),
+    },
   };
 }
 

@@ -41,11 +41,15 @@ function chatFnFor(provider: LlmEndpointConfig["provider"]): ChatFn {
   }
 }
 
-export type LlmStageRole = "planner" | "writer" | "qa";
+export type LlmStageRole = "planner" | "writer" | "qa" | "architect" | "localizer" | "memory";
 
 /**
  * Which configured model runs which stage — cheap models plan and label,
  * stronger models write and check. Editable only here.
+ *
+ * The canon roles exist so the expensive/rare work (series architecture, arc
+ * design) can use a strong paid model while the high-volume work (chapter
+ * prose, memory extraction, localization) runs on a small or local one.
  */
 export const STAGE_ROLES: Partial<Record<StoryStageId, LlmStageRole>> = {
   idea: "planner",
@@ -58,6 +62,29 @@ export const STAGE_ROLES: Partial<Record<StoryStageId, LlmStageRole>> = {
   "continuity-qa": "qa",
   naturalize: "qa",
   "originality-qa": "qa",
+
+  // Canon. Chapter planning is architectural; chapter prose is high-volume.
+  "chapter-plan": "architect",
+  "canon-write": "writer",
+  "canon-continuity": "qa",
+  "memory-extract": "memory",
+
+  // Localization is the highest-volume AI work in the system — one call per
+  // section per locale per chapter — so it gets its own cheap role.
+  localize: "localizer",
+  "canon-alignment": "qa",
+};
+
+/**
+ * The role a stage escalates to when its own model keeps failing QA. Escalation
+ * is a role swap, not a separate mechanism: `runLlmCall` already takes the
+ * endpoint as a parameter, so retrying with a stronger one is one argument.
+ */
+export const ESCALATION_ROLES: Partial<Record<LlmStageRole, LlmStageRole>> = {
+  writer: "architect",
+  localizer: "qa",
+  memory: "qa",
+  qa: "architect",
 };
 
 export function stageEndpoint(config: StudioConfig, stage: StoryStageId): LlmEndpointConfig {
@@ -65,11 +92,67 @@ export function stageEndpoint(config: StudioConfig, stage: StoryStageId): LlmEnd
   if (!role) {
     throw new Error(`Stage ${stage} is not an LLM stage.`);
   }
+  return roleEndpoint(config, role);
+}
+
+/**
+ * An "unset" role is one with an empty model, never a missing key — the record
+ * is total so every call site stays non-optional. A role configured with no
+ * model falls back to its legacy equivalent, which is what keeps a config
+ * written before the canon roles existed working unchanged.
+ */
+const LEGACY_ROLE_FALLBACK: Record<LlmStageRole, LlmStageRole | null> = {
+  planner: null,
+  writer: null,
+  qa: null,
+  architect: "planner",
+  localizer: "qa",
+  memory: "qa",
+};
+
+export function roleEndpoint(config: StudioConfig, role: LlmStageRole): LlmEndpointConfig {
   const endpoint = config.storyFactory.models[role];
-  if (!endpoint.model.trim()) {
-    throw new Error(
-      `No model configured for the story factory ${role} role. Set storyFactory.models.${role}.model in the studio config.`,
-    );
+  if (endpoint.model.trim()) {
+    return endpoint;
+  }
+  const fallbackRole = LEGACY_ROLE_FALLBACK[role];
+  if (fallbackRole) {
+    const fallback = config.storyFactory.models[fallbackRole];
+    if (fallback.model.trim()) {
+      return fallback;
+    }
+  }
+  throw new Error(
+    `No model configured for the story factory ${role} role. Set storyFactory.models.${role}.model in the studio config.`,
+  );
+}
+
+/**
+ * The endpoint to retry a failing stage on. Returns null when the stage has
+ * nowhere stronger to go, so the caller stops instead of looping on the same
+ * model. A paid escalation target is refused unless the run was confirmed as
+ * paid: the operator authorised the pipeline, not a silent free-to-paid switch.
+ */
+export function escalationEndpoint(
+  config: StudioConfig,
+  stage: StoryStageId,
+  confirmedPaidRequest: boolean,
+): LlmEndpointConfig | null {
+  const role = STAGE_ROLES[stage];
+  const target = role ? ESCALATION_ROLES[role] : undefined;
+  if (!role || !target) return null;
+  let endpoint: LlmEndpointConfig;
+  try {
+    endpoint = roleEndpoint(config, target);
+  } catch {
+    return null;
+  }
+  const current = roleEndpoint(config, role);
+  if (endpoint.model === current.model && endpoint.baseUrl === current.baseUrl) {
+    return null;
+  }
+  if (endpoint.paid && !confirmedPaidRequest) {
+    return null;
   }
   return endpoint;
 }

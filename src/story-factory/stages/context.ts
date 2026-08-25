@@ -1,4 +1,4 @@
-import type { StudioConfig } from "../../config.ts";
+import type { LlmEndpointConfig, StudioConfig } from "../../config.ts";
 import type { ChatMessage } from "../../llm/chat.ts";
 import type { ImageProvider } from "../../images/types.ts";
 import type { TtsProvider } from "../../tts/types.ts";
@@ -46,6 +46,12 @@ export async function llmStage<T>(
   promptVersion: string,
   messages: ChatMessage[],
   parse: (raw: string) => T,
+  /**
+   * Overrides the stage's configured endpoint. This one argument IS the model
+   * escalation mechanism: a retry loop calls the same stage again with a
+   * stronger role's endpoint rather than going through separate machinery.
+   */
+  endpoint?: LlmEndpointConfig,
 ): Promise<LlmCallResult<T>> {
   return runLlmCall({
     channelId: ctx.channelId,
@@ -53,7 +59,7 @@ export async function llmStage<T>(
     stage,
     promptName,
     promptVersion,
-    endpoint: stageEndpoint(ctx.config, stage),
+    endpoint: endpoint ?? stageEndpoint(ctx.config, stage),
     messages,
     parse,
     pricing: ctx.config.storyFactory.llmPricing,
