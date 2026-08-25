@@ -25,9 +25,6 @@ export type SubtitleChoice = { path: string; language: string };
 
 const CANDIDATE_FILE = "candidate.json";
 const SUBTITLE_PATTERN = /^video\.([a-z]{2,3}(?:-[A-Za-z0-9]+)?)(\.auto)?\.(srt|vtt|ass)$/;
-const VIDEO_PATTERN = /^video\.(mp4|mkv|webm|mov|m4a|mp3)$/;
-/** Comment streams that pose as subtitle tracks and that ffmpeg cannot convert. */
-const NON_SUBTITLE_TRACKS = ["danmaku", "live_chat"];
 
 export function parseDownloadProgress(line: string): number | null {
   const match = /^\[download\]\s+(\d+(?:\.\d+)?)%/.exec(line.trim());
@@ -61,17 +58,6 @@ export function selectSubtitle(files: string[], languages: string[]): SubtitleCh
 }
 
 /**
- * The `--sub-langs` value for the configured languages. yt-dlp reads each entry
- * as a pattern, so an empty list would request nothing at all; falling back to
- * the excluded-only form would do the same. `all` minus the comment streams is
- * the honest reading of "no language preference".
- */
-export function subtitleLanguageArgument(languages: string[]): string {
-  const wanted = languages.map((language) => language.trim()).filter(Boolean);
-  return [...(wanted.length ? wanted : ["all"]), ...NON_SUBTITLE_TRACKS.map((track) => `-${track}`)].join(",");
-}
-
-/**
  * Downloads a declared candidate. Cleanup runs in `finally` and the status write
  * follows it regardless: a full disk that also defeats cleanup must still leave
  * `failed` on record rather than a candidate frozen in `downloading`.
@@ -90,13 +76,7 @@ export async function downloadCandidate(id: string, options: DownloadOptions): P
 
   // A retry must not inherit half of an earlier attempt.
   await clearDownloadedFiles(safeId);
-  await patchCandidate(safeId, (current) => ({
-    ...current,
-    status: "downloading",
-    error: undefined,
-    warning: undefined,
-    media: undefined,
-  }));
+  await patchCandidate(safeId, (current) => ({ ...current, status: "downloading", error: undefined, media: undefined }));
 
   const args = [
     ...(options.ytDlpArgs ?? config?.sources.ytDlpArgs ?? []),
@@ -104,15 +84,6 @@ export async function downloadCandidate(id: string, options: DownloadOptions): P
     format,
     "--write-subs",
     "--write-auto-subs",
-    // Naming the languages keeps two hazards away. Left to itself yt-dlp takes
-    // whatever track a platform offers first, and on Bilibili that is danmaku —
-    // scrolling comments in an XML ffmpeg cannot convert, which failed the whole
-    // download after the video had already arrived. Asking for `all` instead
-    // trades that for YouTube handing back a hundred auto-translated languages
-    // until it answers 429. The exclusions still hold the line for an operator
-    // who configures `all` deliberately.
-    "--sub-langs",
-    subtitleLanguageArgument(languages),
     "--newline",
     // Without --ffmpeg-location a split-format download (bv*+ba) leaves
     // unmerged video.f<id>.<ext> files behind and still exits 0.
@@ -123,7 +94,6 @@ export async function downloadCandidate(id: string, options: DownloadOptions): P
   ];
   options.onCommand?.(executable, args);
 
-  let warning = "";
   try {
     // Progress must reach the job while yt-dlp is still running, throttled to
     // whole percents so a chatty download does not thrash the job store.
@@ -143,29 +113,20 @@ export async function downloadCandidate(id: string, options: DownloadOptions): P
         : undefined,
     });
   } catch (error: unknown) {
+    await removeQuietly(() => clearDownloadedFiles(safeId));
     // An abort is a cancellation, not a broken source: the remedies differ, and a
     // cancelled download reported as failed reads as damage nobody caused.
     if (isAbort(error, options.signal)) {
-      await removeQuietly(() => clearDownloadedFiles(safeId));
       await patchCandidate(safeId, (current) => ({ ...current, status: "metadata", error: undefined }));
       throw error;
     }
     const message = redact(failureDetail(error));
-    // yt-dlp reports a post-processing failure — a subtitle it could not convert
-    // or could not fetch past a rate limit — with the same non-zero exit as a
-    // download that never started, and `--ignore-errors` does not soften it. The
-    // subtitle is optional here, so throwing away a merged video over one is the
-    // more expensive mistake: keep the video and carry the complaint instead.
-    if (!(await hasMergedVideo(directory))) {
-      await removeQuietly(() => clearDownloadedFiles(safeId));
-      await patchCandidate(safeId, (current) => ({ ...current, status: "failed", error: message }));
-      throw new Error(`yt-dlp could not download ${safeId}: ${message}`);
-    }
-    warning = message;
+    await patchCandidate(safeId, (current) => ({ ...current, status: "failed", error: message }));
+    throw new Error(`yt-dlp could not download ${safeId}: ${message}`);
   }
 
   const files = await readdir(directory);
-  const video = files.find((name) => VIDEO_PATTERN.test(name));
+  const video = files.find((name) => /^video\.(mp4|mkv|webm|mov|m4a|mp3)$/.test(name));
   if (!video) {
     await removeQuietly(() => clearDownloadedFiles(safeId));
     const message = "yt-dlp exited successfully but wrote no video file.";
@@ -179,7 +140,6 @@ export async function downloadCandidate(id: string, options: DownloadOptions): P
     ...current,
     status: "downloaded",
     error: undefined,
-    warning: warning || undefined,
     media: {
       videoRelativePath: video,
       ...(options.audioOnly ? { audioOnly: true } : {}),
@@ -198,23 +158,6 @@ async function patchCandidate(
     await saveCandidate(updated);
     return updated;
   });
-}
-
-/**
- * Whether a run left a video that is whole. yt-dlp downloads to `.part` and only
- * renames once a stream is complete, and a split format becomes `video.<ext>`
- * only after the merge, so a merged name with no `.part` beside it is the one
- * signal that the media stage finished — whatever the exit code says.
- */
-async function hasMergedVideo(directory: string): Promise<boolean> {
-  let files: string[];
-  try {
-    files = await readdir(directory);
-  } catch {
-    return false;
-  }
-  if (files.some((name) => name.endsWith(".part"))) return false;
-  return files.some((name) => VIDEO_PATTERN.test(name));
 }
 
 async function clearDownloadedFiles(id: string): Promise<void> {

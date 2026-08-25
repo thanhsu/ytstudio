@@ -398,8 +398,8 @@ async function routeRequest(
   if (method === "GET" && url.pathname === "/api/youtube/oauth/callback") {
     const code = url.searchParams.get("code")?.trim() ?? "";
     const state = url.searchParams.get("state")?.trim() ?? "";
-    const pending = state ? consumeOAuthState(state) : null;
-    if (!pending || !code) {
+    const channelId = state ? consumeOAuthState(state) : null;
+    if (!channelId || !code) {
       sendError(response, 400, { code: "youtube-oauth-state-invalid", message: "The YouTube OAuth state or code is missing or expired." });
       return;
     }
@@ -410,13 +410,14 @@ async function routeRequest(
       sendError(response, 409, { code: "youtube-not-configured", message: "YouTube OAuth client credentials are not configured." });
       return;
     }
+    const redirectBaseUrl = url.origin;
     const token = await exchangeCode({
       clientId,
       clientSecret,
-      redirectUri: pending.redirectUri,
+      redirectUri: `${redirectBaseUrl}/api/youtube/oauth/callback`,
       code,
     });
-    await saveTokens(pending.channelId, storedTokensFromResponse(token));
+    await saveTokens(channelId, storedTokensFromResponse(token));
     sendHtml(response, 200, "YouTube connected — you can close this tab.");
     return;
   }

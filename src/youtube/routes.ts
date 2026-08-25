@@ -52,7 +52,7 @@ export async function routeYouTube(options: {
       const redirectBaseUrl = typeof body.redirectBaseUrl === "string" && body.redirectBaseUrl.trim() ? body.redirectBaseUrl.trim().replace(/\/+$/, "") : "http://127.0.0.1:3000";
       const redirectUri = `${redirectBaseUrl}/api/youtube/oauth/callback`;
       const state = `${seriesId}.${randomUUID()}`;
-      rememberOAuthState(state, seriesId, redirectUri);
+      rememberOAuthState(state, seriesId);
       tools.sendJson(200, { ok: true, authUrl: buildAuthUrl({ clientId, redirectUri, scopes: config.youtube.scopes, state }) });
       return true;
     }

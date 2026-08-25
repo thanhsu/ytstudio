@@ -1613,11 +1613,6 @@ video {
   color: #f85149;
 }
 
-.source-warning {
-  margin: 0;
-  color: #d29922;
-}
-
 .source-actions {
   display: flex;
   gap: 0.5rem;

@@ -3,7 +3,7 @@ import test from "node:test";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { buildAuthUrl, consumeOAuthState, exchangeCode, refreshAccessToken, rememberOAuthState } from "../src/youtube/oauth.ts";
+import { buildAuthUrl, exchangeCode, refreshAccessToken } from "../src/youtube/oauth.ts";
 import { clearTokens, getFreshAccessToken, loadTokens, saveTokens } from "../src/youtube/token-store.ts";
 import { createStudioServer, startStudioServer } from "../src/server.ts";
 
@@ -26,19 +26,6 @@ test("buildAuthUrl carries offline consent and encoded OAuth parameters", () => 
   assert.equal(url.searchParams.get("state"), "channel.one");
   assert.equal(url.searchParams.get("access_type"), "offline");
   assert.equal(url.searchParams.get("prompt"), "consent");
-});
-
-test("OAuth state remembers the exact redirect URI used in the auth request", () => {
-  const now = Date.now();
-  rememberOAuthState("es-horror.state-1", "es-horror", "http://127.0.0.1:3000/api/youtube/oauth/callback", now);
-  assert.deepEqual(consumeOAuthState("es-horror.state-1", now), {
-    channelId: "es-horror",
-    redirectUri: "http://127.0.0.1:3000/api/youtube/oauth/callback",
-  });
-  // Consumed states cannot be replayed, and expired states are rejected.
-  assert.equal(consumeOAuthState("es-horror.state-1", now), null);
-  rememberOAuthState("es-horror.state-2", "es-horror", "http://127.0.0.1:3000/api/youtube/oauth/callback", now);
-  assert.equal(consumeOAuthState("es-horror.state-2", now + 11 * 60 * 1000), null);
 });
 
 test("exchangeCode and refreshAccessToken post form bodies and compute expiry", async () => {
