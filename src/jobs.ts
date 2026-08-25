@@ -21,7 +21,12 @@ export type JobKind =
   | "final-render"
   | "youtube-metadata"
   | "reup-wizard"
-  | "youtube-publish";
+  | "youtube-publish"
+  // Canon: designing a series, and running one chapter's stages. Chapter jobs
+  // use a composite owner (seriesId::chapterId) so chapters of one series run
+  // concurrently, the way stories of one channel already do.
+  | "canon-design"
+  | "canon-chapter";
 export type JobStatus = "running" | "succeeded" | "failed" | "cancelled";
 
 export type JobRecord = {

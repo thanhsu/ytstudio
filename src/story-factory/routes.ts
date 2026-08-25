@@ -33,6 +33,8 @@ import { resolveProjectPath } from "../project-paths.ts";
 import { createCompilation, exportCompilation, listCompilations, loadCompilation, renderCompilation, runCompilationMetadata } from "./compilation.ts";
 import { isStoryStageId, type StoryApprovalStage, type StoryProject, type StoryStageId } from "./types.ts";
 import { startYouTubePublish, type YouTubePublishInput } from "../youtube/publish.ts";
+import { routeCanon, routeCanonChapter, type CanonRouteTools } from "../canon/routes.ts";
+import { listProjectIds } from "../fs.ts";
 
 /**
  * The story-factory HTTP surface, mounted inside the series router:
@@ -270,6 +272,21 @@ export async function routeStoryFactory(options: {
       },
     });
     return;
+  }
+
+  // Canon series entities. Chapters need no routes of their own: a canon
+  // chapter is a StoryProject, so the `stories/...` endpoints below already
+  // cover its stage runs, artifacts, approvals, AI log, and cost.
+  if (rest.startsWith("canon/")) {
+    const handled = await routeCanon({
+      method,
+      rest: rest.slice("canon/".length),
+      url,
+      seriesId: channelId,
+      config,
+      tools: canonTools(tools),
+    });
+    if (handled) return;
   }
 
   const storyMatch = /^stories\/([a-z0-9-]+)(?:\/(.+))?$/.exec(rest);
@@ -545,7 +562,19 @@ async function routeStory(options: {
     return;
   }
 
-  const approveMatch = /^approve\/(script|media|final)$/.exec(storyRest);
+  // Canon-specific chapter verbs the generic story routes have no notion of.
+  if (storyRest === "lock" || storyRest === "unlock" || storyRest === "publish-variants") {
+    const handled = await routeCanonChapter({
+      method,
+      rest: storyRest,
+      seriesId: channelId,
+      chapterId: storyId,
+      tools: canonTools(tools),
+    });
+    if (handled) return;
+  }
+
+  const approveMatch = /^approve\/(script|media|final|canon)$/.exec(storyRest);
   if (approveMatch && method === "POST") {
     const body = await tools.readBody();
     try {
@@ -656,6 +685,20 @@ function artifactPaths(story: StoryProject): Record<string, string> {
     }
   }
   return result;
+}
+
+/**
+ * The canon routes need one capability the story tools do not carry: the list
+ * of project ids, so a series can discover which channels publish it.
+ */
+function canonTools(tools: StoryFactoryTools): CanonRouteTools {
+  return {
+    sendJson: tools.sendJson,
+    sendError: tools.sendError,
+    readBody: tools.readBody,
+    startChannelJob: tools.startChannelJob,
+    listProjectIds,
+  };
 }
 
 function optionalString(value: unknown): string | undefined {

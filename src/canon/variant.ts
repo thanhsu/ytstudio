@@ -1,6 +1,7 @@
 import { copyFile, mkdir, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { sha256 } from "../project-state.ts";
+import { resolveProjectPath } from "../project-paths.ts";
 import { loadStoryChannel } from "../story-factory/channel.ts";
 import { storyPath, storyRelativePath } from "../story-factory/paths.ts";
 import {
@@ -35,6 +36,18 @@ import type { CanonChapterArtifact } from "./types.ts";
  * the difference between a variant costing one stage and costing a fork of the
  * whole pipeline.
  */
+
+/** Whether a project has actually been configured as a story channel. */
+async function hasStoryChannelConfig(channelId: string): Promise<boolean> {
+  try {
+    await readFile(resolveProjectPath(channelId, "story-channel.json"), "utf8");
+    return true;
+  } catch (error: unknown) {
+    if (isNotFound(error)) return false;
+    // An invalid project id is not a configured channel either.
+    return false;
+  }
+}
 
 /** A canon chapter's directory, read from another project. */
 export function canonChapterPath(seriesId: string, chapterId: string, ...segments: string[]): string {
@@ -83,6 +96,20 @@ export async function createPublicationVariant(input: CreateVariantInput): Promi
   const anchor = chapterStory.stages["canon-write"];
   if (!anchor?.artifactHash || anchor.artifactHash !== chapterStory.approvals.canon.artifactHash) {
     throw new CanonChapterNotApprovedError(input.chapterId, "its canon approval is stale");
+  }
+
+  // A canon series must not publish into itself: its chapters are the source,
+  // not a market.
+  if (input.channelId === input.seriesId) {
+    throw new Error("A canon series cannot publish variants into itself. Choose a publication channel.");
+  }
+  // loadStoryChannel returns normalized defaults for a missing file, which is
+  // right for reading but wrong here: without this check a typo'd channel id
+  // would silently CREATE a project and a variant inside it.
+  if (!(await hasStoryChannelConfig(input.channelId))) {
+    throw new Error(
+      `Channel ${input.channelId} has no story-channel.json. Configure the channel before publishing into it.`,
+    );
   }
 
   const channel = await loadStoryChannel(input.channelId);
