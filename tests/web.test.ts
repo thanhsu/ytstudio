@@ -304,6 +304,7 @@ test("the config and story video screens expose Hyperframes rendering controls",
   assert.match(script, /artifact\.engine/);
   assert.match(script, /artifact\.outputSha256/);
   assert.match(script, /artifact\.compositionPath/);
+  assert.match(script, /seriesLinkButton\(channelId, "Hyperframes composition", artifact\.compositionPath\)/);
 });
 
 test("the sources screen exposes paste, rights, score, download, and delete", async () => {

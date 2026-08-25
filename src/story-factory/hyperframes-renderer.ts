@@ -1,5 +1,5 @@
 import { mkdir, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { runProcess } from "../process.ts";
 import type { HyperframesComposition } from "./hyperframes-composition.ts";
 
@@ -37,7 +37,7 @@ export async function renderHyperframesStoryVideo(options: RenderHyperframesOpti
   try {
     await runProcess(
       options.command,
-      [...options.args, "render", "--output", outputPath, "."],
+      [...resolveConfiguredArgs(options.args), "render", "--output", outputPath, "."],
       { cwd: options.workspacePath, signal: combinedSignal },
     );
   } catch (error) {
@@ -51,6 +51,16 @@ export async function renderHyperframesStoryVideo(options: RenderHyperframesOpti
 
   await stat(outputPath);
   return { engine: "hyperframes", videoPath: outputPath, compositionPath, manifestPath };
+}
+
+function resolveConfiguredArgs(args: string[]): string[] {
+  const basePath = process.cwd();
+  return args.map((arg) => {
+    if ((arg.startsWith("./") || arg.startsWith("../") || arg.startsWith(".\\") || arg.startsWith("..\\")) && !isAbsolute(arg)) {
+      return resolve(basePath, arg);
+    }
+    return arg;
+  });
 }
 
 function combineSignals(signals: Array<AbortSignal | undefined>): AbortSignal | undefined {

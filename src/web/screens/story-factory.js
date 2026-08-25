@@ -542,10 +542,11 @@ async function renderStoryVideoTab(channelId, storyId) {
     Size: `${artifact.width}x${artifact.height}`,
   };
   if (artifact.outputSha256) summary["Output sha256"] = artifact.outputSha256;
-  if (artifact.compositionPath) summary.Composition = artifact.compositionPath;
-  return [wrapSection("Rendered video", video, summaryGrid({
-    ...summary,
-  }))];
+  const controls = [];
+  if (artifact.compositionPath) {
+    controls.push(seriesLinkButton(channelId, "Hyperframes composition", artifact.compositionPath));
+  }
+  return [wrapSection("Rendered video", video, summaryGrid(summary), ...controls)];
 }
 
 async function renderStoryThumbnailTab(channelId, storyId) {

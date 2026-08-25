@@ -10,15 +10,17 @@ Branch: feature/hyperframes-story-render
 - Added deterministic `visual-prompts` stage that derives scene cues from the approved naturalized narration, scene timing, and TTS chunk timing.
 - Added Hyperframes composition generation under `workspace/render/hyperframes/` with escaped HTML/CSS and a manifest.
 - Added a direct CLI renderer adapter that invokes `node ./node_modules/hyperframes/bin/hyperframes.mjs render --output ... .`, with timeout/abort handling and no `npx` wrapper.
+- Relative configured CLI script args are resolved before entering the composition workspace, so the default local Hyperframes CLI path still works when rendering from `workspace/render/hyperframes/`.
 - Wired the story pipeline so `render` depends on `visual-prompts` and can render with either FFmpeg or Hyperframes.
 - Render artifacts now record `engine`, optional `outputSha256`, and optional `compositionPath`; final approval staleness remains anchored to the render artifact hash.
-- Exposed the new render engine settings in Config and render provenance in the Story Factory video tab.
+- Exposed the new render engine settings in Config and render provenance plus a composition inspection link in the Story Factory video tab.
 
 ## Verification
 
 - `npm run typecheck` passed.
 - `node --test tests\\story-pipeline.test.ts tests\\hyperframes-renderer.test.ts tests\\hyperframes-composition.test.ts tests\\story-visual-prompts.test.ts tests\\web-phases.test.ts` passed.
 - `node --test tests\\web.test.ts tests\\web-phases.test.ts` passed.
+- `node --test tests\\config.test.ts tests\\hyperframes-renderer.test.ts tests\\story-pipeline.test.ts tests\\web.test.ts tests\\web-phases.test.ts` passed.
 - `node --test --test-concurrency=1 tests\\*.test.ts` passed: 662/662.
 - `npm ls hyperframes` reports `hyperframes@0.8.13`.
 - `node -v` reports `v22.23.2`.

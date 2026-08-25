@@ -104,6 +104,12 @@ test("render config defaults to ffmpeg and pinned local Hyperframes CLI", async 
   });
 });
 
+test("package metadata pins Hyperframes because the CLI is pre-1.0", async () => {
+  const packageJson = JSON.parse(await readFile("package.json", "utf8"));
+
+  assert.equal(packageJson.devDependencies.hyperframes, "0.8.13");
+});
+
 test("render config accepts hyperframes and normalizes malformed values", async () => {
   await withTempCwd(async () => {
     await writeFile(
