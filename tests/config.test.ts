@@ -93,6 +93,54 @@ test("studio config defaults story transitions to a plain 0.5s fade", async () =
   });
 });
 
+test("render config defaults to ffmpeg and pinned local Hyperframes CLI", async () => {
+  await withTempCwd(async () => {
+    const config = await loadStudioConfig();
+
+    assert.equal(config.render.storyEngine, "ffmpeg");
+    assert.equal(config.render.hyperframesCommand, "node");
+    assert.deepEqual(config.render.hyperframesArgs, ["./node_modules/hyperframes/bin/hyperframes.mjs"]);
+    assert.equal(config.render.hyperframesTimeoutMinutes, 90);
+  });
+});
+
+test("render config accepts hyperframes and normalizes malformed values", async () => {
+  await withTempCwd(async () => {
+    await writeFile(
+      "studio.config.json",
+      JSON.stringify({
+        render: {
+          storyEngine: "hyperframes",
+          hyperframesCommand: "node",
+          hyperframesArgs: ["./node_modules/hyperframes/bin/hyperframes.mjs"],
+          hyperframesTimeoutMinutes: 15,
+        },
+      }),
+      "utf8",
+    );
+    const config = await loadStudioConfig();
+    assert.equal(config.render.storyEngine, "hyperframes");
+    assert.deepEqual(config.render.hyperframesArgs, ["./node_modules/hyperframes/bin/hyperframes.mjs"]);
+    assert.equal(config.render.hyperframesTimeoutMinutes, 15);
+
+    await writeFile(
+      "studio.config.json",
+      JSON.stringify({
+        render: {
+          storyEngine: "bad",
+          hyperframesArgs: "npx hyperframes",
+          hyperframesTimeoutMinutes: -1,
+        },
+      }),
+      "utf8",
+    );
+    const repaired = await loadStudioConfig();
+    assert.equal(repaired.render.storyEngine, "ffmpeg");
+    assert.deepEqual(repaired.render.hyperframesArgs, ["./node_modules/hyperframes/bin/hyperframes.mjs"]);
+    assert.equal(repaired.render.hyperframesTimeoutMinutes, 90);
+  });
+});
+
 test("a valid xfade transition setting is saved and reloaded as-is", async () => {
   await withTempCwd(async () => {
     const saved = await saveStudioConfig({
