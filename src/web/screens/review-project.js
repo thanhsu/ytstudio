@@ -3,7 +3,7 @@ import {
   summaryGrid, formatBytes, checklist, wrapSection, uploadField, fileField,
   paragraph, sectionTitle, field, textareaField, checkboxField, selectField,
   actionButton, formValues, boolFormValues, strongText, confidenceMeter,
-  formatTimecode, formatSeconds, sliderField,
+  formatTimecode, formatSeconds, sliderField, inlineError,
 } from "../lib/dom.js";
 import { toast, paidVoiceDialog, paidScriptDialog } from "../lib/shell.js";
 import {
@@ -834,6 +834,19 @@ function renderCutControls(snapshot) {
 }
 
 function renderRender(snapshot) {
+  onJobEvent((job) => {
+    if (job.status !== "failed") return;
+    if (job.kind !== "render" && job.kind !== "final-render") return;
+    if (appState.activeStage !== "render") return;
+    const errorBlock = inlineError(
+      "Render failed",
+      job.error ?? "Unknown error",
+      [{ label: "Dismiss", onClick: () => errorBlock.remove() },
+       { label: "Try again", onClick: () => requestRender(), variant: "primary" }],
+    );
+    stageContent.prepend(errorBlock);
+  });
+
   const mapping = snapshot.visualMapping;
   const gateNotice = renderGateNotice(snapshot);
   // Built before the early return below: a cut project never has a visual

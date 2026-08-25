@@ -244,6 +244,33 @@ export function tableCell(text) {
  * A label containing a range slider and a number input kept in sync.
  * Both share the same `name` so formValues() reads the number input value.
  */
+export function inlineError(title, detail, actions = []) {
+  const block = document.createElement("div");
+  block.className = "inline-error";
+  const head = document.createElement("div");
+  head.className = "inline-error-head";
+  const icon = document.createElement("span");
+  icon.className = "inline-error-icon";
+  icon.textContent = "✕";
+  const heading = document.createElement("strong");
+  heading.className = "inline-error-title";
+  heading.textContent = title;
+  head.append(icon, heading);
+  const pre = document.createElement("pre");
+  pre.className = "inline-error-detail";
+  pre.textContent = detail;
+  block.append(head, pre);
+  if (actions.length) {
+    const btns = document.createElement("div");
+    btns.className = "inline-error-actions";
+    for (const { label, onClick, variant } of actions) {
+      btns.append(actionButton(label, onClick, "button", variant ?? ""));
+    }
+    block.append(btns);
+  }
+  return block;
+}
+
 export function sliderField(label, name, value, min, max, step = "any") {
   const numberId = `sf-${name.replace(/\W/g, "-")}-${Math.random().toString(36).slice(2, 6)}`;
   const wrapper = document.createElement("label");
