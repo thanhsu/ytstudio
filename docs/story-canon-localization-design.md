@@ -1,6 +1,6 @@
 # Story Canon + Localization — Design
 
-Status: design (2026-08-25). Extends the AI Audio Story Factory
+Status: implemented (2026-08-25) on `feature/story-canon-localization`. Extends the AI Audio Story Factory
 (`docs/ai-audio-story-factory-design.md`, Phase 1 + 2, on master).
 
 ## Goal
@@ -356,6 +356,36 @@ into a loop over role names, so six roles cost what three did.
 - `src/audio-story.ts` remains live and duplicative pending a separate decision.
 - Localization quality of a small local model is unproven; the alignment gate
   bounds factual drift, not prose quality.
+
+## What is NOT wired
+
+Stated plainly so nobody has to discover it by reading code:
+
+- **Embeddings are implemented but not invoked.** `EmbeddingProvider`
+  (Ollama / OpenAI-compatible), the vector store, cosine similarity, the
+  paid-request guard and the cost estimate all exist and are configurable, and
+  `retrieve()` accepts and ranks vectors. But no stage calls the provider, so
+  no vectors are ever written and retrieval runs keyword+structured in every
+  path today. Wiring it is one `embed` stage after `memory-apply`; nothing in
+  the retrieval contract has to change.
+- **`CostKind` was not widened to `embedding`.** It follows from the above:
+  `ChannelCosts.byKind` is a closed three-key object and `addStoryCost`
+  increments `byMonth` unconditionally, so adding a fourth kind without
+  updating both would desync the monthly budget guard from the ledger. That
+  belongs with the embed stage, not before it.
+- **Knowledge rollup is a field, not a behaviour.** `knowledgeSummary` and
+  `summarizedThroughChapter` exist on character state and the context builder
+  renders them, but nothing writes them yet. Character knowledge is therefore
+  bounded by relevance selection (only the chapter's cast) and by the context
+  budget, but not yet by compaction. For a 40-chapter series the budget test
+  shows that is sufficient; for a 200-chapter one it will not be.
+- **Canon performance ships without retention or CTR.** Those need YouTube
+  Analytics scopes the repo does not request. Views, likes, comments and
+  production cost are real; the comparison is honest but coarse.
+- **`src/audio-story.ts` still runs.** It is a deprecated prototype of this
+  feature with colliding type names and its own Bible/Outline/Chapters UI.
+  Canon types are prefixed `Canon*` to avoid confusion. Removing it is a
+  separate, explicitly-approved change.
 
 ## Out of scope
 

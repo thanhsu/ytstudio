@@ -342,6 +342,12 @@ test("MVP 1 — chapter 2 sees chapter 1's state and events, but not its prose",
     );
     assert.ok(context!.estimatedTokens <= context!.budgetTokens, "and it fits the budget");
     assert.ok(context!.blocks.length > 0 && context!.retrieved.length > 0, "the debugger has something to show");
+
+    // Chapter 1's context was actually used for a write, so its estimate has
+    // been checked against the provider's measured prompt count. Without this
+    // the chars-per-token heuristic would never be anything but a guess.
+    const usedContext = await readStageArtifact<ContextReport>(SERIES, chapterIdFor(1), "canon-context");
+    assert.equal(usedContext?.actualPromptTokens, 1000, "the measured prompt size is recorded against the estimate");
   });
 });
 

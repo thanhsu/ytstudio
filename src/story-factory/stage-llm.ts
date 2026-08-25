@@ -176,6 +176,13 @@ export type LlmCallResult<T> = {
   value: T;
   provenance: Provenance;
   costUsd: number;
+  /**
+   * Measured usage, when the provider reported any. Local servers often do
+   * not, hence the null. The canon context builder records the prompt count
+   * against its own estimate, which is the only way its chars-per-token
+   * heuristic becomes a measured error rather than an assumed one.
+   */
+  usage: { promptTokens: number; completionTokens: number } | null;
 };
 
 export async function runLlmCall<T>(options: LlmCallOptions<T>): Promise<LlmCallResult<T>> {
@@ -244,5 +251,8 @@ export async function runLlmCall<T>(options: LlmCallOptions<T>): Promise<LlmCall
       generatedAt: new Date().toISOString(),
     },
     costUsd,
+    usage: result.usage
+      ? { promptTokens: result.usage.promptTokens, completionTokens: result.usage.completionTokens }
+      : null,
   };
 }

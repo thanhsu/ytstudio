@@ -224,6 +224,17 @@ export async function runCanonWriteStage(ctx: StageContext): Promise<CanonChapte
   // the series entities rather than as a story stage. Projecting it here lets
   // scene extraction — and so the visuals every locale reuses — run unmodified.
   await writeProjectedBible(ctx.channelId, ctx.channelId, ctx.storyId);
+
+  // Record what the prompt actually cost in tokens against what the builder
+  // estimated. The context budget rests on a chars-per-token heuristic, and
+  // this is the only thing that turns its error from assumed into measured —
+  // visible in the Context tab beside the per-block table.
+  if (result.usage) {
+    await writeStageArtifact(ctx.channelId, ctx.storyId, "canon-context", {
+      ...context,
+      actualPromptTokens: result.usage.promptTokens,
+    });
+  }
   return artifact;
 }
 
