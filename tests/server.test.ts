@@ -1446,3 +1446,45 @@ test("static serving covers nested module files under src/web", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+async function seedApprovedMapping(): Promise<void> {
+  const dir = join("projects", "sample-project", "workspace", "editing");
+  await mkdir(dir, { recursive: true });
+  await writeFile(
+    join(dir, "visual-mapping.json"),
+    JSON.stringify({
+      version: 1,
+      status: "approved",
+      generatedAt: "2026-08-24T00:00:00.000Z",
+      inputFingerprint: "abc",
+      segments: [{
+        id: "scene-001", startSeconds: 0, endSeconds: 5, narration: "n", keywords: [], intent: "hook",
+        assetId: null, confidence: 0, reason: "", fitMode: "cover", sourceStartSeconds: 0,
+        sourceDurationSeconds: 5, muteSourceAudio: true, selectionMode: "automatic",
+        fallback: "generated-background", effects: DEFAULT_SEGMENT_EFFECTS,
+      }],
+    }),
+    "utf8",
+  );
+}
+
+test("clearing a background loop that was never set keeps the approval intact", async () => {
+  await withTempCwd(async () => {
+    await seedApprovedMapping();
+    const running = await startStudioServer(createStudioServer(), { port: 0 });
+    try {
+      const response = await fetch(`${running.url}/api/projects/sample-project/visual-mapping/background-loop`, {
+        method: "PUT",
+        headers: { "content-type": "application/json", origin: running.url },
+        body: JSON.stringify({ assetId: "" }),
+      });
+
+      assert.equal(response.status, 200);
+      // Nothing changed, so the operator's approval must survive: a no-op save
+      // that silently blocks rendering is worse than no button at all.
+      assert.equal((await response.json()).mapping.status, "approved");
+    } finally {
+      await running.close();
+    }
+  });
+});

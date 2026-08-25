@@ -1264,6 +1264,55 @@ async function routeRequest(
     return;
   }
 
+  if (method === "PUT" && rest === "visual-mapping/background-loop") {
+    const mapping = await loadVisualMapping(projectId);
+    if (!mapping) {
+      sendError(response, 404, { code: "visual-mapping-missing", message: "Generate visual mapping first." });
+      return;
+    }
+    const body = await readJsonBody(request);
+    const assetId = typeof body.assetId === "string" ? body.assetId.trim() : "";
+    const before = JSON.stringify(mapping.backgroundLoop ?? null);
+    if (!assetId) {
+      delete mapping.backgroundLoop;
+    } else {
+      let effects: SegmentEffects;
+      try {
+        effects = patchSegmentEffects(mapping.backgroundLoop?.effects, body.effects ?? {});
+      } catch (error: unknown) {
+        sendError(response, 400, {
+          code: "background-loop-effects-invalid",
+          message: error instanceof Error ? error.message : "Background loop effects are invalid.",
+        });
+        return;
+      }
+      const candidate = {
+        ...mapping,
+        backgroundLoop: { assetId, fitMode: body.fitMode === "contain" ? "contain" as const : "cover" as const, effects },
+      };
+      // Validated here rather than only at approval so picking an ineligible
+      // clip fails where the operator picked it, not two clicks later.
+      const manifest = await loadAssetManifest(projectId);
+      const validation = validateVisualMapping(candidate, manifest.assets);
+      const loopErrors = validation.errors.filter((message) => message.startsWith("Background loop"));
+      if (loopErrors.length > 0) {
+        sendError(response, 400, { code: "background-loop-invalid", message: loopErrors.join("; "), details: { errors: loopErrors } });
+        return;
+      }
+      mapping.backgroundLoop = candidate.backgroundLoop;
+    }
+    // A changed background is a changed video, so the approval goes stale for
+    // the same reason a segment edit makes it stale. A save that changed
+    // nothing leaves it alone: silently blocking a render over a no-op would
+    // cost the operator an approval round for no reason.
+    if (JSON.stringify(mapping.backgroundLoop ?? null) !== before) {
+      mapping.status = "draft";
+    }
+    await saveVisualMapping(projectId, mapping);
+    sendJson(response, 200, { ok: true, mapping });
+    return;
+  }
+
   const assetMetadataMatch = /^assets\/([a-zA-Z0-9-]+)$/.exec(rest);
   if (method === "PATCH" && assetMetadataMatch) {
     const body = await readJsonBody(request);

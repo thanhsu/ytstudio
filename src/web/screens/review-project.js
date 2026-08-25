@@ -853,10 +853,13 @@ function renderRender(snapshot) {
     actionButton("Render Draft", () => requestRender(), "button", "primary"),
   );
 
+  const loopPanel = mapping ? renderBackgroundLoopPanel(mapping, snapshot.assetManifest?.assets ?? []) : null;
+
   if (!mapping?.segments?.length) {
     stageContent.replaceChildren(
       toolbar,
       ...(gateNotice ? [gateNotice] : []),
+      ...(loopPanel ? [loopPanel] : []),
       paragraph("Generate a visual mapping to open the timeline editor."),
       cutControls,
     );
@@ -872,10 +875,67 @@ function renderRender(snapshot) {
   stageContent.replaceChildren(
     toolbar,
     ...(gateNotice ? [gateNotice] : []),
+    ...(loopPanel ? [loopPanel] : []),
     editor,
     artifactList(snapshot.state?.artifacts ?? {}, ["voice", "captions", "render", "cut"]),
     cutControls,
   );
+}
+
+// A loop asset must be a video the operator confirmed rights for; the server
+// applies the same rule, so an ineligible clip can never be picked here.
+function eligibleLoopAssets(assets) {
+  return assets.filter((asset) => asset.mediaType === "video" && asset.rightsConfirmed && (asset.usagePurpose ?? "").trim());
+}
+
+function renderBackgroundLoopPanel(mapping, assets) {
+  const loop = mapping.backgroundLoop ?? null;
+  const eligible = eligibleLoopAssets(assets);
+  const form = document.createElement("form");
+  form.className = "render-inspector";
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    saveBackgroundLoop(form).catch((error) => setStatus(error.message));
+  });
+
+  const children = [
+    sectionTitle("Background loop"),
+    paragraph("One video repeated for the whole narration. While a loop is set the scene timeline below is ignored, so the clip fills every frame."),
+  ];
+  if (eligible.length === 0) {
+    children.push(paragraph("No eligible clip yet. Upload a video in the Assets stage with Media type “video”, fill in its usage purpose, and confirm the rights."));
+  }
+  children.push(
+    selectField("Loop clip", "assetId", loop?.assetId ?? "", [["", "None (use the scene timeline)"], ...eligible.map((asset) => [asset.id, asset.filename])]),
+    selectField("Fit", "fitMode", loop?.fitMode ?? "cover", [["cover", "Cover"], ["contain", "Contain"]]),
+    selectField("Zoom", "zoom", loop?.effects?.zoom ?? "none", ZOOM_OPTIONS),
+    selectField("Flip", "flip", loop?.effects?.flip ?? "none", FLIP_OPTIONS),
+    actionButton("Save background loop", null, "submit", "primary"),
+  );
+  if (loop) {
+    children.push(paragraph("Zoom motion runs once per repeat, so it restarts with each pass instead of drifting."));
+  }
+  form.replaceChildren(...children);
+  return form;
+}
+
+async function saveBackgroundLoop(form) {
+  const assetId = form.elements.assetId?.value ?? "";
+  const response = await fetch(projectApiUrl("visual-mapping/background-loop"), {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      assetId,
+      fitMode: form.elements.fitMode?.value,
+      effects: { zoom: form.elements.zoom?.value, flip: form.elements.flip?.value },
+    }),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(`${data.code}: ${data.message}`);
+  setStatus(assetId
+    ? "Background loop saved. Approve the mapping again before rendering."
+    : "Background loop cleared; the scene timeline is active again. Approve the mapping again before rendering.");
+  await refreshProjectView();
 }
 
 // Mirrors DEFAULT_SEGMENT_EFFECTS from src/visual-effects.ts. The web bundle
@@ -886,6 +946,7 @@ const NEUTRAL_SEGMENT_EFFECTS = {
   version: 1,
   speed: 1,
   zoom: "none",
+  flip: "none",
   transitionIn: "cut",
   transitionOut: "cut",
   color: { brightness: 0, contrast: 1, saturation: 1, grayscale: 0 },
@@ -896,6 +957,12 @@ const ZOOM_OPTIONS = [
   ["none", "None"],
   ["slow-in", "Slow zoom in"],
   ["slow-out", "Slow zoom out"],
+];
+
+const FLIP_OPTIONS = [
+  ["none", "None"],
+  ["horizontal", "Mirror left/right"],
+  ["vertical", "Mirror top/bottom"],
 ];
 
 const TRANSITION_OPTIONS = [
@@ -1031,6 +1098,7 @@ function buildEffectsPatch(form, currentEffects) {
   return {
     speed: values.speed,
     zoom: form.elements.zoom?.value,
+    flip: form.elements.flip?.value,
     transitionIn: form.elements.transitionIn?.value,
     transitionOut: form.elements.transitionOut?.value,
     color: {
@@ -1145,6 +1213,7 @@ function renderInspector(segment, assets) {
     paragraph("Effects render only into an exported draft. Saving or resetting effects does not approve the mapping — approve it again before rendering."),
     field("Speed", "speed", String(effects.speed), "number", "", "any", "0.5", "2"),
     selectField("Zoom", "zoom", effects.zoom, ZOOM_OPTIONS),
+    selectField("Flip", "flip", effects.flip ?? "none", FLIP_OPTIONS),
     selectField("Transition in", "transitionIn", effects.transitionIn, TRANSITION_OPTIONS),
     selectField("Transition out", "transitionOut", effects.transitionOut, TRANSITION_OPTIONS),
     field("Brightness", "color.brightness", String(color.brightness), "number", "", "any", "-1", "1"),

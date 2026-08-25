@@ -425,3 +425,33 @@ test("watermark overlay allocates unique labels across successive calls", () => 
   assert.equal(second.nextInputIndex, 4);
   assert.notEqual(first.filter, second.filter);
 });
+
+test("horizontal flip mirrors the frame", () => {
+  assert.equal(
+    buildSegmentEffectFilter("[v0]", "[v1]", effects({ flip: "horizontal" }), DIMENSIONS, 8, "image"),
+    "[v0]hflip[v1]",
+  );
+});
+
+test("vertical flip mirrors the frame", () => {
+  assert.equal(
+    buildSegmentEffectFilter("[v0]", "[v1]", effects({ flip: "vertical" }), DIMENSIONS, 8, "image"),
+    "[v0]vflip[v1]",
+  );
+});
+
+test("flip precedes zoom so mirroring applies to the source geometry", () => {
+  const filter = buildSegmentEffectFilter(
+    "[v0]",
+    "[v1]",
+    effects({ flip: "horizontal", zoom: "slow-in" }),
+    DIMENSIONS,
+    8,
+    "video",
+  );
+  const flipAt = filter.indexOf("hflip");
+  const zoomAt = filter.indexOf("zoompan");
+  assert.ok(flipAt >= 0, `expected hflip in ${filter}`);
+  assert.ok(zoomAt >= 0, `expected zoompan in ${filter}`);
+  assert.ok(flipAt < zoomAt, filter);
+});
