@@ -239,3 +239,45 @@ export function tableCell(text) {
   cell.textContent = text;
   return cell;
 }
+
+/**
+ * A label containing a range slider and a number input kept in sync.
+ * Both share the same `name` so formValues() reads the number input value.
+ */
+export function sliderField(label, name, value, min, max, step = "any") {
+  const numberId = `sf-${name.replace(/\W/g, "-")}-${Math.random().toString(36).slice(2, 6)}`;
+  const wrapper = document.createElement("label");
+  wrapper.className = "field slider-field";
+
+  const caption = document.createElement("span");
+  caption.textContent = label;
+
+  const row = document.createElement("div");
+  row.className = "slider-row";
+
+  const range = document.createElement("input");
+  range.type = "range";
+  range.min = String(min);
+  range.max = String(max);
+  range.step = String(step);
+  range.value = String(value);
+  range.setAttribute("aria-label", label);
+  range.dataset.mirror = numberId;
+
+  const num = document.createElement("input");
+  num.type = "number";
+  num.id = numberId;
+  num.name = name;
+  num.min = String(min);
+  num.max = String(max);
+  num.step = String(step);
+  num.value = String(value);
+  num.className = "slider-num";
+
+  range.addEventListener("input", () => { num.value = range.value; });
+  num.addEventListener("input", () => { range.value = num.value; });
+
+  row.append(range, num);
+  wrapper.append(caption, row);
+  return wrapper;
+}
