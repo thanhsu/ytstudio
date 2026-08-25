@@ -34,6 +34,23 @@ export type RenderInput = {
   assetPaths: string[];
   visualSegments?: RenderVisualSegment[];
   backgroundVideoPath?: string;
+  /** A clip repeated under the whole narration, replacing `visualSegments`.
+   *  Effects are already baked in by `renderDraft` before this point, because
+   *  `-stream_loop` repeats at the input stage: zoompan's frame counter would
+   *  otherwise keep climbing across repeats instead of restarting each pass. */
+  backgroundLoopPath?: string;
+  backgroundLoopFitMode?: "cover" | "contain";
+  /** The operator-facing form of a loop: `renderDraft` bakes its effects into a
+   *  temporary clip and then feeds that clip back through `backgroundLoopPath`. */
+  backgroundLoop?: {
+    assetPath: string;
+    fitMode: "cover" | "contain";
+    /** The clip's own length, which bounds one pass of the loop. Zoom motion is
+     *  measured against it so the movement restarts with each repeat instead of
+     *  drifting further on every pass. */
+    clipDurationSeconds: number;
+    effects: SegmentEffects;
+  };
   ffmpegPath?: string;
   ffmpegPrefixArgs?: string[];
   fontFilePath?: string;
@@ -120,7 +137,10 @@ export function buildShortsRenderArgs(input: RenderInput): string[] {
   // so it can never shift `nextInputIndex` and desynchronize it from the real
   // -i ordinals that later segments and `backgroundVideoPath` depend on.
   let nextWatermarkLabelIndex = 0;
-  for (const [index, segment] of (input.visualSegments ?? []).entries()) {
+  // A background loop owns the whole frame, so the per-scene timeline is skipped
+  // outright rather than built and then overwritten.
+  const visualSegments = input.backgroundLoopPath ? [] : input.visualSegments ?? [];
+  for (const [index, segment] of visualSegments.entries()) {
     const sceneDuration = Math.max(0, segment.endSeconds - segment.startSeconds);
     if (!segment.assetPath || !segment.mediaType) {
       filters.push(`color=c=#111827:s=${width}x${height}:d=${sceneDuration}[scene${index}]`);
@@ -162,7 +182,14 @@ export function buildShortsRenderArgs(input: RenderInput): string[] {
     }
     visualLabels.push(`[scene${index}]`);
   }
-  if (input.backgroundVideoPath) {
+  if (input.backgroundLoopPath) {
+    const loopIndex = nextInputIndex++;
+    // -stream_loop must sit before the -i it applies to.
+    args.push("-stream_loop", "-1", "-i", input.backgroundLoopPath);
+    const fit = visualFilter(loopIndex, width, height, input.backgroundLoopFitMode ?? "cover");
+    filters.push(`${fit}[loopfit]`);
+    filters.push(`[loopfit]trim=duration=${input.durationSeconds},setpts=PTS-STARTPTS[bg]`);
+  } else if (input.backgroundVideoPath) {
     const backgroundIndex = nextInputIndex++;
     args.push("-i", input.backgroundVideoPath);
     filters.push(`[${backgroundIndex}:v]trim=duration=${input.durationSeconds},setpts=PTS-STARTPTS[bg]`);
@@ -212,7 +239,23 @@ export async function renderDraft(input: RenderInput, signal?: AbortSignal): Pro
   const ffmpeg = input.ffmpegPath ?? process.env.FFMPEG_PATH ?? "ffmpeg";
   let renderInput = input;
   let temporaryDirectory: string | undefined;
-  if ((input.visualSegments?.length ?? 0) > 1) {
+  if (input.backgroundLoop) {
+    const loop = input.backgroundLoop;
+    let loopPath = loop.assetPath;
+    // Neutral effects would make the bake a pure re-encode: skip it and loop the
+    // asset itself, so the common case costs no extra pass over the clip.
+    if (!isNeutralEffects(loop.effects)) {
+      temporaryDirectory = join(dirname(input.outputPath), `.loop-${Date.now()}`);
+      await mkdir(temporaryDirectory, { recursive: true });
+      loopPath = join(temporaryDirectory, "loop-source.mp4");
+      await runProcess(
+        ffmpeg,
+        [...(input.ffmpegPrefixArgs ?? []), ...buildLoopBakeArgs(loop, loopPath, width, height, input.projectId)],
+        { signal },
+      );
+    }
+    renderInput = { ...input, visualSegments: undefined, backgroundLoopPath: loopPath, backgroundLoopFitMode: loop.fitMode };
+  } else if ((input.visualSegments?.length ?? 0) > 1) {
     const prepared = await prepareVisualTimeline(input, ffmpeg, signal);
     temporaryDirectory = prepared.temporaryDirectory;
     renderInput = { ...input, visualSegments: undefined, backgroundVideoPath: prepared.timelinePath };
@@ -264,6 +307,33 @@ async function prepareVisualTimeline(input: RenderInput, ffmpeg: string, signal?
   const timelinePath = join(temporaryDirectory, "timeline.mp4");
   await runProcess(ffmpeg, [...(input.ffmpegPrefixArgs ?? []), "-y", "-f", "concat", "-safe", "0", "-i", concatPath, "-c", "copy", timelinePath], { signal });
   return { temporaryDirectory, timelinePath };
+}
+
+function isNeutralEffects(effects: SegmentEffects): boolean {
+  return buildSegmentEffectFilter("[in]", "[out]", effects, { width: 1, height: 1 }, 1, "video") === "[in]null[out]";
+}
+
+/**
+ * Bakes a loop's effects into a standalone clip. Fit/crop is deliberately left
+ * out: the final render applies it, so one bake serves any output size.
+ */
+export function buildLoopBakeArgs(
+  loop: NonNullable<RenderInput["backgroundLoop"]>,
+  outputPath: string,
+  width: number,
+  height: number,
+  projectId: string,
+): string[] {
+  const duration = Math.max(0.04, loop.clipDurationSeconds);
+  const composed = applySegmentEffects("[0:v]", "[pre]", loop.effects, { width, height }, duration, "video", projectId, undefined, 1, "loop");
+  const filters = [...composed.filters, `[pre]setpts=PTS-STARTPTS[v]`];
+  return [
+    "-y", "-i", loop.assetPath,
+    "-filter_complex_threads", "1",
+    "-filter_complex", filters.join(";"),
+    "-map", "[v]", "-an", "-r", "30", "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1", "-pix_fmt", "yuv420p",
+    outputPath,
+  ];
 }
 
 export function buildSegmentArgs(segment: RenderVisualSegment, outputPath: string, width: number, height: number, projectId: string): string[] {

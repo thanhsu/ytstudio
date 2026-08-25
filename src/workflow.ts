@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { loadAssetManifest, validateAssetManifest } from "./assets.ts";
+import { loadAssetManifest, validateAssetManifest, type AssetRecord } from "./assets.ts";
 import { saveCaptions, type CaptionArtifact } from "./captions.ts";
 import { loadStudioConfig } from "./config.ts";
 import { loadEditManifest, type EditManifest } from "./edit-manifest.ts";
@@ -45,6 +45,7 @@ export type GenerateVoiceOptions = {
 export type RenderDraftOptions = {
   ffmpegPath?: string;
   ffmpegPrefixArgs?: string[];
+  probeDuration?: (filePath: string) => Promise<number>;
 };
 
 export async function approveCurrentScript(projectId: string): Promise<void> {
@@ -339,9 +340,12 @@ export async function renderDraftProject(projectId: string, options: RenderDraft
     };
   });
 
+  const backgroundLoop = await resolveBackgroundLoop(projectId, mapping, assetsById, options);
+
   return renderDraft({
     projectId,
     title: brief.topic,
+    ...(backgroundLoop ? { backgroundLoop } : {}),
     durationSeconds: Number(voice.metadata.durationSeconds ?? 75),
     voicePath: resolveProjectPath(projectId, voice.relativePath),
     captionsPath: resolveProjectPath(projectId, captions.relativePath),
@@ -352,6 +356,30 @@ export async function renderDraftProject(projectId: string, options: RenderDraft
     ffmpegPrefixArgs: options.ffmpegPrefixArgs,
     ...renderDimensions(brief.format, config),
   });
+}
+
+/**
+ * Turns the mapping's background loop into renderer input. The clip's own
+ * duration bounds one pass of the loop, so it comes from the manifest when the
+ * upload recorded it and is probed otherwise -- a loop whose length is unknown
+ * would make zoom motion drift across repeats instead of restarting.
+ */
+async function resolveBackgroundLoop(
+  projectId: string,
+  mapping: Awaited<ReturnType<typeof loadVisualMapping>>,
+  assetsById: Map<string, AssetRecord>,
+  options: RenderDraftOptions,
+): Promise<NonNullable<Parameters<typeof renderDraft>[0]["backgroundLoop"]> | undefined> {
+  const loop = mapping?.backgroundLoop;
+  if (!loop) return undefined;
+  const asset = assetsById.get(loop.assetId);
+  if (!asset) {
+    throw new Error(`Background loop references a missing asset: ${loop.assetId}.`);
+  }
+  const assetPath = resolveProjectPath(projectId, asset.relativePath);
+  const probe = options.probeDuration ?? probeDuration;
+  const clipDurationSeconds = asset.durationSeconds ?? (await probe(assetPath));
+  return { assetPath, fitMode: loop.fitMode, clipDurationSeconds, effects: loop.effects };
 }
 
 function renderDimensions(

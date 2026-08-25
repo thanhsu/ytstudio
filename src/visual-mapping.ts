@@ -9,7 +9,15 @@ import { normalizeSegmentEffects, validateSegmentEffects, type SegmentEffects } 
 
 export type NarrationScene = { id: string; startSeconds: number; endSeconds: number; narration: string; keywords: string[]; intent: "hook" | "context" | "analysis" | "closing" };
 export type VisualMappingSegment = NarrationScene & { assetId: string | null; mediaType?: "image" | "video"; confidence: number; reason: string; fitMode: "cover" | "contain"; sourceStartSeconds: number; sourceDurationSeconds: number; muteSourceAudio: boolean; selectionMode: "automatic" | "manual"; fallback?: "generated-background"; effects?: SegmentEffects };
-export type VisualMapping = { version: 1; status: "draft" | "approved" | "stale"; generatedAt: string; inputFingerprint: string; segments: VisualMappingSegment[] };
+/**
+ * One video that loops under the whole narration, replacing the per-scene
+ * timeline. It is deliberately NOT a segment: the five-second excerpt cap and
+ * the adjacent-reuse rule below guard fair-use clipping in the review workflow,
+ * and a background the operator owns is not an excerpt of someone else's work.
+ * Keeping it inside the mapping keeps it behind the same approval gate.
+ */
+export type BackgroundLoop = { assetId: string; fitMode: "cover" | "contain"; effects: SegmentEffects };
+export type VisualMapping = { version: 1; status: "draft" | "approved" | "stale"; generatedAt: string; inputFingerprint: string; segments: VisualMappingSegment[]; backgroundLoop?: BackgroundLoop };
 
 export function buildNarrationScenes(srt: string): NarrationScene[] {
   const cues = parseSrt(srt);
@@ -61,6 +69,15 @@ export function generateVisualMapping(scenes: NarrationScene[], assets: AssetRec
 
 export function validateVisualMapping(mapping: VisualMapping, assets: AssetRecord[]): { valid: boolean; errors: string[] } {
   const errors: string[] = [];
+  if (mapping.backgroundLoop) {
+    const loop = mapping.backgroundLoop;
+    const asset = assets.find((candidate) => candidate.id === loop.assetId);
+    if (!asset) errors.push(`Background loop references a missing asset: ${loop.assetId}.`);
+    else if (asset.mediaType !== "video") errors.push(`Background loop asset ${loop.assetId} must be a video.`);
+    else if (!asset.rightsConfirmed) errors.push(`Background loop asset ${loop.assetId} has no rights confirmation.`);
+    const loopEffects = validateSegmentEffects(loop.effects, assets);
+    for (const message of loopEffects.errors) errors.push(`Background loop effects: ${message}`);
+  }
   let previousVideo: string | null = null;
   for (const segment of mapping.segments) {
     if (segment.mediaType === "video" && segment.sourceDurationSeconds > 5) errors.push(`${segment.id} exceeds the five-second video limit.`);
@@ -83,17 +100,31 @@ export function validateVisualMapping(mapping: VisualMapping, assets: AssetRecor
 function canonicalizeMappingEffects(mapping: VisualMapping): VisualMapping {
   return {
     ...mapping,
-    segments: mapping.segments.map((segment) => {
-      if (segment.effects === undefined) {
-        return { ...segment, effects: normalizeSegmentEffects(undefined) };
-      }
-      const validation = validateSegmentEffects(segment.effects);
-      if (!validation.valid) {
-        throw new Error(`Invalid effects for segment ${segment.id}: ${validation.errors.join(" ")}`);
-      }
-      return { ...segment, effects: normalizeSegmentEffects(segment.effects) };
-    }),
+    ...(mapping.backgroundLoop
+      ? { backgroundLoop: { ...mapping.backgroundLoop, effects: canonicalizeEffects(mapping.backgroundLoop.effects, "background loop") } }
+      : {}),
+    segments: mapping.segments.map((segment) => ({
+      ...segment,
+      effects: canonicalizeEffects(segment.effects, `segment ${segment.id}`),
+    })),
   };
+}
+
+/**
+ * Absent normalizes to neutral defaults; present-but-invalid is rejected with
+ * field-specific errors rather than silently clamped.
+ *
+ * Normalizing merges onto that neutral baseline, which is also what keeps a
+ * mapping written before a newer effect field existed loadable: the absent
+ * field takes its default instead of reading as invalid. Validating the raw
+ * value instead would strand every mapping saved before the field was added.
+ */
+function canonicalizeEffects(effects: SegmentEffects | undefined, label: string): SegmentEffects {
+  try {
+    return normalizeSegmentEffects(effects);
+  } catch (error: unknown) {
+    throw new Error(`Invalid effects for ${label}: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 export async function saveVisualMapping(projectId: string, mapping: VisualMapping): Promise<void> {

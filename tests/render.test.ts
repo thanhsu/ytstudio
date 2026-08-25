@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -549,3 +549,125 @@ test("normalized visual effects change the render artifact source hash", async (
   }
 });
 
+
+test("background loop repeats the clip and trims it to the narration length", () => {
+  const args = buildShortsRenderArgs({
+    ...sampleRenderInput(),
+    durationSeconds: 120,
+    backgroundLoopPath: "projects/sample-project/workspace/renders/loop-source.mp4",
+    backgroundLoopFitMode: "cover",
+  });
+  const inputAt = args.indexOf("projects/sample-project/workspace/renders/loop-source.mp4");
+
+  assert.ok(inputAt > 0, "loop clip must be an ffmpeg input");
+  assert.equal(args[inputAt - 1], "-i");
+  assert.equal(args[inputAt - 2], "-1");
+  assert.equal(args[inputAt - 3], "-stream_loop", "-stream_loop must precede the input it loops");
+  assert.match(args[args.indexOf("-filter_complex") + 1], /trim=duration=120/);
+});
+
+test("background loop replaces the per-scene timeline", () => {
+  const args = buildShortsRenderArgs({
+    ...sampleRenderInput(),
+    backgroundLoopPath: "projects/sample-project/workspace/renders/loop-source.mp4",
+    visualSegments: [imageSegment],
+  });
+
+  assert.ok(!args.includes(imageSegment.assetPath!), "segment assets must not be mapped when a loop is set");
+});
+
+test("background loop honours contain fit without cropping", () => {
+  const args = buildShortsRenderArgs({
+    ...sampleRenderInput(),
+    backgroundLoopPath: "projects/sample-project/workspace/renders/loop-source.mp4",
+    backgroundLoopFitMode: "contain",
+  });
+  const filter = args[args.indexOf("-filter_complex") + 1];
+
+  assert.match(filter, /pad=/);
+  assert.ok(!/crop=/.test(filter), filter);
+});
+
+async function recordingFfmpeg(recordDir: string): Promise<string> {
+  return makeFakeExecutable([
+    'import { mkdir, writeFile, readdir } from "node:fs/promises";',
+    'import { dirname, join } from "node:path";',
+    `const recordDir = ${JSON.stringify(recordDir)};`,
+    "await mkdir(recordDir, { recursive: true });",
+    "const seen = await readdir(recordDir);",
+    "const record = join(recordDir, `call-${seen.length}.json`);",
+    "await writeFile(record, JSON.stringify(process.argv.slice(2)));",
+    "const outputPath = process.argv.at(-1);",
+    "await mkdir(dirname(outputPath), { recursive: true });",
+    'await writeFile(outputPath, "video");',
+  ].join("\n"));
+}
+
+async function readFfmpegCalls(recordDir: string): Promise<string[][]> {
+  const names = await readdir(recordDir);
+  names.sort((left, right) => Number(left.replace(/\D/g, "")) - Number(right.replace(/\D/g, "")));
+  const calls: string[][] = [];
+  for (const name of names) {
+    calls.push(JSON.parse(await readFile(join(recordDir, name), "utf8")) as string[]);
+  }
+  return calls;
+}
+
+async function withLoopRenderRoot(run: (root: string, recordDir: string) => Promise<void>): Promise<void> {
+  const previousRoot = process.env.YT_STUDIO_PROJECTS_DIR;
+  const root = await mkdtemp(join(tmpdir(), "yt-render-loop-"));
+  process.env.YT_STUDIO_PROJECTS_DIR = root;
+  try {
+    await run(root, join(root, "calls"));
+  } finally {
+    if (previousRoot === undefined) delete process.env.YT_STUDIO_PROJECTS_DIR;
+    else process.env.YT_STUDIO_PROJECTS_DIR = previousRoot;
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+test("a loop carrying effects is baked once, then repeated", async () => {
+  await withLoopRenderRoot(async (root, recordDir) => {
+    await renderDraft({
+      ...sampleRenderInput(),
+      durationSeconds: 60,
+      outputPath: join(root, "sample-project", "workspace", "renders", "draft.mp4"),
+      ffmpegPath: process.execPath,
+      ffmpegPrefixArgs: [await recordingFfmpeg(recordDir)],
+      backgroundLoop: {
+        assetPath: join(root, "ambience.mp4"),
+        fitMode: "cover",
+        clipDurationSeconds: 10,
+        effects: { ...DEFAULT_SEGMENT_EFFECTS, flip: "horizontal" },
+      },
+    });
+
+    const calls = await readFfmpegCalls(recordDir);
+    assert.equal(calls.length, 2, "one bake pass plus the final render");
+    assert.ok(calls[0].join(" ").includes("hflip"), calls[0].join(" "));
+    assert.ok(!calls[0].includes("-stream_loop"), "the bake pass must not loop");
+    assert.ok(calls[1].includes("-stream_loop"), "the final render repeats the baked clip");
+  });
+});
+
+test("a loop with neutral effects skips the bake pass", async () => {
+  await withLoopRenderRoot(async (root, recordDir) => {
+    await renderDraft({
+      ...sampleRenderInput(),
+      durationSeconds: 60,
+      outputPath: join(root, "sample-project", "workspace", "renders", "draft.mp4"),
+      ffmpegPath: process.execPath,
+      ffmpegPrefixArgs: [await recordingFfmpeg(recordDir)],
+      backgroundLoop: {
+        assetPath: join(root, "ambience.mp4"),
+        fitMode: "cover",
+        clipDurationSeconds: 10,
+        effects: DEFAULT_SEGMENT_EFFECTS,
+      },
+    });
+
+    const calls = await readFfmpegCalls(recordDir);
+    assert.equal(calls.length, 1, "neutral effects need no bake pass");
+    assert.ok(calls[0].includes("-stream_loop"), calls[0].join(" "));
+  });
+});

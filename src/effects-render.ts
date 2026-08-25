@@ -7,6 +7,7 @@ import {
   WATERMARK_OPACITY_RANGE,
   WATERMARK_SCALE_RANGE,
   type SegmentColorEffects,
+  type FlipEffect,
   type SegmentEffects,
   type SegmentWatermarkEffect,
   type TransitionEffect,
@@ -43,8 +44,8 @@ const VIDEO_ZOOM_DELTA = 0.04;
 const FADE_CONSTANT_SECONDS = 0.5;
 
 /**
- * Builds the full per-segment visual effect chain in spec order: speed (video
- * only) -> zoom motion -> color -> blur -> fade edges. Watermarking is
+ * Builds the full per-segment visual effect chain in spec order: flip -> speed
+ * (video only) -> zoom motion -> color -> blur -> fade edges. Watermarking is
  * intentionally excluded here because it requires allocating an extra ffmpeg
  * input; compose it with `buildVisualEffectFilter` + `buildWatermarkOverlayFilter`
  * + `buildFadeFilter` instead (see those functions' docs) when a segment has
@@ -81,8 +82,8 @@ export function buildSegmentEffectFilter(
 }
 
 /**
- * Speed + zoom + color + blur only (chain order: speed -> zoom -> color ->
- * blur), stopping before the watermark/fade stages. Use this together with
+ * Flip + speed + zoom + color + blur only (chain order: flip -> speed -> zoom ->
+ * color -> blur), stopping before the watermark/fade stages. Use this together with
  * `buildWatermarkOverlayFilter` and `buildFadeFilter` to splice a watermark
  * into the correct position in the chain: blur -> watermark -> fade.
  */
@@ -184,6 +185,10 @@ function visualEffectSteps(
   mediaType: MediaType,
 ): string[] {
   const steps: string[] = [];
+  // Flip leads the chain: it mirrors the source geometry, so zoompan's crop
+  // window and every later filter see the frame the operator actually picked.
+  const flip = buildFlipFilter(effects.flip);
+  if (flip) steps.push(flip);
   const speed = buildSpeedFilter(effects.speed, mediaType);
   if (speed) steps.push(speed);
   const zoom = buildZoomFilter(effects.zoom, mediaType, dimensions, duration);
@@ -212,6 +217,12 @@ function wrapSteps(inputLabel: string, outputLabel: string, steps: string[]): st
     return `${inputLabel}null${outputLabel}`;
   }
   return `${inputLabel}${steps.join(",")}${outputLabel}`;
+}
+
+function buildFlipFilter(flip: FlipEffect): string | undefined {
+  if (flip === "horizontal") return "hflip";
+  if (flip === "vertical") return "vflip";
+  return undefined;
 }
 
 function buildSpeedFilter(speed: number, mediaType: MediaType): string | undefined {

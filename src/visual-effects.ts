@@ -1,6 +1,7 @@
 import type { AssetRecord } from "./assets.ts";
 
 export type ZoomEffect = "none" | "slow-in" | "slow-out";
+export type FlipEffect = "none" | "horizontal" | "vertical";
 export type TransitionEffect = "cut" | "fade";
 export type WatermarkPosition = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 
@@ -22,6 +23,7 @@ export type SegmentEffects = {
   version: 1;
   speed: number; // 0.5..2.0, default 1
   zoom: ZoomEffect;
+  flip: FlipEffect;
   transitionIn: TransitionEffect;
   transitionOut: TransitionEffect;
   color: SegmentColorEffects;
@@ -33,6 +35,7 @@ export const DEFAULT_SEGMENT_EFFECTS: SegmentEffects = {
   version: 1,
   speed: 1,
   zoom: "none",
+  flip: "none",
   transitionIn: "cut",
   transitionOut: "cut",
   color: { brightness: 0, contrast: 1, saturation: 1, grayscale: 0 },
@@ -49,6 +52,7 @@ export const WATERMARK_SCALE_RANGE = [0.05, 0.5] as const;
 export const WATERMARK_OPACITY_RANGE = [0, 1] as const;
 
 const ZOOM_VALUES: readonly ZoomEffect[] = ["none", "slow-in", "slow-out"];
+const FLIP_VALUES: readonly FlipEffect[] = ["none", "horizontal", "vertical"];
 const TRANSITION_VALUES: readonly TransitionEffect[] = ["cut", "fade"];
 const WATERMARK_POSITIONS: readonly WatermarkPosition[] = ["top-left", "top-right", "bottom-left", "bottom-right"];
 const ELIGIBLE_WATERMARK_RIGHTS_STATUSES = new Set(["owned", "licensed", "generated"]);
@@ -121,6 +125,7 @@ function collectEffectsErrors(value: unknown, assets: AssetRecord[] | undefined,
 
   validateRange(errors, "speed", value.speed, SPEED_RANGE);
   validateEnum(errors, "zoom", value.zoom, ZOOM_VALUES);
+  validateEnum(errors, "flip", value.flip, FLIP_VALUES);
   validateEnum(errors, "transitionIn", value.transitionIn, TRANSITION_VALUES);
   validateEnum(errors, "transitionOut", value.transitionOut, TRANSITION_VALUES);
 
@@ -164,6 +169,7 @@ function finalizeEffects(candidate: Record<string, unknown>): SegmentEffects {
     version: 1,
     speed: candidate.speed as number,
     zoom: candidate.zoom as ZoomEffect,
+    flip: candidate.flip as FlipEffect,
     transitionIn: candidate.transitionIn as TransitionEffect,
     transitionOut: candidate.transitionOut as TransitionEffect,
     color: { brightness: color.brightness, contrast: color.contrast, saturation: color.saturation, grayscale: color.grayscale },

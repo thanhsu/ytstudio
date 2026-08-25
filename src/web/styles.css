@@ -1128,7 +1128,7 @@ video {
 .render-inspector .field select {
   border-color: #334155;
   background: #0f172a;
-  color: #10151c;
+  color: #e6edf3;
 }
 
 .confidence-meter {

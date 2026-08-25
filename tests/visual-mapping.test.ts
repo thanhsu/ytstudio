@@ -310,3 +310,119 @@ test("a legacy mapping segment without effects normalizes to neutral defaults, r
     assert.deepEqual(argsWithNormalizedEffects, argsWithNoEffectsField);
   });
 });
+
+const loopVideoAsset: AssetRecord = {
+  id: "loop-1", filename: "ambience.mp4", relativePath: "assets/clips/ambience.mp4", mediaType: "video",
+  mimeType: "video/mp4", sizeBytes: 2048, rightsConfirmed: true, usagePurpose: "looping background",
+  createdAt: "2026-08-25T00:00:00.000Z", analysisStatus: "ready", durationSeconds: 300,
+};
+
+function mappingWithLoop(backgroundLoop: unknown) {
+  const mapping = generateVisualMapping(buildNarrationScenes(captions), []);
+  return { ...mapping, backgroundLoop } as Parameters<typeof validateVisualMapping>[0];
+}
+
+test("a mapping written before an effect field existed still loads", async () => {
+  await withTempCwd(async () => {
+    // The on-disk shape from before `flip` was added: every other field is
+    // present and valid. Adding a field must not strand mappings already saved.
+    const legacyEffects = {
+      version: 1,
+      speed: 1,
+      zoom: "none",
+      transitionIn: "cut",
+      transitionOut: "cut",
+      color: { brightness: 0, contrast: 1, saturation: 1, grayscale: 0 },
+      blur: 0,
+    };
+    const dir = join("projects", "legacy-project", "workspace", "editing");
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      join(dir, "visual-mapping.json"),
+      JSON.stringify({
+        version: 1,
+        status: "approved",
+        generatedAt: "2026-08-24T00:00:00.000Z",
+        inputFingerprint: "abc",
+        segments: [{
+          id: "scene-001", startSeconds: 0, endSeconds: 5, narration: "n", keywords: [], intent: "hook",
+          assetId: null, confidence: 0, reason: "", fitMode: "cover", sourceStartSeconds: 0,
+          sourceDurationSeconds: 5, muteSourceAudio: true, selectionMode: "automatic",
+          fallback: "generated-background", effects: legacyEffects,
+        }],
+      }),
+      "utf8",
+    );
+
+    const loaded = await loadVisualMapping("legacy-project");
+
+    assert.equal(loaded?.segments[0].effects?.flip, "none");
+  });
+});
+
+test("effects carrying a genuinely invalid value are still rejected on load", async () => {
+  await withTempCwd(async () => {
+    const dir = join("projects", "bad-project", "workspace", "editing");
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      join(dir, "visual-mapping.json"),
+      JSON.stringify({
+        version: 1, status: "draft", generatedAt: "2026-08-24T00:00:00.000Z", inputFingerprint: "abc",
+        segments: [{
+          id: "scene-001", startSeconds: 0, endSeconds: 5, narration: "n", keywords: [], intent: "hook",
+          assetId: null, confidence: 0, reason: "", fitMode: "cover", sourceStartSeconds: 0,
+          sourceDurationSeconds: 5, muteSourceAudio: true, selectionMode: "automatic",
+          fallback: "generated-background",
+          effects: { version: 1, speed: 99, zoom: "none", flip: "none", transitionIn: "cut", transitionOut: "cut", color: { brightness: 0, contrast: 1, saturation: 1, grayscale: 0 }, blur: 0 },
+        }],
+      }),
+      "utf8",
+    );
+
+    await assert.rejects(() => loadVisualMapping("bad-project"), /speed/);
+  });
+});
+
+test("accepts a background loop on a rights-confirmed video asset", () => {
+  const result = validateVisualMapping(
+    mappingWithLoop({ assetId: "loop-1", fitMode: "cover", effects: DEFAULT_SEGMENT_EFFECTS }),
+    [loopVideoAsset],
+  );
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.valid, true);
+});
+
+test("rejects a background loop that points at an image asset", () => {
+  const result = validateVisualMapping(
+    mappingWithLoop({ assetId: "still-1", fitMode: "cover", effects: DEFAULT_SEGMENT_EFFECTS }),
+    [{ ...loopVideoAsset, id: "still-1", mediaType: "image", filename: "cover.png" }],
+  );
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((error) => /video/i.test(error)), result.errors.join(" "));
+});
+
+test("rejects a background loop whose asset is missing", () => {
+  const result = validateVisualMapping(mappingWithLoop({ assetId: "ghost", fitMode: "cover", effects: DEFAULT_SEGMENT_EFFECTS }), [loopVideoAsset]);
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((error) => /missing/i.test(error)), result.errors.join(" "));
+});
+
+test("rejects a background loop whose asset has no rights confirmation", () => {
+  const result = validateVisualMapping(
+    mappingWithLoop({ assetId: "loop-1", fitMode: "cover", effects: DEFAULT_SEGMENT_EFFECTS }),
+    [{ ...loopVideoAsset, rightsConfirmed: false }],
+  );
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((error) => /rights/i.test(error)), result.errors.join(" "));
+});
+
+test("a background loop is exempt from the five-second excerpt rule", () => {
+  // The 5s cap and the adjacent-reuse rule guard fair-use clipping in the
+  // review workflow. A background loop is not a segment, so it must not be
+  // measured against them -- otherwise looping any clip is impossible.
+  const result = validateVisualMapping(
+    mappingWithLoop({ assetId: "loop-1", fitMode: "cover", effects: DEFAULT_SEGMENT_EFFECTS }),
+    [loopVideoAsset],
+  );
+  assert.equal(result.valid, true, result.errors.join(" "));
+});
