@@ -6,16 +6,18 @@ import { validateProjectId } from "../project-paths.ts";
 import { normalizeMode, normalizeTtsProfile, normalizeVisualStyle } from "./channel.ts";
 import { storiesRootPath, storyPath, validateStoryId } from "./paths.ts";
 import type {
+  CanonRef,
   StageRun,
   StageRunStatus,
   StoryApprovalStage,
   StoryChannelConfig,
+  StoryKind,
   StoryProject,
   StoryProjectConfig,
   StoryStageId,
   StoryStatus,
 } from "./types.ts";
-import { STORY_STAGES } from "./types.ts";
+import { STORY_APPROVAL_STAGES, STORY_STAGES, allStagesForKind, stagesForKind } from "./types.ts";
 
 /**
  * The story entity: `projects/<channelId>/stories/<storyId>/story.json` plus
@@ -54,6 +56,24 @@ export const STAGE_DEPS: Record<StoryStageId, StoryStageId[]> = {
   "final-qa": ["render", "metadata", "thumbnail"],
   export: ["final-qa"],
   publish: ["export"],
+
+  // Canon chapter stages. `chapter-plan` has no stage dependency because its
+  // input is a series entity (the arc's chapter card), not another stage —
+  // the same reason `idea` has none.
+  "chapter-plan": [],
+  "canon-context": ["chapter-plan"],
+  "canon-write": ["canon-context"],
+  "canon-continuity": ["canon-write"],
+  "memory-extract": ["canon-continuity"],
+  "memory-apply": ["memory-extract"],
+
+  // Variant stages. `localize` reads the canon chapter, an entity outside this
+  // story, so it has no stage dependency either. It writes the `sections`
+  // artifacts, which is what lets naturalize/scenes/metadata run unchanged.
+  localize: [],
+  // Alignment checks the naturalized narration — the text TTS actually reads —
+  // so a naturalizer rewrite can never smuggle a canon contradiction past it.
+  "canon-alignment": ["naturalize"],
 };
 
 /** The artifact file each stage writes; the sections stage also writes sections/section-NNN.json. */
@@ -77,6 +97,22 @@ export const STAGE_ARTIFACT_FILES: Record<StoryStageId, string> = {
   "final-qa": "final-qa.json",
   export: "export.json",
   publish: "publish.json",
+
+  "chapter-plan": "plan.json",
+  "canon-context": "context.json",
+  // canon-write also writes sections/section-NNN.json and script.json, so the
+  // existing scenes/metadata stages read a canon chapter exactly as they read
+  // an original story.
+  "canon-write": "chapter.json",
+  // Deliberately not "continuity-report.json": no story runs both this and
+  // continuity-qa, but sharing a filename would make an artifact's owner
+  // ambiguous to anyone reading the directory.
+  "canon-continuity": "canon-continuity.json",
+  "memory-extract": "memory-delta.json",
+  "memory-apply": "memory.json",
+
+  localize: "localized.json",
+  "canon-alignment": "canon-alignment.json",
 };
 
 export type CreateStoryInput = {
@@ -87,6 +123,10 @@ export type CreateStoryInput = {
   targetDurationMinutes?: number;
   tone?: string;
   mode?: string;
+  /** Omitted for the standalone stories the factory has always produced. */
+  kind?: StoryKind;
+  /** Supplied when creating a localized variant of a canon chapter. */
+  canonRef?: CanonRef;
 };
 
 export type UpdateStoryInput = {
@@ -114,6 +154,8 @@ export async function createStory(
     id: storyId,
     channelId,
     title: required(input.title, "title"),
+    kind: resolveStoryKind(input.kind, input.canonRef),
+    ...(input.canonRef ? { canonRef: normalizeCanonRef(input.canonRef) } : {}),
     config: snapshotConfig(channel, input),
     stages: {},
     approvals: {},
@@ -232,8 +274,16 @@ export async function readStageArtifact<T>(
  * (the running job re-reads its inputs anyway).
  */
 export function invalidateDependents(story: StoryProject, changed: StoryStageId): StoryStageId[] {
+  // Only stages that exist for this story's kind may be invalidated. Without
+  // the filter, editing a variant's localized section would mark
+  // `continuity-qa` stale through STAGE_DEPS — a stage a variant never runs, so
+  // nothing could ever clear it and deriveStoryStatus would pin the variant at
+  // IN_PROGRESS forever. Note this is the ALL-stages set, not the runnable one:
+  // export and publish are human-only but absolutely can go stale.
+  const ownStages = new Set(allStagesForKind(story.kind));
   const dependentsOf = new Map<StoryStageId, StoryStageId[]>();
   for (const stage of STORY_STAGES) {
+    if (!ownStages.has(stage)) continue;
     for (const dep of STAGE_DEPS[stage]) {
       const list = dependentsOf.get(dep) ?? [];
       list.push(stage);
@@ -280,6 +330,11 @@ export const APPROVAL_ANCHOR_STAGE: Record<StoryApprovalStage, StoryStageId> = {
   script: "naturalize",
   media: "images",
   final: "render",
+  // Anchoring canon approval to the chapter artifact gives the composite
+  // behaviour for free: regenerating the plan invalidates canon-context and
+  // canon-write through STAGE_DEPS, which drops canon-write out of `done` and
+  // makes approvalState report `stale` without any extra hashing.
+  canon: "canon-write",
 };
 
 export async function approveStoryStage(
@@ -319,6 +374,57 @@ export function emptyStageRun(): StageRun {
   return { status: "pending", attemptCount: 0, costUsd: 0 };
 }
 
+/** The ordered stage list this particular story runs. */
+export function pipelineStagesFor(story: StoryProject): StoryStageId[] {
+  return stagesForKind(story.kind);
+}
+
+/**
+ * `kind` is derived from the canonRef, not trusted from disk. A variant whose
+ * canonRef was lost would otherwise read back as an `original`, and the next
+ * pipeline run would generate a brand-new English story over the top of it.
+ * A stored kind is honoured only where it cannot contradict the ref.
+ */
+export function resolveStoryKind(stored: unknown, canonRef: CanonRef | undefined): StoryKind {
+  if (canonRef) return "variant";
+  return stored === "canon" ? "canon" : "original";
+}
+
+export function normalizeCanonRef(value: CanonRef): CanonRef {
+  return {
+    seriesId: validateProjectId(value.seriesId),
+    chapterId: validateStoryId(value.chapterId),
+    chapterNumber: boundedCount(value.chapterNumber),
+    canonTextHash: String(value.canonTextHash ?? "").trim(),
+  };
+}
+
+/** Reads a canonRef off disk, returning undefined for anything unusable. */
+function readCanonRef(value: unknown): CanonRef | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const candidate = value as Partial<CanonRef>;
+  if (typeof candidate.seriesId !== "string" || typeof candidate.chapterId !== "string") {
+    return undefined;
+  }
+  try {
+    return normalizeCanonRef(candidate as CanonRef);
+  } catch {
+    // A ref naming an invalid project or story id is not a ref. Returning
+    // undefined makes the story an `original`, which callers must catch — the
+    // variant pipeline refuses to run without a resolvable canon chapter.
+    return undefined;
+  }
+}
+
+/** True when a variant's localization is out of date with its canon chapter. */
+export type CanonLinkState = "fresh" | "stale" | "unlinked";
+
+export function canonState(story: StoryProject, canonTextHash: string | null): CanonLinkState {
+  if (!story.canonRef) return "unlinked";
+  if (!canonTextHash || !story.canonRef.canonTextHash) return "stale";
+  return story.canonRef.canonTextHash === canonTextHash ? "fresh" : "stale";
+}
+
 function snapshotConfig(channel: StoryChannelConfig, input: CreateStoryInput): StoryProjectConfig {
   return {
     language: channel.language,
@@ -351,7 +457,7 @@ function normalizeStory(channelId: string, storyId: string, value: unknown): Sto
   }
   const approvals: StoryProject["approvals"] = {};
   if (candidate.approvals && typeof candidate.approvals === "object") {
-    for (const key of ["script", "media", "final"] as const) {
+    for (const key of STORY_APPROVAL_STAGES) {
       const record = (candidate.approvals as Record<string, unknown>)[key];
       if (record && typeof record === "object") {
         const approval = record as Partial<StoryProject["approvals"]["script"]>;
@@ -365,11 +471,20 @@ function normalizeStory(channelId: string, storyId: string, value: unknown): Sto
       }
     }
   }
+  // A story written before the canon layer existed has neither field. It is an
+  // `original`, which is exactly what an absent canonRef derives to — so old
+  // files need no migration. The fields must be listed here at all because this
+  // function REBUILDS the object and runs on every stage write: anything it
+  // does not name is erased the first time a stage saves.
+  const canonRef = readCanonRef(candidate.canonRef);
   return {
     version: 1,
     id: validateStoryId(String(candidate.id ?? storyId)),
     channelId: validateProjectId(String(candidate.channelId ?? channelId)),
     title: stringOr(candidate.title, "Untitled story"),
+    kind: resolveStoryKind(candidate.kind, canonRef),
+    ...(canonRef ? { canonRef } : {}),
+    ...(optionalString(candidate.lockedAt) ? { lockedAt: candidate.lockedAt } : {}),
     config: {
       language: stringOr(configCandidate.language, "es"),
       locale: stringOr(configCandidate.locale, "es-MX"),

@@ -30,6 +30,17 @@ import { runOriginalityStage } from "./stages/originality-qa.ts";
 import { runOutlineStage } from "./stages/outline.ts";
 import { runScenesStage } from "./stages/scenes.ts";
 import { runSectionsStage } from "./stages/sections.ts";
+import { runCanonAlignmentStage } from "./stages/canon-alignment.ts";
+import { runLocalizeStage } from "./stages/localize.ts";
+import {
+  runCanonContextStage,
+  runCanonContinuityStage,
+  runCanonWriteStage,
+  runChapterPlanStage,
+  runMemoryApplyStage,
+  runMemoryExtractStage,
+} from "../canon/stages.ts";
+import { copyCanonSceneImage } from "../canon/variant.ts";
 import {
   approvalState,
   approveStoryStage,
@@ -37,6 +48,7 @@ import {
   writeStageArtifact,
   invalidateDependents,
   loadStory,
+  pipelineStagesFor,
   readStageArtifact,
   saveStageRun,
   saveStory,
@@ -59,13 +71,14 @@ import type {
   SceneList,
   StageErrorClassification,
   StoryApprovalStage,
+  StoryKind,
   StoryMetadataArtifact,
   StoryProject,
   StoryStageId,
   TtsChunkManifest,
   TtsNormalizedText,
 } from "./types.ts";
-import { STORY_STAGES } from "./types.ts";
+import { ORIGINAL_STAGES } from "./types.ts";
 
 /**
  * The resumable orchestrator. "Generate Full Story" runs every stage in order,
@@ -75,7 +88,12 @@ import { STORY_STAGES } from "./types.ts";
  * a human click, per the studio's approval rule.
  */
 
-export const PIPELINE_STAGES: StoryStageId[] = STORY_STAGES.filter((stage) => stage !== "export" && stage !== "publish");
+/**
+ * The original story's stage list. Kept under its historical name because it is
+ * part of this module's public surface; a canon chapter or a variant runs a
+ * different list, selected per story by `pipelineStagesFor`.
+ */
+export const PIPELINE_STAGES: StoryStageId[] = ORIGINAL_STAGES;
 
 export type StoryPipelineDeps = {
   config: StudioConfig;
@@ -119,7 +137,10 @@ export async function runStoryPipeline(
   deps: StoryPipelineDeps,
   options: { toStage?: StoryStageId } = {},
 ): Promise<PipelineOutcome> {
-  for (const [index, stage] of PIPELINE_STAGES.entries()) {
+  // The stage list is per story, not global: an original, a canon chapter, and
+  // a localized variant run disjoint pipelines out of one stage vocabulary.
+  const stages = pipelineStagesFor(await loadStory(channelId, storyId));
+  for (const [index, stage] of stages.entries()) {
     const story = await loadStory(channelId, storyId);
     const run = story.stages[stage] ?? emptyStageRun();
     if (run.status !== "done") {
@@ -131,8 +152,8 @@ export async function runStoryPipeline(
         }
       }
       await deps.update?.(
-        Math.round((index / PIPELINE_STAGES.length) * 100),
-        `Stage ${stage} (${index + 1}/${PIPELINE_STAGES.length})...`,
+        Math.round((index / stages.length) * 100),
+        `Stage ${stage} (${index + 1}/${stages.length})...`,
       );
       await executeGuarded(channelId, storyId, stage, deps, {});
     }
@@ -155,6 +176,13 @@ export async function runSingleStage(
   if (stage === "export" || stage === "publish") {
     throw new Error("Export is packaged through its own endpoint after approvals, never as a pipeline stage.");
   }
+  // A stage belonging to another kind of story must be refused, not attempted.
+  // Running `sections` on a variant would otherwise generate a fresh English
+  // story straight over the localization it was supposed to be publishing.
+  const owner = await loadStory(channelId, storyId);
+  if (!pipelineStagesFor(owner).includes(stage)) {
+    throw new StoryStageNotInPipelineError(stage, owner.kind);
+  }
   if (options.regenerate) {
     const story = await loadStory(channelId, storyId);
     story.stages[stage] = emptyStageRun();
@@ -172,10 +200,27 @@ export async function runSingleStage(
   return { story: await loadStory(channelId, storyId), completed: true };
 }
 
+/** Raised when a stage is asked of a story whose kind does not run it. */
+export class StoryStageNotInPipelineError extends Error {
+  readonly stage: StoryStageId;
+  readonly kind: StoryKind;
+
+  constructor(stage: StoryStageId, kind: StoryKind) {
+    super(`Stage ${stage} is not part of the ${kind} pipeline.`);
+    this.name = "StoryStageNotInPipelineError";
+    this.stage = stage;
+    this.kind = kind;
+  }
+}
+
 /** Which approval must be in place before a stage may run. */
 function gateFor(stage: StoryStageId): StoryApprovalStage | null {
   if (stage === "tts-normalize") return "script";
   if (stage === "render") return "media";
+  // Nothing enters the series' permanent memory until a human has accepted the
+  // chapter as canon. Memory extraction is the point of no easy return: it
+  // mutates character knowledge and world state that every later chapter reads.
+  if (stage === "memory-extract") return "canon";
   return null;
 }
 
@@ -205,11 +250,29 @@ async function ensureGate(
 }
 
 async function gateQaPassed(channelId: string, storyId: string, approval: StoryApprovalStage): Promise<boolean> {
+  // Canon is never auto-granted. Its QA is a continuity check that a small
+  // local model may have run against its own output, so auto-approving here
+  // would let a machine accept its own canon — exactly what AGENTS.md's
+  // human-approval rule exists to prevent.
+  if (approval === "canon") {
+    return false;
+  }
+  const story = await loadStory(channelId, storyId);
   if (approval === "script") {
+    // The report must be current, not merely present. A canon-alignment
+    // remediation re-runs localize and naturalize, which leaves the existing
+    // originality report describing text that no longer exists; without the
+    // status check, assisted mode would re-grant the script approval against it.
+    if (story.stages["originality-qa"]?.status !== "done") {
+      return false;
+    }
     const report = await readStageArtifact<{ publishable?: boolean }>(channelId, storyId, "originality-qa");
     return report?.publishable === true;
   }
   if (approval === "media") {
+    if (story.stages.images?.status !== "done") {
+      return false;
+    }
     const images = await readStageArtifact<ImageManifest>(channelId, storyId, "images");
     return Boolean(images && images.images.length > 0 && images.images.every((image) => image.status === "done"));
   }
@@ -334,6 +397,37 @@ async function executeStage(stage: StoryStageId, ctx: StageContext, options: Sin
     case "final-qa":
       await runFinalQaStage(ctx);
       return;
+
+    // Canon chapter stages (kind "canon").
+    case "chapter-plan":
+      await runChapterPlanStage(ctx);
+      return;
+    case "canon-context":
+      await runCanonContextStage(ctx);
+      return;
+    case "canon-write":
+      await runCanonWriteStage(ctx);
+      return;
+    case "canon-continuity":
+      await runCanonContinuityStage(ctx);
+      return;
+    case "memory-extract":
+      await runMemoryExtractStage(ctx);
+      return;
+    case "memory-apply":
+      await runMemoryApplyStage(ctx);
+      return;
+
+    // Localization stages (kind "variant").
+    case "localize":
+      await runLocalizeStage(ctx, {
+        onlySections: options.sectionIndex === undefined ? undefined : [options.sectionIndex],
+      });
+      return;
+    case "canon-alignment":
+      await runCanonAlignmentStage(ctx);
+      return;
+
     default:
       throw new Error(`Stage ${stage} has no executor.`);
   }
@@ -472,6 +566,28 @@ async function runImagesStage(ctx: StageContext, onlySceneId?: string): Promise<
   for (const image of manifest.images) {
     if (onlySceneId && image.sceneId !== onlySceneId) continue;
     if (image.status === "done") continue;
+
+    // A variant reuses its canon chapter's rendered scene image: same chapter,
+    // same picture, only the narration differs. Four locales pay for the image
+    // once. Cross-project paths are impossible, so this is a guarded read from
+    // the series project plus a copy into this channel's workspace.
+    if (ctx.story.canonRef) {
+      const copied = await copyCanonSceneImage(
+        ctx.story.canonRef.seriesId,
+        ctx.story.canonRef.chapterId,
+        image.sceneId,
+        resolveProjectPath(ctx.channelId, image.relativePath),
+      );
+      if (copied) {
+        image.status = "done";
+        image.costUsd = 0;
+        image.lastError = undefined;
+        await persist();
+        await ctx.update?.(`Reused canon image for ${image.sceneId}.`);
+        continue;
+      }
+    }
+
     await assertWithinBudget(ctx.channelId, ctx.storyId, ctx.story.config.budget.maxCostPerStoryUsd, usdPerImage, { maxUsd: ctx.channel.budget.maxCostPerMonthUsd ?? 0 });
     try {
       await provider.generate(

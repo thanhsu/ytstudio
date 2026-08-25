@@ -135,23 +135,38 @@ export function renderConfig(container = configHost) {
     ]),
     configSection("Story Factory", config.storyFactory.enabled ? "done" : "neutral", config.storyFactory.enabled ? "Enabled" : "Disabled", [
       checkboxField("Story factory enabled", "storyFactory.enabled", config.storyFactory.enabled),
-      field("Planner model", "storyFactory.models.planner.model", config.storyFactory.models.planner.model),
-      field("Planner base URL", "storyFactory.models.planner.baseUrl", config.storyFactory.models.planner.baseUrl),
-      field("Planner API key env", "storyFactory.models.planner.apiKeyEnv", config.storyFactory.models.planner.apiKeyEnv),
-      checkboxField("Planner is paid", "storyFactory.models.planner.paid", config.storyFactory.models.planner.paid),
-      selectField("Planner provider", "storyFactory.models.planner.provider", config.storyFactory.models.planner.provider, [["openai-compatible", "OpenAI-compatible"], ["anthropic", "Anthropic"], ["gemini", "Gemini"]]),
-      field("Writer model", "storyFactory.models.writer.model", config.storyFactory.models.writer.model),
-      field("Writer base URL", "storyFactory.models.writer.baseUrl", config.storyFactory.models.writer.baseUrl),
-      field("Writer API key env", "storyFactory.models.writer.apiKeyEnv", config.storyFactory.models.writer.apiKeyEnv),
-      checkboxField("Writer is paid", "storyFactory.models.writer.paid", config.storyFactory.models.writer.paid),
-      selectField("Writer provider", "storyFactory.models.writer.provider", config.storyFactory.models.writer.provider, [["openai-compatible", "OpenAI-compatible"], ["anthropic", "Anthropic"], ["gemini", "Gemini"]]),
-      field("QA model", "storyFactory.models.qa.model", config.storyFactory.models.qa.model),
-      field("QA base URL", "storyFactory.models.qa.baseUrl", config.storyFactory.models.qa.baseUrl),
-      field("QA API key env", "storyFactory.models.qa.apiKeyEnv", config.storyFactory.models.qa.apiKeyEnv),
-      checkboxField("QA is paid", "storyFactory.models.qa.paid", config.storyFactory.models.qa.paid),
-      selectField("QA provider", "storyFactory.models.qa.provider", config.storyFactory.models.qa.provider, [["openai-compatible", "OpenAI-compatible"], ["anthropic", "Anthropic"], ["gemini", "Gemini"]]),
       field("Duplicate similarity threshold", "storyFactory.duplicateSimilarityThreshold", String(config.storyFactory.duplicateSimilarityThreshold), "number", "", "any"),
       field("Default max cost per story (USD)", "storyFactory.defaultMaxCostPerStoryUsd", String(config.storyFactory.defaultMaxCostPerStoryUsd), "number", "", "any"),
+    ]),
+    // One section per model role rather than a hand-written block each: six
+    // roles then cost what three did, and a role the config file happens not to
+    // mention cannot crash the screen.
+    ...MODEL_ROLES.map(([role, label, hint]) =>
+      configSection(
+        `Model: ${label}`,
+        (config.storyFactory.models?.[role]?.model ?? "") ? "done" : "neutral",
+        config.storyFactory.models?.[role]?.model || `Falls back to ${hint}`,
+        modelRoleFields(config, role),
+      ),
+    ),
+    configSection("Story Memory (embeddings)", config.storyFactory.embeddings?.provider === "disabled" ? "neutral" : "done", config.storyFactory.embeddings?.provider ?? "disabled", [
+      selectField("Embedding provider", "storyFactory.embeddings.provider", config.storyFactory.embeddings?.provider ?? "disabled", [
+        ["disabled", "Disabled (keyword retrieval only)"],
+        ["ollama", "Ollama"],
+        ["openai-compatible", "OpenAI-compatible"],
+      ]),
+      field("Embedding base URL", "storyFactory.embeddings.baseUrl", config.storyFactory.embeddings?.baseUrl ?? ""),
+      field("Embedding model", "storyFactory.embeddings.model", config.storyFactory.embeddings?.model ?? ""),
+      field("Embedding API key env", "storyFactory.embeddings.apiKeyEnv", config.storyFactory.embeddings?.apiKeyEnv ?? ""),
+      checkboxField("Embeddings are paid", "storyFactory.embeddings.paid", config.storyFactory.embeddings?.paid ?? false),
+      field("Embedding USD per M tokens", "storyFactory.embeddings.usdPerMTok", String(config.storyFactory.embeddings?.usdPerMTok ?? 0), "number", "", "any"),
+    ]),
+    configSection("Story Canon", config.storyFactory.canon?.enabled ? "done" : "neutral", config.storyFactory.canon?.enabled ? "Enabled" : "Disabled", [
+      checkboxField("Canon engine enabled", "storyFactory.canon.enabled", config.storyFactory.canon?.enabled ?? false),
+      field("Context token budget", "storyFactory.canon.contextTokenBudget", String(config.storyFactory.canon?.contextTokenBudget ?? 12000), "number"),
+      field("Retrieved memories per class", "storyFactory.canon.retrievalTopKPerClass", String(config.storyFactory.canon?.retrievalTopKPerClass ?? 6), "number"),
+      field("Escalate after N attempts", "storyFactory.canon.escalateAfterAttempts", String(config.storyFactory.canon?.escalateAfterAttempts ?? 2), "number"),
+      field("Max attempts per chapter", "storyFactory.canon.maxAttemptsPerChapter", String(config.storyFactory.canon?.maxAttemptsPerChapter ?? 6), "number"),
     ]),
     configSection("YouTube", config.youtube.clientIdEnv && config.youtube.clientSecretEnv ? "done" : "warn", config.youtube.clientIdEnv && config.youtube.clientSecretEnv ? "Configured" : "Needs environment variables", [
       field("Client ID environment variable", "youtube.clientIdEnv", config.youtube.clientIdEnv),
@@ -239,4 +254,36 @@ function configSection(title, level, label, fields) {
   fieldWrap.append(...fields);
   section.append(header, fieldWrap);
   return section;
+}
+
+/**
+ * The story-factory model roles. The record is total in config, with an empty
+ * `model` meaning "unset" - so a role is never a missing key, and the hint says
+ * what it falls back to rather than pretending it is unconfigured.
+ */
+const MODEL_ROLES = [
+  ["planner", "Planner", "nothing - required"],
+  ["writer", "Writer", "nothing - required"],
+  ["qa", "QA", "nothing - required"],
+  ["architect", "Series Architect", "the planner"],
+  ["localizer", "Localizer", "the QA model"],
+  ["memory", "Memory Extractor", "the QA model"],
+];
+
+function modelRoleFields(config, role) {
+  const endpoint = config.storyFactory.models?.[role] ?? {};
+  return [
+    field(`${role} model`, `storyFactory.models.${role}.model`, endpoint.model ?? ""),
+    field(`${role} base URL`, `storyFactory.models.${role}.baseUrl`, endpoint.baseUrl ?? ""),
+    field(`${role} API key env`, `storyFactory.models.${role}.apiKeyEnv`, endpoint.apiKeyEnv ?? ""),
+    checkboxField(`${role} is paid`, `storyFactory.models.${role}.paid`, endpoint.paid ?? false),
+    field(`${role} max output tokens`, `storyFactory.models.${role}.maxOutputTokens`, String(endpoint.maxOutputTokens ?? 8000), "number"),
+    // Without a stated context window the story-context builder has no ceiling
+    // to check, and a small local model silently truncates the FRONT of the
+    // prompt - exactly where the canon rules sit. 0 means "unknown".
+    field(`${role} context window tokens`, `storyFactory.models.${role}.contextWindowTokens`, String(endpoint.contextWindowTokens ?? 0), "number"),
+    selectField(`${role} provider`, `storyFactory.models.${role}.provider`, endpoint.provider ?? "openai-compatible", [
+      ["openai-compatible", "OpenAI-compatible"], ["anthropic", "Anthropic"], ["gemini", "Gemini"],
+    ]),
+  ];
 }

@@ -26,12 +26,114 @@ export const STORY_STAGES = [
   "final-qa",
   "export",
   "publish",
+  // Canon stages. A canon chapter is a StoryProject too (kind "canon"), so it
+  // reuses StageRun, resumability, approvals, the cost ledger, and the AI log
+  // rather than forking a parallel pipeline. Appended rather than interleaved
+  // so the ordering of an original story's stages is untouched.
+  "chapter-plan",
+  "canon-context",
+  "canon-write",
+  "canon-continuity",
+  "memory-extract",
+  "memory-apply",
+  // Localization stages, used only by kind "variant". `localize` writes the
+  // same artifacts the `sections` stage writes, so every downstream stage and
+  // the whole dependency graph keep working unchanged.
+  "localize",
+  "canon-alignment",
 ] as const;
 
 export type StoryStageId = (typeof STORY_STAGES)[number];
 
 export function isStoryStageId(value: unknown): value is StoryStageId {
   return typeof value === "string" && (STORY_STAGES as readonly string[]).includes(value);
+}
+
+/**
+ * Which stages each kind of story actually runs, in order. These are explicit
+ * lists rather than a filter over STORY_STAGES: a story must never run a stage
+ * belonging to another kind, and an explicit list makes that impossible to get
+ * wrong when a stage is added later.
+ *
+ * `export` and `publish` are excluded from all three — packaging for upload is
+ * always a human click, per the studio's approval rule.
+ */
+export const ORIGINAL_STAGES: StoryStageId[] = [
+  "idea",
+  "hook",
+  "outline",
+  "bible",
+  "sections",
+  "continuity-qa",
+  "naturalize",
+  "originality-qa",
+  "tts-normalize",
+  "tts",
+  "scenes",
+  "images",
+  "bgm",
+  "render",
+  "metadata",
+  "thumbnail",
+  "final-qa",
+];
+
+/**
+ * A canon chapter stops at `images`: it produces the authoritative English text
+ * and the scene visuals every locale reuses, but never narration, render, or
+ * metadata — those belong to a publication, and a canon chapter is not one.
+ */
+export const CANON_STAGES: StoryStageId[] = [
+  "chapter-plan",
+  "canon-context",
+  "canon-write",
+  "canon-continuity",
+  "memory-extract",
+  "memory-apply",
+  "scenes",
+  "images",
+];
+
+/**
+ * A variant swaps the front half of the original pipeline for localization and
+ * keeps the entire production half. `scenes` and `images` still appear because
+ * their stages resolve the canon chapter's plan and rendered images first and
+ * only generate on a miss.
+ */
+export const VARIANT_STAGES: StoryStageId[] = [
+  "localize",
+  "naturalize",
+  "canon-alignment",
+  "originality-qa",
+  "tts-normalize",
+  "tts",
+  "scenes",
+  "images",
+  "bgm",
+  "render",
+  "metadata",
+  "thumbnail",
+  "final-qa",
+];
+
+/** The stages the pipeline runner executes, in order. */
+export function stagesForKind(kind: StoryKind): StoryStageId[] {
+  if (kind === "canon") return CANON_STAGES;
+  if (kind === "variant") return VARIANT_STAGES;
+  return ORIGINAL_STAGES;
+}
+
+/**
+ * Every stage that can EXIST on a story of this kind — the runnable ones plus
+ * the human-only tail. This is a different question from what the runner
+ * executes, and invalidation needs this one: an export package built from
+ * superseded metadata is stale even though no pipeline run ever produces it.
+ *
+ * A canon chapter has no tail at all; it is not a publication.
+ */
+export function allStagesForKind(kind: StoryKind): StoryStageId[] {
+  if (kind === "canon") return CANON_STAGES;
+  return [...stagesForKind(kind), "export", "publish"];
 }
 
 /**
@@ -58,7 +160,16 @@ export type StageRun = {
   artifactHash?: string;
 };
 
-export type StoryApprovalStage = "script" | "media" | "final";
+/**
+ * `canon` gates a canon chapter before its memory is extracted into the
+ * series state. Unlike the other three it is NEVER auto-granted in assisted
+ * mode: its QA is a continuity check that a small local model may well have
+ * run on itself, and AGENTS.md's human-approval rule exists precisely to stop
+ * a machine approving its own canon.
+ */
+export type StoryApprovalStage = "script" | "media" | "final" | "canon";
+
+export const STORY_APPROVAL_STAGES: StoryApprovalStage[] = ["script", "media", "final", "canon"];
 
 export type StoryApproval = {
   artifactHash: string;
@@ -104,11 +215,44 @@ export type StoryProjectConfig = {
   budget: StoryBudget;
 };
 
+/**
+ * What a StoryProject is for. One entity serves three roles so canon chapters
+ * and localized variants inherit stage runs, resumability, hash-bound
+ * approvals, the cost ledger, the AI log, and jobs for free:
+ *
+ * - `original` — the standalone story the factory has always produced.
+ * - `canon`    — an authoritative English chapter of a canon series.
+ * - `variant`  — one canon chapter localized for one channel and locale.
+ */
+export type StoryKind = "original" | "canon" | "variant";
+
+/**
+ * A variant's link to the canon chapter it renders. `canonTextHash` is the
+ * staleness anchor: comparing it against the chapter's current hash derives
+ * whether the localization is out of date, so no stale flag is ever stored.
+ */
+export type CanonRef = {
+  seriesId: string;
+  chapterId: string;
+  chapterNumber: number;
+  canonTextHash: string;
+};
+
 export type StoryProject = {
   version: 1;
   id: string;
   channelId: string;
   title: string;
+  /** Derived from canonRef/stage shape on load, never trusted from disk. */
+  kind: StoryKind;
+  /** Present on variants; a canon chapter refers to its series by channelId. */
+  canonRef?: CanonRef;
+  /**
+   * Set on a canon chapter when a variant of it publishes. A locked chapter
+   * refuses regeneration — that is what makes "published content is never
+   * silently regenerated" enforceable rather than aspirational.
+   */
+  lockedAt?: string;
   config: StoryProjectConfig;
   stages: Partial<Record<StoryStageId, StageRun>>;
   approvals: Partial<Record<StoryApprovalStage, StoryApproval>>;
@@ -132,6 +276,28 @@ export type StoryChannelConfig = {
   enabled: boolean;
   language: string;
   locale: string;
+  /**
+   * The canon series this channel publishes localized variants of. Empty for a
+   * standalone channel. It is also what links analytics back to a canon
+   * chapter, so story quality can be told apart from localization quality.
+   */
+  canonSeriesId: string;
+  /**
+   * Locale guidance for the localizer, inline rather than in a registry: a new
+   * locale is then channel configuration and never new code.
+   */
+  localeNotes: {
+    audience: string;
+    spokenStyle: string;
+    formality: string;
+    avoid: string[];
+    /**
+     * Declared intentional divergence from canon — TTS name respellings,
+     * honorifics, unit conversions. Without these the alignment gate fires on
+     * the very transformations localization is instructed to perform.
+     */
+    alignmentExemptions: string[];
+  };
   niche: string;
   subNiches: string[];
   /** Free-text channel voice/style notes injected into every prompt. */
@@ -273,6 +439,12 @@ export type ContinuityReport = {
 export type NaturalizedScript = {
   version: 1;
   fullText: string;
+  /**
+   * The same text, still split by section. `fullText` is what TTS reads, but a
+   * canon-alignment failure has to name ONE section to re-localize — joining
+   * first would throw away the only mapping back to a fixable unit.
+   */
+  sections: Array<{ index: number; text: string }>;
   changes: Array<{ sectionIndex: number; note: string }>;
   locale: string;
   provenance: Provenance;

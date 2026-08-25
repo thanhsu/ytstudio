@@ -44,6 +44,23 @@ export async function ensureProjectDir(projectId: string): Promise<string> {
   return dir;
 }
 
+/**
+ * Every project folder under the projects root. Used to discover which
+ * channels publish a given canon series — the link lives in each channel's own
+ * config, so finding them means asking every project.
+ */
+export async function listProjectIds(): Promise<string[]> {
+  const { readdir } = await import("node:fs/promises");
+  try {
+    return (await readdir(projectsRoot(), { withFileTypes: true }))
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
 export async function writeJson(path: string, value: unknown): Promise<void> {
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }

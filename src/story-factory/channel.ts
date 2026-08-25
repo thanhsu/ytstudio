@@ -49,6 +49,11 @@ export function normalizeStoryChannel(channelId: string, value: unknown): StoryC
     enabled: typeof candidate.enabled === "boolean" ? candidate.enabled : false,
     language: stringOr(candidate.language, "es"),
     locale: stringOr(candidate.locale, "es-MX"),
+    // Both fields must be named here for the same reason the story normalizer
+    // names kind/canonRef: this function rebuilds the object, so an unlisted
+    // field is erased the first time the channel is saved.
+    canonSeriesId: typeof candidate.canonSeriesId === "string" ? candidate.canonSeriesId.trim() : "",
+    localeNotes: normalizeLocaleNotes(candidate.localeNotes),
     niche: stringOr(candidate.niche, "horror"),
     subNiches: stringArray(candidate.subNiches, ["paranormal encounters", "night shift horror", "urban legends"]),
     promptStyle: stringOr(
@@ -70,6 +75,24 @@ export function normalizeStoryChannel(channelId: string, value: unknown): StoryC
       maxCostPerMonthUsd: rangeOr(candidate.budget?.maxCostPerMonthUsd, 0, 0, 100000),
     },
     updatedAt: stringOr(candidate.updatedAt, new Date(0).toISOString()),
+  };
+}
+
+/**
+ * Locale guidance for the localizer. `alignmentExemptions` is the load-bearing
+ * field: the canon alignment gate compares typed values, and a TTS-friendly
+ * name respelling or a unit conversion is a legitimate divergence that would
+ * otherwise be reported as a canon violation on every chapter.
+ */
+export function normalizeLocaleNotes(value: unknown): StoryChannelConfig["localeNotes"] {
+  const candidate =
+    value && typeof value === "object" ? (value as Partial<StoryChannelConfig["localeNotes"]>) : {};
+  return {
+    audience: stringOr(candidate.audience, ""),
+    spokenStyle: stringOr(candidate.spokenStyle, "natural spoken storytelling"),
+    formality: stringOr(candidate.formality, "neutral"),
+    avoid: stringArray(candidate.avoid, []),
+    alignmentExemptions: stringArray(candidate.alignmentExemptions, []),
   };
 }
 

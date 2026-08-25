@@ -73,8 +73,13 @@ async function renderChannelOverview(channelId) {
   const channel = data?.storyChannel ?? {};
   stageTitle.textContent = PHASE_LABELS.overview;
   seriesPanel.replaceChildren();
+  // A canon series is a channel project with a story-series.json sidecar, so
+  // the same workspace serves both; the canon panel simply appears when the
+  // sidecar is there.
+  const canon = await fetchJsonOrNull(storyApiUrl(channelId, "canon/series"));
   stageContent.replaceChildren(
     wrapSection("Channel", channelBadgeRow(channel), channelToolRow(channelId)),
+    ...(canon?.series ? [renderCanonPanel(channelId, canon.series)] : []),
     renderStoryChannelSettings(channelId, channel),
   );
   setStatus(`Channel ${channelId} loaded.`);
@@ -108,6 +113,52 @@ const STORY_TABS = [
   ["script", "Script"], ["audio", "Audio"], ["scenes", "Scenes"], ["images", "Images"], ["video", "Video"],
   ["thumbnail", "Thumbnail"], ["metadata", "Metadata"], ["publish", "Publish & Analytics"], ["ai-log", "AI Logs"], ["cost", "Cost"],
 ];
+
+// A canon chapter and a localized variant run different pipelines, so they get
+// different tabs. Every tab id below is also a stage id, which is what lets the
+// generic artifact viewer render Plan / Context / Continuity / Memory for free.
+const CANON_CHAPTER_TABS = [
+  ["overview", "Overview"], ["chapter-plan", "Plan"], ["canon-context", "Context"], ["canon-write", "Draft"],
+  ["canon-continuity", "Continuity"], ["memory-extract", "Memory Delta"], ["memory-apply", "Memory Applied"],
+  ["scenes", "Scenes"], ["images", "Images"], ["ai-log", "AI Logs"], ["cost", "Cost"],
+];
+
+const VARIANT_TABS = [
+  ["overview", "Overview"], ["localize", "Localization"], ["script", "Script"], ["canon-alignment", "Canon Alignment"],
+  ["audio", "Audio"], ["scenes", "Scenes"], ["images", "Images"], ["video", "Video"], ["thumbnail", "Thumbnail"],
+  ["metadata", "Metadata"], ["publish", "Publish & Analytics"], ["ai-log", "AI Logs"], ["cost", "Cost"],
+];
+
+function tabsForStory(story) {
+  if (story?.kind === "canon") return CANON_CHAPTER_TABS;
+  if (story?.kind === "variant") return VARIANT_TABS;
+  return STORY_TABS;
+}
+
+/**
+ * The canon banner on a variant. `state` is derived from a hash comparison on
+ * every read, never stored, so it cannot go quietly wrong.
+ */
+function canonBanner(story) {
+  if (story?.kind === "variant" && story.canonRef) {
+    const ref = story.canonRef;
+    return gateNotice(
+      `Localization of ${ref.chapterId}`,
+      `Canon series ${ref.seriesId}, chapter ${ref.chapterNumber}. Canon is the source of truth: fix the story in the canon chapter, not here.`,
+      "info",
+    );
+  }
+  if (story?.kind === "canon") {
+    return gateNotice(
+      story.lockedAt ? "Canon chapter (LOCKED)" : "Canon chapter",
+      story.lockedAt
+        ? `Locked since ${story.lockedAt} because a variant of it has published. Unlock explicitly before regenerating.`
+        : "This is the authoritative English chapter. Localized variants are generated from it after canon approval.",
+      story.lockedAt ? "warn" : "info",
+    );
+  }
+  return null;
+}
 
 export async function renderStoryFactory() {
   seriesPanel.replaceChildren();
@@ -246,7 +297,7 @@ export async function renderStoryDetail(channelId, storyId, tab = "overview") {
 
   const tabs = document.createElement("nav");
   tabs.className = "story-tabs";
-  for (const [id, label] of STORY_TABS) {
+  for (const [id, label] of tabsForStory(detail.story)) {
     const button = actionButton(label, () => renderStoryDetail(channelId, storyId, id).catch((error) => setStatus(error.message)));
     if (id === tab) button.classList.add("selected");
     tabs.append(button);
@@ -254,7 +305,8 @@ export async function renderStoryDetail(channelId, storyId, tab = "overview") {
   const back = actionButton("Back to stories", () => navigate({ screen: "channel", id: channelId, phase: "content" }));
 
   const body = await renderStoryTab(channelId, storyId, tab, detail);
-  stageContent.replaceChildren(back, tabs, ...body);
+  const banner = canonBanner(detail.story);
+  stageContent.replaceChildren(back, tabs, ...(banner ? [banner] : []), ...body);
   setStatus(`${storyId}: ${detail.status}`);
 }
 
@@ -841,3 +893,178 @@ onJobEvent((job) => {
     void renderStoryDetail(storyFactoryState.channelId, storyFactoryState.storyId).catch((error) => setStatus(error.message));
   }
 });
+
+// =============================== Story Canon ===============================
+// The canon entities for a series. Each opens the raw JSON through the same
+// route the pipeline reads, so what the operator inspects is exactly what the
+// AI is given - which is the point of having a memory view at all.
+
+const CANON_ENTITIES = [
+  ["bible", "Bible"], ["characters", "Characters"], ["world-state", "World State"],
+  ["arcs", "Arcs"], ["threads", "Plot Threads"],
+];
+
+function renderCanonPanel(seriesId, series) {
+  const buttons = document.createElement("div");
+  buttons.className = "button-row";
+  for (const [entity, label] of CANON_ENTITIES) {
+    buttons.append(actionButton(label, () => {
+      showCanonEntity(seriesId, entity, label).catch((error) => setStatus(error.message));
+    }));
+  }
+  buttons.append(actionButton("Event Ledger", () => {
+    showCanonEvents(seriesId).catch((error) => setStatus(error.message));
+  }));
+  buttons.append(actionButton("Story Memory", () => {
+    showCanonMemory(seriesId).catch((error) => setStatus(error.message));
+  }));
+  buttons.append(actionButton("Variants", () => {
+    showCanonVariants(seriesId).catch((error) => setStatus(error.message));
+  }));
+  buttons.append(actionButton("Performance", () => {
+    showCanonPerformance(seriesId).catch((error) => setStatus(error.message));
+  }));
+
+  return wrapSection(
+    `Canon: ${series.title}`,
+    paragraph(
+      `Canonical language ${series.canonicalLanguage} - ${series.status}. ` +
+        "The canon is the source of truth; localized variants are renderings of it and never change it.",
+    ),
+    buttons,
+  );
+}
+
+async function showCanonEntity(seriesId, entity, label) {
+  const data = await fetchJsonOrNull(storyApiUrl(seriesId, `canon/${entity}`));
+  const value = data?.[entity];
+  if (!value) {
+    stageContent.replaceChildren(
+      channelBackButton(),
+      wrapSection(label, paragraph("Nothing here yet. Design the series first.")),
+    );
+    return;
+  }
+  const editor = document.createElement("textarea");
+  editor.className = "artifact-editor";
+  editor.rows = 28;
+  editor.value = JSON.stringify(value, null, 2);
+  const save = actionButton("Save canon", () => {
+    let parsed;
+    try {
+      parsed = JSON.parse(editor.value);
+    } catch (error) {
+      setStatus(`Not valid JSON: ${error.message}`);
+      return;
+    }
+    putJson(storyApiUrl(seriesId, `canon/${entity}`), parsed)
+      .then(() => setStatus(`${label} saved.`))
+      .catch((error) => setStatus(error.message));
+  }, "button", "primary");
+  stageContent.replaceChildren(channelBackButton(), wrapSection(`${label} (canon)`, editor, save));
+  setStatus(`${label} loaded.`);
+}
+
+async function showCanonEvents(seriesId) {
+  const data = await fetchJsonOrNull(storyApiUrl(seriesId, "canon/events"));
+  const events = data?.events ?? [];
+  const rows = events.map((event) =>
+    `#${event.chapterNumber} [${event.eventType}] ${event.summary}`
+    + (event.storyTime ? ` (${event.storyTime})` : "")
+    + (event.characters.length ? ` - ${event.characters.join(", ")}` : ""),
+  );
+  const sections = [wrapSection("Event Ledger", preBlock(rows.join("\n") || "No events recorded yet."))];
+  // A torn line means lost story history, so it is reported rather than hidden.
+  if (data?.tornLines) {
+    sections.unshift(gateNotice(
+      "Damaged ledger lines",
+      `${data.tornLines} line(s) could not be parsed and are not counted above.`,
+      "warn",
+    ));
+  }
+  if (data?.retracted?.length) {
+    sections.push(wrapSection(
+      "Retracted",
+      paragraph(`${data.retracted.length} event(s) withdrawn by a canon correction. They stay on disk for audit but are invisible to every reader.`),
+    ));
+  }
+  stageContent.replaceChildren(channelBackButton(), ...sections);
+  setStatus(`${events.length} canon event(s).`);
+}
+
+async function showCanonMemory(seriesId) {
+  const form = document.createElement("form");
+  const input = document.createElement("input");
+  input.name = "q";
+  input.placeholder = "e.g. Maria returns to the elevator looking for Diego";
+  input.className = "text-input";
+  const results = document.createElement("div");
+  form.append(input, actionButton("Search memory", null, "submit", "primary"));
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    runCanonMemorySearch(seriesId, input.value, results).catch((error) => setStatus(error.message));
+  });
+  stageContent.replaceChildren(
+    channelBackButton(),
+    wrapSection(
+      "Story Memory",
+      paragraph("Exactly what retrieval would return for this query, with the score breakdown that explains the ranking."),
+      form,
+      results,
+    ),
+  );
+  setStatus("Story memory ready.");
+}
+
+async function runCanonMemorySearch(seriesId, query, target) {
+  const data = await fetchJsonOrNull(storyApiUrl(seriesId, `canon/memory?q=${encodeURIComponent(query)}`));
+  const lines = (data?.results ?? []).map((entry) =>
+    `${entry.rank}. [${entry.entityType} ch.${entry.chapterNumber}] ${entry.text}\n`
+    + `    keyword ${entry.keywordScore} | vector ${entry.vectorScore ?? "n/a"} | importance ${entry.importance} | distance ${entry.chapterDistance} | final ${entry.finalScore}`,
+  );
+  target.replaceChildren(preBlock(lines.join("\n") || "Nothing matched."));
+  setStatus(`${data?.results?.length ?? 0} memory hit(s).`);
+}
+
+async function showCanonVariants(seriesId) {
+  const data = await fetchJsonOrNull(storyApiUrl(seriesId, "canon/variants"));
+  const variants = data?.variants ?? [];
+  const lines = variants.map((entry) =>
+    `${entry.chapterId} -> ${entry.locale} (${entry.channelId}/${entry.storyId}) - ${entry.state}${entry.published ? ", published" : ""}`,
+  );
+  const stale = variants.filter((entry) => entry.state === "stale");
+  const sections = [wrapSection("Publication Variants", preBlock(lines.join("\n") || "No variants yet."))];
+  if (stale.length) {
+    // Reported, never acted on: regenerating a published video is the
+    // operator's decision, not the system's.
+    sections.unshift(gateNotice(
+      `${stale.length} localization(s) are behind their canon chapter`,
+      "The canon chapter changed after these were localized. Nothing has been regenerated - re-run localize on the ones you want updated.",
+      "warn",
+    ));
+  }
+  stageContent.replaceChildren(channelBackButton(), ...sections);
+  setStatus(`${variants.length} variant(s).`);
+}
+
+async function showCanonPerformance(seriesId) {
+  const data = await fetchJsonOrNull(storyApiUrl(seriesId, "canon/performance"));
+  const performance = data?.performance;
+  const lines = (performance?.chapters ?? []).map((chapter) => {
+    const locales = chapter.byLocale
+      .map((entry) => `      ${entry.locale}: ${entry.views} views, $${entry.productionCostUsd.toFixed(4)}${entry.localizerModel ? `, ${entry.localizerModel}` : ""}`)
+      .join("\n");
+    return `Chapter ${chapter.chapterNumber} - ${chapter.totalViews} views across ${chapter.localeCount} locale(s)`
+      + (chapter.bestLocale ? `, best: ${chapter.bestLocale}` : "")
+      + `\n${locales}`;
+  });
+  stageContent.replaceChildren(
+    channelBackButton(),
+    wrapSection(
+      "Canon Performance",
+      paragraph("One chapter across every market it published in - which separates story quality from localization, voice, and market."),
+      preBlock(lines.join("\n\n") || "No published variants with analytics yet."),
+    ),
+  );
+  setStatus(performance?.bestLocale ? `Best locale so far: ${performance.bestLocale}.` : "No analytics yet.");
+}

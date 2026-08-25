@@ -26,6 +26,7 @@ export async function runNaturalizeStage(ctx: StageContext): Promise<Naturalized
     throw new Error("Naturalization needs a completed script.");
   }
   const naturalizedSections: string[] = [];
+  const perSection: Array<{ index: number; text: string }> = [];
   const changes: Array<{ sectionIndex: number; note: string }> = [];
   let provenance: Provenance = {
     provider: "openai-compatible",
@@ -48,6 +49,7 @@ export async function runNaturalizeStage(ctx: StageContext): Promise<Naturalized
       parseNaturalization,
     );
     naturalizedSections.push(result.value.text.trim());
+    perSection.push({ index: entry.index, text: result.value.text.trim() });
     for (const note of result.value.notes) {
       changes.push({ sectionIndex: entry.index, note });
     }
@@ -56,6 +58,7 @@ export async function runNaturalizeStage(ctx: StageContext): Promise<Naturalized
   const artifact: NaturalizedScript = {
     version: 1,
     fullText: naturalizedSections.join("\n\n"),
+    sections: perSection,
     changes,
     locale: ctx.story.config.locale,
     provenance,
