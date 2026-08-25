@@ -95,7 +95,7 @@ function channelToolRow(channelId) {
 
 const STORY_STAGE_LIST = [
   "idea", "hook", "outline", "bible", "sections", "continuity-qa", "naturalize", "originality-qa",
-  "tts-normalize", "tts", "scenes", "images", "bgm", "render", "metadata", "thumbnail", "final-qa", "export", "publish",
+  "tts-normalize", "tts", "scenes", "images", "bgm", "visual-prompts", "render", "metadata", "thumbnail", "final-qa", "export", "publish",
 ];
 const STORY_STATUS_LEVELS = {
   DRAFT: "neutral", IN_PROGRESS: "progress", GENERATING: "progress", AWAITING_APPROVAL: "warn",
@@ -532,12 +532,19 @@ async function renderStoryImagesTab(channelId, storyId) {
 async function renderStoryVideoTab(channelId, storyId) {
   const data = await fetchJsonOrNull(storyApiUrl(channelId, `stories/${encodeURIComponent(storyId)}/artifacts/render`));
   if (!data) return [wrapSection("Video", paragraph("Not rendered yet."))];
+  const artifact = data.artifact;
   const video = document.createElement("video");
   video.controls = true;
-  video.src = seriesFileUrl(channelId, data.artifact.videoPath);
+  video.src = seriesFileUrl(channelId, artifact.videoPath);
+  const summary = {
+    Engine: artifact.engine ?? "ffmpeg",
+    Duration: `${Math.round(artifact.durationSeconds)}s`,
+    Size: `${artifact.width}x${artifact.height}`,
+  };
+  if (artifact.outputSha256) summary["Output sha256"] = artifact.outputSha256;
+  if (artifact.compositionPath) summary.Composition = artifact.compositionPath;
   return [wrapSection("Rendered video", video, summaryGrid({
-    Duration: `${Math.round(data.artifact.durationSeconds)}s`,
-    Size: `${data.artifact.width}x${data.artifact.height}`,
+    ...summary,
   }))];
 }
 
