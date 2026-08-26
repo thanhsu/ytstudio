@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { resolveProjectPath } from "../project-paths.ts";
 import { runProcess } from "../process.ts";
 import { writeJson } from "../fs.ts";
+import { loadStudioConfig } from "../config.ts";
 import { loadStory, readStageArtifact } from "./story-project.ts";
 import { storyPath, validateStoryId } from "./paths.ts";
 import type { ExportManifest, StoryMetadataArtifact, StageRun, StoryApproval } from "./types.ts";
@@ -135,8 +136,9 @@ export async function exportCompilation(channelId: string, compilationId: string
   const dir = compilationPath(channelId, compilationId, "workspace", "export");
   await mkdir(dir, { recursive: true });
   const manifest: ExportManifest = { version: 1, videoPath: `compilations/${compilationId}/workspace/export/story.mp4`, thumbnailPath: `compilations/${compilationId}/workspace/export/thumbnail.png`, titlePath: `compilations/${compilationId}/workspace/export/title.txt`, descriptionPath: `compilations/${compilationId}/workspace/export/description.txt`, tagsPath: `compilations/${compilationId}/workspace/export/tags.txt`, srtPath: `compilations/${compilationId}/workspace/export/captions.srt`, packagedAt: new Date().toISOString() };
+  const config = await loadStudioConfig();
   await copyFile(resolveProjectPath(channelId, render.videoPath), resolveProjectPath(channelId, manifest.videoPath));
-  await createCompilationThumbnail(channelId, project, metadata, dir);
+  await createCompilationThumbnail(channelId, project, metadata, dir, config.render.ffmpegPath || undefined);
   await copyFile(join(dir, "thumbnail.png"), resolveProjectPath(channelId, manifest.thumbnailPath));
   await writeFile(resolveProjectPath(channelId, manifest.titlePath), `${metadata.chosenTitle}\n`, "utf8");
   await writeFile(resolveProjectPath(channelId, manifest.descriptionPath), `${metadata.description}\n`, "utf8");
@@ -145,7 +147,7 @@ export async function exportCompilation(channelId: string, compilationId: string
   return manifest;
 }
 
-async function createCompilationThumbnail(channelId: string, project: CompilationProject, metadata: StoryMetadataArtifact, exportDir: string): Promise<void> {
+async function createCompilationThumbnail(channelId: string, project: CompilationProject, metadata: StoryMetadataArtifact, exportDir: string, ffmpegPath?: string): Promise<void> {
   const first = await readStageArtifact<{ backgroundPath?: string; finalPath?: string }>(channelId, project.storyIds[0], "thumbnail");
   const source = first?.backgroundPath ?? first?.finalPath;
   if (!source) throw new Error("Compilation export needs a completed thumbnail on the first member story.");
@@ -155,7 +157,7 @@ async function createCompilationThumbnail(channelId: string, project: Compilatio
   await copyFile(resolveProjectPath(channelId, source), background);
   const output = join(thumbnailDir, "thumbnail.png");
   if (first?.backgroundPath) {
-    await runProcess("ffmpeg", buildThumbnailOverlayArgs({ backgroundPath: background, overlayText: metadata.thumbnailText, outputPath: output }));
+    await runProcess(ffmpegPath ?? process.env.FFMPEG_PATH ?? "ffmpeg", buildThumbnailOverlayArgs({ backgroundPath: background, overlayText: metadata.thumbnailText, outputPath: output }));
   } else {
     // Older stories may only have the final thumbnail artifact. Reuse it as-is
     // instead of forcing a paid regeneration or requiring ffmpeg during export.

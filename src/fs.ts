@@ -1,3 +1,4 @@
+import { existsSync, readdirSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
@@ -42,6 +43,25 @@ export async function ensureProjectDir(projectId: string): Promise<string> {
   const dir = projectDir(projectId);
   await mkdir(dir, { recursive: true });
   return dir;
+}
+
+/**
+ * Looks for a bundled binary (ffmpeg or ffprobe) inside the `tools/<name>/`
+ * directory relative to the process working directory. Returns the first
+ * executable found, or undefined if none exist. Allows the studio to work
+ * without ffmpeg on the system PATH when a self-contained build is checked in.
+ */
+export function bundledBinaryPath(name: "ffmpeg" | "ffprobe"): string | undefined {
+  const exe = process.platform === "win32" ? `${name}.exe` : name;
+  const toolsDir = join(process.cwd(), "tools", name);
+  if (!existsSync(toolsDir)) return undefined;
+  try {
+    for (const entry of readdirSync(toolsDir)) {
+      const candidate = join(toolsDir, entry, "bin", exe);
+      if (existsSync(candidate)) return candidate;
+    }
+  } catch { /* ignore read errors */ }
+  return undefined;
 }
 
 export async function writeJson(path: string, value: unknown): Promise<void> {

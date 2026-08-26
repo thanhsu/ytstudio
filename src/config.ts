@@ -1,4 +1,5 @@
 import { readFile, writeFile } from "node:fs/promises";
+import { bundledBinaryPath } from "./fs.ts";
 
 export const SCRIPT_PROVIDERS = ["dry-run", "openai-compatible"] as const;
 
@@ -442,8 +443,8 @@ export function normalizeStudioConfig(value: unknown): StudioConfig {
       ),
     },
     render: {
-      ffmpegPath: stringValue(candidate.render?.ffmpegPath, ""),
-      ffprobePath: stringValue(candidate.render?.ffprobePath, ""),
+      ffmpegPath: stringValue(candidate.render?.ffmpegPath, "") || bundledBinaryPath("ffmpeg") || "",
+      ffprobePath: stringValue(candidate.render?.ffprobePath, "") || bundledBinaryPath("ffprobe") || "",
       shortsWidth: numberValue(candidate.render?.shortsWidth, 1080),
       shortsHeight: numberValue(candidate.render?.shortsHeight, 1920),
       longformWidth: numberValue(candidate.render?.longformWidth, 1920),
